@@ -362,7 +362,7 @@ import useAuthStore from "../store/useAuthStore";
 import SidebarSkeleton from "./skeletons/SidebarSkeleton";
 import { Users, X, Search } from "lucide-react";
 
-const Sidebar = () => {
+const SideBar = () => {
   const { getUsers, users, selectedUser, setSelectedUser, isUsersLoading } =
     useChatStore();
   const { onlineUsers } = useAuthStore();
@@ -527,4 +527,4 @@ const Sidebar = () => {
   );
 };
 
-export default Sidebar;
+export default SideBar;

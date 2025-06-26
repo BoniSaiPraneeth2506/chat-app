@@ -1,8 +1,18 @@
-import axios from 'axios';
+// import axios from 'axios';
+
+// const axiosInstance = axios.create({
+//     baseURL: "http://localhost:5001/api4",
+//     withCredentials: true
+// });
+
+// export default axiosInstance;
+
+
+import axios from "axios";
 
 const axiosInstance = axios.create({
-    baseURL: "https://chat-app-backend-zg2t.onrender.com/api",
-    withCredentials: true
+  baseURL: import.meta.env.MODE === "development" ? "http://localhost:5001/api" : "/api",
+  withCredentials: true,
 });
 
-export default axiosInstance;
+export default axiosInstance
