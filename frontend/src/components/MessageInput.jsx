@@ -144,47 +144,20 @@ const MessageInput = () => {
 
   // WhatsApp-like keyboard behavior
   useEffect(() => {
-    let isInputFocused = false;
-
     const handleViewportChange = () => {
-      if (window.visualViewport && isInputFocused) {
+      if (window.visualViewport) {
         const keyboardHeight = window.innerHeight - window.visualViewport.height;
         setKeyboardOffset(keyboardHeight > 150 ? keyboardHeight : 0);
       }
-    };
-
-    const handleInputFocus = () => {
-      isInputFocused = true;
-      setTimeout(() => {
-        if (window.visualViewport) {
-          const keyboardHeight = window.innerHeight - window.visualViewport.height;
-          setKeyboardOffset(keyboardHeight > 150 ? keyboardHeight : 0);
-        }
-      }, 100);
-    };
-
-    const handleInputBlur = () => {
-      isInputFocused = false;
-      setKeyboardOffset(0);
     };
 
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', handleViewportChange);
     }
 
-    const inputElement = inputRef.current;
-    if (inputElement) {
-      inputElement.addEventListener('focus', handleInputFocus);
-      inputElement.addEventListener('blur', handleInputBlur);
-    }
-
     return () => {
       if (window.visualViewport) {
         window.visualViewport.removeEventListener('resize', handleViewportChange);
-      }
-      if (inputElement) {
-        inputElement.removeEventListener('focus', handleInputFocus);
-        inputElement.removeEventListener('blur', handleInputBlur);
       }
     };
   }, []);
@@ -251,13 +224,9 @@ const MessageInput = () => {
     <div 
       className="w-full p-4 py-7"
       style={{ 
-        position: 'fixed',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        zIndex: 1000,
         transform: keyboardOffset > 0 ? `translateY(-${keyboardOffset}px)` : 'translateY(0)',
-        transition: 'transform 0.3s ease'
+        transition: 'transform 0.3s ease',
+        marginBottom: keyboardOffset > 0 ? `-${keyboardOffset}px` : '0px'
       }}
     >
       {imagePreview && (
@@ -283,7 +252,6 @@ const MessageInput = () => {
       <form onSubmit={handleSendMessage} className="flex items-center gap-2">
         <div className="flex flex-1 gap-2">
           <input
-            ref={inputRef}
             type="text"
             className="w-full h-10 mt-1 rounded-lg sm:h-10 sm:flex sm:items-center input input-bordered input-sm sm:input-md focus:outline-none focus:ring-0 focus:border-primary"
             placeholder="Type a message..."
