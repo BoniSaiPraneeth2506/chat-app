@@ -8,6 +8,8 @@ const MessageInput = () => {
   const [imagePreview, setImagePreview] = useState(null);
   const fileInputRef = useRef(null);
   const { sendMessage } = useChatStore();
+
+
  const handleImageChange = (e) => {
   const file = e.target.files[0];
   if (!file.type.startsWith("image/")) {
@@ -69,7 +71,7 @@ const compressImage = (base64, quality = 0.6) => {
   };
 
   return (
-    <div className="w-full p-4 py-15">
+    <div className="w-full p-4 py-7">
       {imagePreview && (
         <div className="flex items-center gap-2 mb-3">
           <div className="relative">
@@ -128,10 +130,5 @@ const compressImage = (base64, quality = 0.6) => {
   );
 };
 export default MessageInput;
-
-
-
-
-
 
 
