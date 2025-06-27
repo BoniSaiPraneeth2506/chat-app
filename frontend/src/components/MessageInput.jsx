@@ -138,61 +138,26 @@ import toast from "react-hot-toast";
 const MessageInput = () => {
   const [text, setText] = useState("");
   const [imagePreview, setImagePreview] = useState(null);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
   const fileInputRef = useRef(null);
-  const inputRef = useRef(null);
   const { sendMessage } = useChatStore();
 
-  // Handle keyboard visibility on mobile
+  // Only add keyboard detection
   useEffect(() => {
-    const handleResize = () => {
-      // Detect if keyboard is open by checking viewport height change
-      const viewportHeight = window.visualViewport?.height || window.innerHeight;
-      const windowHeight = window.screen.height;
-      const keyboardThreshold = windowHeight * 0.75; // Keyboard likely open if viewport < 75% of screen
-      
-      setKeyboardVisible(viewportHeight < keyboardThreshold);
-    };
-
-    const handleVisualViewportChange = () => {
+    const handleViewportChange = () => {
       if (window.visualViewport) {
-        const keyboardHeight = window.screen.height - window.visualViewport.height;
-        setKeyboardVisible(keyboardHeight > 150); // Keyboard threshold
+        const offset = window.innerHeight - window.visualViewport.height;
+        setKeyboardOffset(offset > 150 ? offset : 0);
       }
     };
 
-    // Listen for viewport changes
     if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', handleVisualViewportChange);
-    } else {
-      window.addEventListener('resize', handleResize);
-    }
-
-    // Focus handling for iOS
-    const handleFocus = () => {
-      setTimeout(() => {
-        if (inputRef.current) {
-          inputRef.current.scrollIntoView({ 
-            behavior: 'smooth', 
-            block: 'center' 
-          });
-        }
-      }, 300);
-    };
-
-    const inputElement = inputRef.current;
-    if (inputElement) {
-      inputElement.addEventListener('focus', handleFocus);
+      window.visualViewport.addEventListener('resize', handleViewportChange);
     }
 
     return () => {
       if (window.visualViewport) {
-        window.visualViewport.removeEventListener('resize', handleVisualViewportChange);
-      } else {
-        window.removeEventListener('resize', handleResize);
-      }
-      if (inputElement) {
-        inputElement.removeEventListener('focus', handleFocus);
+        window.visualViewport.removeEventListener('resize', handleViewportChange);
       }
     };
   }, []);
@@ -257,82 +222,63 @@ const MessageInput = () => {
 
   return (
     <div 
-      className={`
-        fixed bottom-0 left-0 right-0 z-50 
-        bg-white border-t border-gray-200 
-        transition-all duration-300 ease-in-out
-        ${keyboardVisible ? 'pb-safe-area-inset-bottom' : 'pb-4'}
-      `}
-      style={{
-        // Ensure it stays above the keyboard on mobile
-        bottom: keyboardVisible && window.visualViewport 
-          ? `${window.screen.height - window.visualViewport.height - window.visualViewport.offsetTop}px`
-          : '0px'
+      style={{ 
+        transform: keyboardOffset > 0 ? `translateY(-${keyboardOffset}px)` : 'translateY(0)',
+        transition: 'transform 0.3s ease'
       }}
     >
-      <div className="px-4 pt-4">
-        {imagePreview && (
-          <div className="mb-3 relative inline-block">
-            <img
-              src={imagePreview}
-              alt="Preview"
-              className="w-20 h-20 object-cover rounded-lg border border-gray-300"
-            />
-            <button
-              type="button"
-              onClick={removeImage}
-              className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        )}
-
-        <form onSubmit={handleSendMessage} className="flex items-end gap-2">
-          <div className="flex-1 relative">
-            <textarea
-              ref={inputRef}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="Type a message..."
-              className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent max-h-32 min-h-[48px]"
-              rows={1}
-              style={{
-                height: 'auto',
-                minHeight: '48px'
-              }}
-              onInput={(e) => {
-                e.target.style.height = 'auto';
-                e.target.style.height = Math.min(e.target.scrollHeight, 128) + 'px';
-              }}
-            />
-            
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleImageChange}
-              accept="image/*"
-              className="hidden"
-            />
-            
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="absolute right-3 bottom-3 text-gray-500 hover:text-gray-700 transition-colors"
-            >
-              <Image size={20} />
-            </button>
-          </div>
-
+      {imagePreview && (
+        <div className="mb-3 relative inline-block">
+          <img
+            src={imagePreview}
+            alt="Preview"
+            className="w-20 h-20 object-cover rounded-lg border border-gray-300"
+          />
           <button
-            type="submit"
-            disabled={!text.trim() && !imagePreview}
-            className="bg-blue-500 text-white p-3 rounded-2xl hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+            type="button"
+            onClick={removeImage}
+            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors"
           >
-            <Send size={20} />
+            <X size={14} />
           </button>
-        </form>
-      </div>
+        </div>
+      )}
+
+      <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+        <div className="flex-1 relative">
+          <input
+            type="text"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Type a message..."
+            className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+          
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleImageChange}
+            accept="image/*"
+            className="hidden"
+          />
+          
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            <Image size={20} />
+          </button>
+        </div>
+
+        <button
+          type="submit"
+          disabled={!text.trim() && !imagePreview}
+          className="bg-blue-500 text-white p-3 rounded-full hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+        >
+          <Send size={20} />
+        </button>
+      </form>
     </div>
   );
 };
