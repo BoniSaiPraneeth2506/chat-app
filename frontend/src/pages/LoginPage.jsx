@@ -134,7 +134,7 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="grid items-center h-screen lg:grid-cols-1">
+    <div className="grid items-center h-screen lg:grid-cols-1 mb-2">
       {/* Left Side - Form */}
       <div className="flex flex-col items-center justify-center p-6 sm:p-12">
         <div className="w-full max-w-md space-y-8">
