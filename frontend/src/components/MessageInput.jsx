@@ -69,7 +69,7 @@ const compressImage = (base64, quality = 0.6) => {
   };
 
   return (
-    <div className="w-full p-4 mb-5">
+    <div className="w-full p-4 py-15">
       {imagePreview && (
         <div className="flex items-center gap-2 mb-3">
           <div className="relative">
