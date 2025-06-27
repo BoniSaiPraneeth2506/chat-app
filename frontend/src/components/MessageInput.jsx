@@ -83,7 +83,7 @@ const compressImage = (base64, quality = 0.6) => {
   };
 
   return (
-    <div className="w-full p-4">
+    <div className="w-full p-4 py-7">
       {imagePreview && (
         <div className="flex items-center gap-2 mb-3">
           <div className="relative">
@@ -108,7 +108,7 @@ const compressImage = (base64, quality = 0.6) => {
         <div className="flex flex-1 gap-2">
           <input
             type="text"
-            className="w-full h-8 mt-1 rounded-lg sm:h-10 sm:flex sm:items-center input input-bordered input-sm sm:input-md focus:outline-none focus:ring-0 focus:border-primary"
+            className="w-full h-10 mt-1 rounded-lg sm:h-10 sm:flex sm:items-center input input-bordered input-sm sm:input-md focus:outline-none focus:ring-0 focus:border-primary"
             placeholder="Type a message..."
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -123,7 +123,7 @@ const compressImage = (base64, quality = 0.6) => {
 
           <button
             type="button"
-            className={`flex  btn btn-circle sm:mt-1
+            className={`flex  btn btn-circle sm:mt-1 mt-1
                      ${imagePreview ? "text-emerald-500" : "text-zinc-400"}`}
             onClick={() => fileInputRef.current?.click()}
           >
