@@ -129,7 +129,6 @@
 // };
 // export default MessageInput;
 
-
 import { useRef, useState, useEffect } from "react";
 import { useChatStore } from "../store/useChatStore";
 import { Image, Send, X } from "lucide-react";
@@ -255,61 +254,68 @@ const MessageInput = () => {
     <div 
       style={{ 
         transform: keyboardOffset > 0 ? `translateY(-${keyboardOffset}px)` : 'translateY(0)',
-        transition: 'transform 0.3s ease'
+        transition: 'transform 0.3s ease',
+        position: 'fixed',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        zIndex: 1000
       }}
     >
       {imagePreview && (
-        <div className="mb-3 relative inline-block">
+        <div className="mb-3 relative inline-block mx-4">
           <img
             src={imagePreview}
             alt="Preview"
-            className="w-20 h-20 object-cover rounded-xl border border-zinc-700"
+            className="w-20 h-20 object-cover rounded-xl border border-slate-600"
           />
           <button
             type="button"
             onClick={removeImage}
-            className="absolute -top-2 -right-2 bg-zinc-800 text-white rounded-full p-1 hover:bg-zinc-700 transition-colors"
+            className="absolute -top-2 -right-2 bg-slate-700 text-white rounded-full p-1 hover:bg-slate-600 transition-colors"
           >
             <X size={14} />
           </button>
         </div>
       )}
 
-      <form onSubmit={handleSendMessage} className="flex items-center gap-3 p-4 bg-zinc-900 rounded-2xl">
-        <div className="flex-1 relative">
-          <input
-            type="text"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Type a message..."
-            className="w-full px-4 py-3 pr-12 bg-zinc-800 text-white placeholder-zinc-400 border border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-600 focus:border-zinc-600"
-          />
-          
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleImageChange}
-            accept="image/*"
-            className="hidden"
-          />
-          
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-zinc-400 hover:text-zinc-200 transition-colors"
-          >
-            <Image size={20} />
-          </button>
-        </div>
+      <div className="bg-slate-800 px-4 py-3 border-t border-slate-700">
+        <form onSubmit={handleSendMessage} className="flex items-center gap-3">
+          <div className="flex-1 relative">
+            <input
+              type="text"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Type a message..."
+              className="w-full px-4 py-2.5 pr-12 bg-slate-700 text-white placeholder-slate-400 border border-slate-600 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleImageChange}
+              accept="image/*"
+              className="hidden"
+            />
+            
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              <Image size={18} />
+            </button>
+          </div>
 
-        <button
-          type="submit"
-          disabled={!text.trim() && !imagePreview}
-          className="bg-zinc-700 text-white p-3 rounded-xl hover:bg-zinc-600 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed transition-colors"
-        >
-          <Send size={20} />
-        </button>
-      </form>
+          <button
+            type="submit"
+            disabled={!text.trim() && !imagePreview}
+            className="bg-blue-600 text-white p-2.5 rounded-full hover:bg-blue-500 disabled:bg-slate-600 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
+          >
+            <Send size={18} />
+          </button>
+        </form>
+      </div>
     </div>
   );
 };
