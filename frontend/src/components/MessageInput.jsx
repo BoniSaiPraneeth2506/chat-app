@@ -130,7 +130,6 @@
 // export default MessageInput;
 
 
-
 import { useEffect, useRef, useState } from "react";
 import { useChatStore } from "../store/useChatStore";
 import { Image, Send, X } from "lucide-react";
@@ -139,8 +138,9 @@ import toast from "react-hot-toast";
 const MessageInput = () => {
   const [text, setText] = useState("");
   const [imagePreview, setImagePreview] = useState(null);
+  const [bottomPadding, setBottomPadding] = useState(0);
   const fileInputRef = useRef(null);
-  const inputContainerRef = useRef(null); // New ref for container
+  const inputContainerRef = useRef(null);
   const { sendMessage } = useChatStore();
 
   const handleImageChange = (e) => {
@@ -193,24 +193,32 @@ const MessageInput = () => {
     }
   };
 
-  // Adjust for keyboard popup on mobile
   useEffect(() => {
-    const handleFocus = () => {
-      setTimeout(() => {
-        inputContainerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      }, 300); // slight delay to ensure keyboard is visible
+    const originalHeight = window.innerHeight;
+
+    const adjustForKeyboard = () => {
+      const currentHeight = window.innerHeight;
+
+      if (currentHeight < originalHeight) {
+        // Keyboard is open
+        const keyboardHeight = originalHeight - currentHeight;
+        setBottomPadding(keyboardHeight);
+        inputContainerRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      } else {
+        // Keyboard is closed
+        setBottomPadding(0);
+      }
     };
 
-    const input = document.querySelector("input[type='text']");
-    input?.addEventListener("focus", handleFocus);
+    window.addEventListener("resize", adjustForKeyboard);
 
     return () => {
-      input?.removeEventListener("focus", handleFocus);
+      window.removeEventListener("resize", adjustForKeyboard);
     };
   }, []);
 
   return (
-    <div className="w-full p-4 py-15" ref={inputContainerRef}>
+    <div className="w-full p-4" ref={inputContainerRef} style={{ paddingBottom: bottomPadding }}>
       {imagePreview && (
         <div className="flex items-center gap-2 mb-3">
           <div className="relative">
@@ -264,6 +272,7 @@ const MessageInput = () => {
 };
 
 export default MessageInput;
+
 
 
 
