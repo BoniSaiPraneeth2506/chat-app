@@ -134,7 +134,7 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="grid items-center h-screen lg:grid-cols-1 mb-2">
+    <div className="grid items-center h-screen lg:grid-cols-1">
       {/* Left Side - Form */}
       <div className="flex flex-col items-center justify-center p-6 sm:p-12">
         <div className="w-full max-w-md space-y-8">
@@ -221,7 +221,7 @@ const LoginPage = () => {
             </button>
           </div>
 
-          <div className="text-center">
+          <div className="text-center mb-2">
             <p className="text-base-content/60">
               Don&apos;t have an account?{" "}
               <Link to="/signup" className="link link-primary">
