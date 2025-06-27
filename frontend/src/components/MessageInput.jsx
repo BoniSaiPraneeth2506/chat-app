@@ -139,23 +139,22 @@ const MessageInput = () => {
   const [imagePreview, setImagePreview] = useState(null);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const fileInputRef = useRef(null);
+  const inputRef = useRef(null);
   const { sendMessage } = useChatStore();
 
-  // Only add keyboard detection - like WhatsApp behavior
+  // WhatsApp-like keyboard behavior
   useEffect(() => {
     let isInputFocused = false;
 
     const handleViewportChange = () => {
       if (window.visualViewport && isInputFocused) {
         const keyboardHeight = window.innerHeight - window.visualViewport.height;
-        // Only move up if keyboard is actually open AND input is focused
         setKeyboardOffset(keyboardHeight > 150 ? keyboardHeight : 0);
       }
     };
 
     const handleInputFocus = () => {
       isInputFocused = true;
-      // Small delay to ensure keyboard is opening
       setTimeout(() => {
         if (window.visualViewport) {
           const keyboardHeight = window.innerHeight - window.visualViewport.height;
@@ -169,13 +168,11 @@ const MessageInput = () => {
       setKeyboardOffset(0);
     };
 
-    // Add event listeners
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', handleViewportChange);
     }
 
-    // Get the input element and add focus/blur listeners
-    const inputElement = document.querySelector('input[type="text"]');
+    const inputElement = inputRef.current;
     if (inputElement) {
       inputElement.addEventListener('focus', handleInputFocus);
       inputElement.addEventListener('blur', handleInputBlur);
@@ -252,70 +249,67 @@ const MessageInput = () => {
 
   return (
     <div 
+      className="w-full p-4 py-7"
       style={{ 
         transform: keyboardOffset > 0 ? `translateY(-${keyboardOffset}px)` : 'translateY(0)',
-        transition: 'transform 0.3s ease',
-        position: 'fixed',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        zIndex: 1000
+        transition: 'transform 0.3s ease'
       }}
     >
       {imagePreview && (
-        <div className="mb-3 relative inline-block mx-4">
-          <img
-            src={imagePreview}
-            alt="Preview"
-            className="w-20 h-20 object-cover rounded-xl border border-slate-600"
-          />
-          <button
-            type="button"
-            onClick={removeImage}
-            className="absolute -top-2 -right-2 bg-slate-700 text-white rounded-full p-1 hover:bg-slate-600 transition-colors"
-          >
-            <X size={14} />
-          </button>
+        <div className="flex items-center gap-2 mb-3">
+          <div className="relative">
+            <img
+              src={imagePreview}
+              alt="Preview"
+              className="object-cover w-20 h-20 border rounded-lg border-zinc-700"
+            />
+            <button
+              onClick={removeImage}
+              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-base-300
+              flex items-center justify-center"
+              type="button"
+            >
+              <X className="size-3" />
+            </button>
+          </div>
         </div>
       )}
 
-      <div className="bg-slate-800 px-4 py-3 border-t border-slate-700">
-        <form onSubmit={handleSendMessage} className="flex items-center gap-3">
-          <div className="flex-1 relative">
-            <input
-              type="text"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="Type a message..."
-              className="w-full px-4 py-2.5 pr-12 bg-slate-700 text-white placeholder-slate-400 border border-slate-600 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-            
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleImageChange}
-              accept="image/*"
-              className="hidden"
-            />
-            
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors"
-            >
-              <Image size={18} />
-            </button>
-          </div>
+      <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+        <div className="flex flex-1 gap-2">
+          <input
+            ref={inputRef}
+            type="text"
+            className="w-full h-10 mt-1 rounded-lg sm:h-10 sm:flex sm:items-center input input-bordered input-sm sm:input-md focus:outline-none focus:ring-0 focus:border-primary"
+            placeholder="Type a message..."
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            ref={fileInputRef}
+            onChange={handleImageChange}
+          />
 
           <button
-            type="submit"
-            disabled={!text.trim() && !imagePreview}
-            className="bg-blue-600 text-white p-2.5 rounded-full hover:bg-blue-500 disabled:bg-slate-600 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
+            type="button"
+            className={`flex  btn btn-circle sm:mt-1 mt-1                     
+            ${imagePreview ? "text-emerald-500" : "text-zinc-400"}`}
+            onClick={() => fileInputRef.current?.click()}
           >
-            <Send size={18} />
+            <Image size={20} />
           </button>
-        </form>
-      </div>
+        </div>
+        <button
+          type="submit"
+          className="btn btn-sm btn-circle"
+          disabled={!text.trim() && !imagePreview}
+        >
+          <Send size={22} />
+        </button>
+      </form>
     </div>
   );
 };
