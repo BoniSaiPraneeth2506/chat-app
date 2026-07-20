@@ -34,6 +34,12 @@ io.on("connection", (socket) => {
 
     // Store the new socket (silently replace old one if exists)
     const oldSocketId = userSocketMap[userId];
+    if (oldSocketId && oldSocketId !== socket.id) {
+        const oldSocket = io.sockets.sockets.get(oldSocketId);
+        if (oldSocket) {
+            oldSocket.disconnect();
+        }
+    }
     userSocketMap[userId] = socket.id;
     
     if (oldSocketId) {
