@@ -73,7 +73,10 @@ import { getReceiverSocketId, io } from "../lib/socket.js";
 const getUsersForSidebar = async (req, res) => {
   try {
     const loggedInUserId = req.user._id;
-    const filteredUsers = await User.find({ _id: { $ne: loggedInUserId } }).select("-password");
+    const filteredUsers = await User.find({ 
+      _id: { $ne: loggedInUserId },
+      fullName: { $exists: true, $ne: "" }
+    }).select("-password");
     res.status(200).json(filteredUsers);
   } catch (err) {
     console.log(err);
@@ -85,15 +88,31 @@ const getMessages = async (req, res) => {
   try {
     const { id: userToChatId } = req.params;
     const myId = req.user._id;
+    const limit = parseInt(req.query.limit) || 0;
+    const skip = parseInt(req.query.skip) || 0;
 
-    const messages = await Message.find({
-      $or: [
-        { senderId: myId, receiverId: userToChatId },
-        { senderId: userToChatId, receiverId: myId }
-      ]
-    }).sort({ createdAt: 1 }); // Optional: Sort messages by time
+    if (limit > 0) {
+      // Find the most recent messages: sort descending, skip, limit, then return reversed (ascending)
+      const messages = await Message.find({
+        $or: [
+          { senderId: myId, receiverId: userToChatId },
+          { senderId: userToChatId, receiverId: myId }
+        ]
+      })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
-    res.status(200).json(messages);
+      res.status(200).json(messages.reverse());
+    } else {
+      const messages = await Message.find({
+        $or: [
+          { senderId: myId, receiverId: userToChatId },
+          { senderId: userToChatId, receiverId: myId }
+        ]
+      }).sort({ createdAt: 1 });
+      res.status(200).json(messages);
+    }
   } catch (err) {
     console.log(err);
     res.status(500).json({ message: "Internal server error" });

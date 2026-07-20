@@ -75,7 +75,7 @@
 // };
 // export default ChatHeader;
 
-import { X } from "lucide-react";
+import { X, ArrowLeft } from "lucide-react";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
 
@@ -92,6 +92,14 @@ const ChatHeader = () => {
         {/* Left Section: Avatar & Info */}
         <div className="flex items-center gap-3">
           
+          {/* Back button for mobile view */}
+          <button 
+            onClick={() => setSelectedUser(null)} 
+            className="p-1 -ml-1 rounded-full lg:hidden hover:bg-base-200 transition-colors"
+          >
+            <ArrowLeft className="size-6" />
+          </button>
+
           {/* Avatar */}
           <div className="avatar">
             <div className="relative rounded-full size-10">
@@ -116,8 +124,8 @@ const ChatHeader = () => {
           </div>
         </div>
 
-        {/* Close Button */}
-        <button onClick={() => setSelectedUser(null)}>
+        {/* Close Button - hidden on mobile since we have back arrow */}
+        <button onClick={() => setSelectedUser(null)} className="hidden lg:block">
           <X />
         </button>
 

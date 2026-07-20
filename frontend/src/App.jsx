@@ -53,14 +53,16 @@ import SignUpPage from './pages/SignUpPage'
 import SettingsPage from './pages/SettingsPage'
 import ProfilePage from './pages/ProfilePage'
 import useAuthStore from './store/useAuthStore'
+import { useChatStore } from './store/useChatStore'
 import { Loader } from 'lucide-react'
 import { Toaster } from 'react-hot-toast'
 import { useThemeStore } from './store/useThemeStore'
 import { THEME_COLORS } from './constants'
 
 const App = () => {
-  const { authUser, checkAuth, isCheckingAuth ,onlineUsers} = useAuthStore();
+  const { authUser, checkAuth, isCheckingAuth, onlineUsers, socket } = useAuthStore();
   const { theme } = useThemeStore()
+  const { subscribeToMessages, unsubscribeFromMessages } = useChatStore();
   
   console.log("onlineUsers",onlineUsers)
   // Apply theme colors to CSS variables
@@ -82,6 +84,13 @@ const App = () => {
   useEffect(() => {
     checkAuth();
   }, [])
+
+  useEffect(() => {
+    if (authUser && socket) {
+      subscribeToMessages();
+      return () => unsubscribeFromMessages();
+    }
+  }, [authUser, socket, subscribeToMessages, unsubscribeFromMessages]);
 
   console.log(authUser);
 

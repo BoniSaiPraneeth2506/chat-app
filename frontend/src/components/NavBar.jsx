@@ -1,13 +1,17 @@
 import { Link } from "react-router-dom";
-import  useAuthStore  from "../store/useAuthStore";
+import useAuthStore from "../store/useAuthStore";
+import { useChatStore } from "../store/useChatStore";
 import { LogOut, MessageSquare, Settings, User } from "lucide-react";
 
 const Navbar = () => {
   const { logOut, authUser } = useAuthStore();
+  const { selectedUser } = useChatStore();
 
   return (
     <header
-      className="fixed top-0 z-40 w-full border-b bg-base-100 border-base-300 backdrop-blur-lg bg-base-100/80"
+      className={`fixed top-0 z-40 w-full bg-base-100 backdrop-blur-lg bg-base-100/80
+        ${selectedUser ? "hidden lg:block" : "block"}
+      `}
     >
       <div className="container h-16 px-4 mx-auto">
         <div className="flex items-center justify-between h-full">

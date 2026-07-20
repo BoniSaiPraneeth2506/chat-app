@@ -26,6 +26,17 @@ io.on("connection", (socket) => {
     // Notify all clients about online users
     io.emit("getOnlineUsers", Object.keys(userSocketMap));
 
+    socket.on("markAsRead", ({ senderId, receiverId }) => {
+        console.log(`[Socket Server] User ${receiverId} read messages from User ${senderId}`);
+        const senderSocketId = getReceiverSocketId(senderId);
+        if (senderSocketId) {
+            io.to(senderSocketId).emit("messagesRead", { userId: receiverId });
+            console.log(`[Socket Server] Forwarded read receipt to sender: ${senderId}`);
+        } else {
+            console.log(`[Socket Server] Sender ${senderId} is currently offline. Receipt buffered/ignored.`);
+        }
+    });
+
     socket.on("disconnect", () => {
         console.log("A user Disconnected:", socket.id);
 
