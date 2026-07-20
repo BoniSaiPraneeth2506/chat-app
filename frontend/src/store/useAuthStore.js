@@ -106,7 +106,7 @@ const useAuthStore=create((set,get)=>({
     if (socket?.connected) {
         socket.disconnect();
         set({ socket: null });  
+    }
   }
-}
 }))
 export default useAuthStore

@@ -13,7 +13,8 @@ const io = new Server(server, {
             "https://chat-app-frontend-lvqd.onrender.com"
         ],
         credentials: true
-    }
+    },
+    transports: ["websocket", "polling"]
 });
 export function getReceiverSocketId(userId){
     return userSocketMap[userId]
