@@ -76,9 +76,9 @@ const ChatContainer = () => {
     }
 
     // Heuristic: If recipient has sent any message after this message, they have read it!
-    const latestReplyFromReceiver = messages
-      .filter((m) => m.senderId === receiverId)
-      .pop();
+    const latestReplyFromReceiver = Array.isArray(messages)
+      ? messages.filter((m) => m.senderId === receiverId).pop()
+      : null;
     if (latestReplyFromReceiver && new Date(latestReplyFromReceiver.createdAt).getTime() > messageTime) {
       return <DoubleCheck className="w-[15px] h-[13px] text-blue-500 flex-shrink-0" />;
     }
@@ -93,7 +93,7 @@ const ChatContainer = () => {
   };
 
   useLayoutEffect(() => {
-    if (!messages || messages.length === 0) {
+    if (!Array.isArray(messages) || messages.length === 0) {
       prevMessagesLengthRef.current = 0;
       lastMessageIdRef.current = null;
       return;
@@ -127,12 +127,12 @@ const ChatContainer = () => {
         onScroll={handleScroll}
         className="flex-1 p-4 space-y-4 overflow-y-auto"
       >
-        {isMessagesLoading && messages.length === 0 ? (
+        {isMessagesLoading && (!Array.isArray(messages) || messages.length === 0) ? (
           <div className="h-full w-full flex items-center justify-center">
             <span className="loading loading-spinner loading-md text-primary/60"></span>
           </div>
         ) : (
-          messages.map((message) => (
+          Array.isArray(messages) && messages.map((message) => (
             <div
               key={message._id}
               className={`chat ${message.senderId === authUser._id ? "chat-end" : "chat-start"}`}

@@ -382,15 +382,30 @@ const SideBar = () => {
   const { onlineUsers, authUser } = useAuthStore();
   const [searchTerm, setSearchTerm] = useState("");
   const [filterMode, setFilterMode] = useState("all");
-  const [favoriteUsers, setFavoriteUsers] = useState(() => 
-    JSON.parse(localStorage.getItem("favoriteUsers") || "[]")
-  );
-  const [archivedUsers, setArchivedUsers] = useState(() => 
-    JSON.parse(localStorage.getItem("archivedUsers") || "[]")
-  );
-  const [pinnedUserIds, setPinnedUserIds] = useState(() => 
-    JSON.parse(localStorage.getItem("pinnedUserIds") || "[]")
-  );
+  const [favoriteUsers, setFavoriteUsers] = useState(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem("favoriteUsers"));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [archivedUsers, setArchivedUsers] = useState(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem("archivedUsers"));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [pinnedUserIds, setPinnedUserIds] = useState(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem("pinnedUserIds"));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
   const [showArchivedOnly, setShowArchivedOnly] = useState(false);
   const [contextMenu, setContextMenu] = useState(null); // { x, y, userId }
   const pressTimerRef = useRef(null);
@@ -401,35 +416,35 @@ const SideBar = () => {
 
   const toggleFavorite = (e, userId) => {
     if (e && e.stopPropagation) e.stopPropagation();
-    const isFav = favoriteUsers.includes(userId);
+    const isFav = Array.isArray(favoriteUsers) && favoriteUsers.includes(userId);
     const updated = isFav
       ? favoriteUsers.filter((id) => id !== userId)
-      : [...favoriteUsers, userId];
+      : [...(Array.isArray(favoriteUsers) ? favoriteUsers : []), userId];
     setFavoriteUsers(updated);
     localStorage.setItem("favoriteUsers", JSON.stringify(updated));
   };
 
   const toggleArchive = (e, userId) => {
     if (e && e.stopPropagation) e.stopPropagation();
-    const isArchived = archivedUsers.includes(userId);
+    const isArchived = Array.isArray(archivedUsers) && archivedUsers.includes(userId);
     const updated = isArchived
       ? archivedUsers.filter((id) => id !== userId)
-      : [...archivedUsers, userId];
+      : [...(Array.isArray(archivedUsers) ? archivedUsers : []), userId];
     setArchivedUsers(updated);
     localStorage.setItem("archivedUsers", JSON.stringify(updated));
   };
 
   const togglePin = (userId) => {
-    const isPinned = pinnedUserIds.includes(userId);
+    const isPinned = Array.isArray(pinnedUserIds) && pinnedUserIds.includes(userId);
     let updated;
     if (isPinned) {
       updated = pinnedUserIds.filter((id) => id !== userId);
     } else {
-      if (pinnedUserIds.length >= 2) {
+      if (Array.isArray(pinnedUserIds) && pinnedUserIds.length >= 2) {
         toast.error("You can only pin up to 2 chats");
         return;
       }
-      updated = [...pinnedUserIds, userId];
+      updated = [...(Array.isArray(pinnedUserIds) ? pinnedUserIds : []), userId];
     }
     setPinnedUserIds(updated);
     localStorage.setItem("pinnedUserIds", JSON.stringify(updated));
@@ -458,40 +473,42 @@ const SideBar = () => {
     }
   };
 
-  const filteredUsers = users.filter((user) => {
-    if (!user || !user.fullName) return false;
+  const filteredUsers = Array.isArray(users)
+    ? users.filter((user) => {
+        if (!user || !user.fullName) return false;
 
-    // Archive check
-    const isArchived = archivedUsers.includes(user._id);
-    if (showArchivedOnly) {
-      if (!isArchived) return false;
-    } else {
-      if (isArchived) return false;
-    }
+        // Archive check
+        const isArchived = Array.isArray(archivedUsers) && archivedUsers.includes(user._id);
+        if (showArchivedOnly) {
+          if (!isArchived) return false;
+        } else {
+          if (isArchived) return false;
+        }
 
-    const isOnline = user._id ? onlineUsers.includes(user._id) : false;
-    const matchesSearch = user.fullName
-      .toLowerCase()
-      .includes(searchTerm.toLowerCase());
-    if (!matchesSearch) return false;
+        const isOnline = user._id && Array.isArray(onlineUsers) ? onlineUsers.includes(user._id) : false;
+        const matchesSearch = user.fullName
+          .toLowerCase()
+          .includes(searchTerm.toLowerCase());
+        if (!matchesSearch) return false;
 
-    // Filters
-    if (filterMode === "unread") {
-      const hasUnread = unreadCounts[user._id] > 0;
-      if (!hasUnread) return false;
-    } else if (filterMode === "favorites") {
-      const isFav = favoriteUsers.includes(user._id);
-      if (!isFav) return false;
-    } else if (filterMode === "online") {
-      if (!isOnline) return false;
-    }
+        // Filters
+        if (filterMode === "unread") {
+          const hasUnread = unreadCounts[user._id] > 0;
+          if (!hasUnread) return false;
+        } else if (filterMode === "favorites") {
+          const isFav = Array.isArray(favoriteUsers) && favoriteUsers.includes(user._id);
+          if (!isFav) return false;
+        } else if (filterMode === "online") {
+          if (!isOnline) return false;
+        }
 
-    return true;
-  });
+        return true;
+      })
+    : [];
 
   const sortedUsers = [...filteredUsers].sort((a, b) => {
-    const isPinnedA = pinnedUserIds.includes(a._id);
-    const isPinnedB = pinnedUserIds.includes(b._id);
+    const isPinnedA = Array.isArray(pinnedUserIds) && pinnedUserIds.includes(a._id);
+    const isPinnedB = Array.isArray(pinnedUserIds) && pinnedUserIds.includes(b._id);
 
     if (isPinnedA && !isPinnedB) return -1;
     if (!isPinnedA && isPinnedB) return 1;
