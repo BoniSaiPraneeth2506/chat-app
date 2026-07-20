@@ -16,7 +16,9 @@ app.use(cookieParser())
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(cors({
-  origin:"http://localhost:5173",
+  origin: process.env.NODE_ENV === "production" 
+    ? "https://chat-app-frontend-lvqd.onrender.com"
+    : "http://localhost:5173",
   credentials:true
 }))
 const __dirname = path.resolve();
