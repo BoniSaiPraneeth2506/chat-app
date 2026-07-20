@@ -15,11 +15,21 @@ import { app, server } from './lib/socket.js';
 app.use(cookieParser())
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "https://chat-app-frontend-lvqd.onrender.com"
+];
+
 app.use(cors({
-  origin: process.env.NODE_ENV === "production" 
-    ? "https://chat-app-frontend-lvqd.onrender.com"
-    : "http://localhost:5173",
-  credentials:true
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true
 }))
 const __dirname = path.resolve();
 app.use('/api/auth',authRoutes)
