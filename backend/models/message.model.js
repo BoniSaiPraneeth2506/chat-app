@@ -19,6 +19,30 @@ const messageSchema = new Schema(
     image: {
       type: String,
     },
+    deleteAt: {
+      type: Date,
+      expires: 0
+    },
+    replyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+      default: null
+    },
+    reactions: [
+      {
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+        emoji: { type: String, required: true }
+      }
+    ],
+    deletedFor: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: []
+    }],
+    isDeletedForEveryone: {
+      type: Boolean,
+      default: false
+    }
   },
   { timestamps: true }
 );

@@ -46,7 +46,7 @@
 
 import React, { useEffect } from 'react'
 import NavBar from './components/NavBar'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
 import SignUpPage from './pages/SignUpPage'
@@ -58,6 +58,38 @@ import { Loader } from 'lucide-react'
 import { Toaster } from 'react-hot-toast'
 import { useThemeStore } from './store/useThemeStore'
 import { THEME_COLORS } from './constants'
+
+const ChatRedirectHandler = () => {
+  const { userId } = useParams();
+  const navigate = useNavigate();
+  const { setSelectedUser, users, getUsers } = useChatStore();
+
+  useEffect(() => {
+    const performRedirect = async () => {
+      let currentUsers = users;
+      if (!currentUsers || currentUsers.length === 0) {
+        await getUsers();
+        currentUsers = useChatStore.getState().users;
+      }
+      
+      const foundUser = currentUsers.find((u) => u._id === userId);
+      if (foundUser) {
+        setSelectedUser(foundUser);
+      } else {
+        setSelectedUser({ _id: userId, fullName: "Chat Partner" });
+      }
+      navigate("/");
+    };
+
+    performRedirect();
+  }, [userId, users, setSelectedUser, getUsers, navigate]);
+
+  return (
+    <div className="flex items-center justify-center h-screen" style={{ backgroundColor: 'var(--color-base-100)' }}>
+      <span className="loading loading-spinner loading-lg" style={{ color: 'var(--color-primary)' }}></span>
+    </div>
+  );
+};
 
 const App = () => {
   const { authUser, checkAuth, isCheckingAuth, onlineUsers, socket } = useAuthStore();
@@ -117,6 +149,7 @@ const App = () => {
         <Route path='/signup' element={!authUser ? <SignUpPage /> : <Navigate to='/' />} />
         <Route path='/settings' element={<SettingsPage />} />
         <Route path='/profile' element={authUser ? <ProfilePage /> : <Navigate to='/login' />} />
+        <Route path='/chat-with/:userId' element={authUser ? <ChatRedirectHandler /> : <Navigate to='/login' />} />
         <Route path='*' element={<Navigate to='/' />} />
       </Routes>
       <Toaster />

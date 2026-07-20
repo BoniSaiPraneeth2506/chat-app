@@ -16,6 +16,7 @@ app.use(cookieParser())
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 const isOriginAllowed = (origin) => {
+  if (process.env.NODE_ENV !== "production") return true;
   if (!origin) return true;
   try {
     const hostname = new URL(origin).hostname;

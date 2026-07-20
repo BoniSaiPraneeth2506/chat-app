@@ -97,11 +97,13 @@ const getMessages = async (req, res) => {
         $or: [
           { senderId: myId, receiverId: userToChatId },
           { senderId: userToChatId, receiverId: myId }
-        ]
+        ],
+        deletedFor: { $ne: myId }
       })
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .populate("replyTo");
 
       res.status(200).json(messages.reverse());
     } else {
@@ -109,8 +111,11 @@ const getMessages = async (req, res) => {
         $or: [
           { senderId: myId, receiverId: userToChatId },
           { senderId: userToChatId, receiverId: myId }
-        ]
-      }).sort({ createdAt: 1 });
+        ],
+        deletedFor: { $ne: myId }
+      })
+      .sort({ createdAt: 1 })
+      .populate("replyTo");
       res.status(200).json(messages);
     }
   } catch (err) {
@@ -122,7 +127,7 @@ const getMessages = async (req, res) => {
 const sendMessage = async (req, res) => {
   try {
     const { id: receiverId } = req.params;
-    const { text, image } = req.body;
+    const { text, image, replyTo } = req.body;
     const senderId = req.user._id;
 
     let imageUrl = "";
@@ -132,14 +137,34 @@ const sendMessage = async (req, res) => {
       imageUrl = uploadResponse.secure_url;
     }
 
+    const sender = await User.findById(senderId).select("disappearingTimers");
+    const timer = sender?.disappearingTimers?.get(receiverId) || "off";
+
+    let deleteAt = undefined;
+    if (timer !== "off") {
+      const durationMap = {
+        "1h": 60 * 60 * 1000,
+        "24h": 24 * 60 * 60 * 1000,
+        "7d": 7 * 24 * 60 * 60 * 1000
+      };
+      const ms = durationMap[timer];
+      if (ms) {
+        deleteAt = new Date(Date.now() + ms);
+      }
+    }
+
     const newMessage = new Message({
       senderId,
       receiverId,
       text,
-      image: imageUrl
+      image: imageUrl,
+      deleteAt,
+      replyTo: replyTo || null
     });
 
     await newMessage.save();
+    await newMessage.populate("replyTo");
+
     const receiverSocketId=getReceiverSocketId(receiverId);
     if(receiverSocketId){
       io.to(receiverSocketId).emit("newMessage",newMessage)
@@ -153,4 +178,216 @@ const sendMessage = async (req, res) => {
   }
 };
 
-export { getUsersForSidebar, getMessages, sendMessage };
+const setDisappearingTimer = async (req, res) => {
+  try {
+    const { id: recipientId } = req.params;
+    const { timer } = req.body; // "off", "1h", "24h", "7d"
+    const senderId = req.user._id;
+
+    if (!["off", "1h", "24h", "7d"].includes(timer)) {
+      return res.status(400).json({ message: "Invalid timer value" });
+    }
+
+    // 1. Update sender's disappearingTimers map
+    const sender = await User.findById(senderId);
+    if (!sender.disappearingTimers) {
+      sender.disappearingTimers = new Map();
+    }
+    sender.disappearingTimers.set(recipientId, timer);
+    await sender.save();
+
+    // 2. Update recipient's disappearingTimers map
+    const recipient = await User.findById(recipientId);
+    if (recipient) {
+      if (!recipient.disappearingTimers) {
+        recipient.disappearingTimers = new Map();
+      }
+      recipient.disappearingTimers.set(senderId.toString(), timer);
+      await recipient.save();
+
+      // 3. Emit real-time update to recipient if online
+      const receiverSocketId = getReceiverSocketId(recipientId);
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit("disappearingTimerUpdate", { userId: senderId.toString(), timer });
+      }
+    }
+
+    res.status(200).json(sender);
+  } catch (error) {
+    console.log("Error in setDisappearingTimer:", error);
+    res.status(500).json({ message: "Failed to update disappearing timer" });
+  }
+};
+
+const toggleMessageReaction = async (req, res) => {
+  try {
+    const { id: messageId } = req.params;
+    const { emoji } = req.body; // emoji character (e.g. 👍, ❤️)
+    const userId = req.user._id;
+
+    const message = await Message.findById(messageId).populate("replyTo");
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    // Check if the user already reacted to this message
+    const existingIndex = message.reactions.findIndex(
+      (r) => r.userId.toString() === userId.toString()
+    );
+
+    if (existingIndex > -1) {
+      if (message.reactions[existingIndex].emoji === emoji) {
+        // Toggle off if clicking the same reaction emoji
+        message.reactions.splice(existingIndex, 1);
+      } else {
+        // Replace with new reaction emoji
+        message.reactions[existingIndex].emoji = emoji;
+      }
+    } else {
+      // Add new reaction emoji
+      message.reactions.push({ userId, emoji });
+    }
+
+    await message.save();
+
+    // Broadcast update via socket
+    const receiverId = message.senderId.toString() === userId.toString()
+      ? message.receiverId.toString()
+      : message.senderId.toString();
+
+    const receiverSocketId = getReceiverSocketId(receiverId);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("messageReaction", {
+        messageId: message._id.toString(),
+        reactions: message.reactions
+      });
+    }
+
+    res.status(200).json(message);
+  } catch (error) {
+    console.error("Error in toggleMessageReaction:", error);
+    res.status(500).json({ message: "Failed to update reaction" });
+  }
+};
+
+const toggleContactAction = async (req, res) => {
+  try {
+    const { id: contactId } = req.params;
+    const { action } = req.body; // "favorite" or "archive"
+    const userId = req.user._id;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (action === "favorite") {
+      const idx = user.favorites.indexOf(contactId);
+      if (idx > -1) {
+        user.favorites.splice(idx, 1);
+      } else {
+        user.favorites.push(contactId);
+      }
+    } else if (action === "archive") {
+      const idx = user.archived.indexOf(contactId);
+      if (idx > -1) {
+        user.archived.splice(idx, 1);
+      } else {
+        user.archived.push(contactId);
+      }
+    } else {
+      return res.status(400).json({ message: "Invalid action" });
+    }
+
+    await user.save();
+    res.status(200).json(user);
+  } catch (error) {
+    console.error("Error in toggleContactAction:", error);
+    res.status(500).json({ message: "Failed to update action" });
+  }
+};
+
+const deleteMessage = async (req, res) => {
+  try {
+    const { id: messageId } = req.params;
+    const { type } = req.body; // "me" or "everyone"
+    const userId = req.user._id;
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    if (type === "me") {
+      if (!message.deletedFor.includes(userId)) {
+        message.deletedFor.push(userId);
+        await message.save();
+      }
+    } else if (type === "everyone") {
+      // Validate that caller is the sender
+      if (message.senderId.toString() !== userId.toString()) {
+        return res.status(403).json({ message: "You can only delete your own messages for everyone" });
+      }
+
+      message.isDeletedForEveryone = true;
+      message.text = "";
+      message.image = "";
+      message.reactions = []; // Clear reactions
+      await message.save();
+
+      // Broadcast socket event to receiver
+      const receiverId = message.receiverId.toString();
+      const receiverSocketId = getReceiverSocketId(receiverId);
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit("messageDeleted", {
+          messageId: message._id.toString(),
+          isDeletedForEveryone: true
+        });
+      }
+    } else {
+      return res.status(400).json({ message: "Invalid delete type" });
+    }
+
+    res.status(200).json(message);
+  } catch (error) {
+    console.error("Error in deleteMessage:", error);
+    res.status(500).json({ message: "Failed to delete message" });
+  }
+};
+
+const clearChatHistory = async (req, res) => {
+  try {
+    const { id: contactId } = req.params;
+    const myId = req.user._id;
+
+    // Append myId to deletedFor array of all messages in this conversation
+    await Message.updateMany(
+      {
+        $or: [
+          { senderId: myId, receiverId: contactId },
+          { senderId: contactId, receiverId: myId }
+        ],
+        deletedFor: { $ne: myId }
+      },
+      {
+        $addToSet: { deletedFor: myId }
+      }
+    );
+
+    res.status(200).json({ message: "Chat history cleared successfully" });
+  } catch (error) {
+    console.error("Error in clearChatHistory:", error);
+    res.status(500).json({ message: "Failed to clear chat history" });
+  }
+};
+
+export { 
+  getUsersForSidebar, 
+  getMessages, 
+  sendMessage, 
+  setDisappearingTimer, 
+  toggleMessageReaction,
+  toggleContactAction,
+  deleteMessage,
+  clearChatHistory
+};

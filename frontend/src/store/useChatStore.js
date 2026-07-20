@@ -54,6 +54,7 @@ import { create } from "zustand";
 import toast from "react-hot-toast";
 import axiosInstance from "../lib/axios";
 import useAuthStore from "./useAuthStore";
+import { useThemeStore } from "./useThemeStore";
 
 
 export const useChatStore = create((set, get) => ({
@@ -66,6 +67,18 @@ export const useChatStore = create((set, get) => ({
   unreadCounts: {},
   lastReadTimestamps: JSON.parse(localStorage.getItem("lastReadTimestamps") || "{}"),
   hasMoreMessages: true,
+  isRecipientProfileOpen: false,
+  setIsRecipientProfileOpen: (isOpen) => set({ isRecipientProfileOpen: isOpen }),
+
+  // Advanced features states
+  typingUsers: {},
+  messageSearchQuery: "",
+  replyingToMessage: null,
+  showArchivedOnly: false,
+
+  setMessageSearchQuery: (query) => set({ messageSearchQuery: query }),
+  setReplyingToMessage: (message) => set({ replyingToMessage: message }),
+  setShowArchivedOnly: (show) => set({ showArchivedOnly: show }),
 
   getUsers: async () => {
     set({ isUsersLoading: true });
@@ -143,12 +156,17 @@ export const useChatStore = create((set, get) => ({
     }
   },
   sendMessage: async (messageData) => {
-    const { selectedUser, messages } = get();
+    const { selectedUser, messages, replyingToMessage } = get();
     try {
-      const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, messageData);
+      const payload = replyingToMessage 
+        ? { ...messageData, replyTo: replyingToMessage._id } 
+        : messageData;
+
+      const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, payload);
       const sentMessage = res.data;
       set({ 
         messages: [...messages, sentMessage],
+        replyingToMessage: null,
         latestMessages: {
           ...get().latestMessages,
           [selectedUser._id]: sentMessage
@@ -165,6 +183,9 @@ export const useChatStore = create((set, get) => ({
     // Clean up existing listeners to avoid duplicates
     socket.off("newMessage");
     socket.off("messagesRead");
+    socket.off("typing");
+    socket.off("messageReaction");
+    socket.off("messageDeleted");
 
     // Emit read receipt for current active chat immediately if any
     const { selectedUser } = get();
@@ -177,6 +198,20 @@ export const useChatStore = create((set, get) => ({
     socket.on("newMessage", (newMessage) => {
       const { selectedUser, messages } = get();
       const currentUser = useAuthStore.getState().authUser;
+
+      if (newMessage.senderId === currentUser?._id && newMessage.receiverId === currentUser?._id) {
+        return;
+      }
+      
+      if (useThemeStore.getState().soundEnabled) {
+        try {
+          const audio = new Audio("https://assets.mixkit.co/active_storage/sfx/2568/2568-84.wav");
+          audio.volume = 0.5;
+          audio.play();
+        } catch (err) {
+          console.error("Failed to play notification sound:", err);
+        }
+      }
       
       // Update latest message for the sender
       set((state) => ({
@@ -217,6 +252,69 @@ export const useChatStore = create((set, get) => ({
       localStorage.setItem("lastReadTimestamps", JSON.stringify(updated));
       set({ lastReadTimestamps: updated });
     });
+
+    // Handle disappearing timer changes from receiver
+    socket.on("disappearingTimerUpdate", ({ userId, timer }) => {
+      console.log(`[Socket Client] Received disappearingTimerUpdate for user: ${userId} to: ${timer}`);
+      const currentUser = useAuthStore.getState().authUser;
+      if (currentUser) {
+        useAuthStore.setState({
+          authUser: {
+            ...currentUser,
+            disappearingTimers: {
+              ...currentUser.disappearingTimers,
+              [userId]: timer
+            }
+          }
+        });
+      }
+    });
+
+    // Handle user status changes (user goes offline)
+    socket.on("userOffline", ({ userId, lastSeen }) => {
+      console.log(`[Socket Client] Received userOffline for user: ${userId} at: ${lastSeen}`);
+      set((state) => {
+        const updatedUsers = state.users.map((u) =>
+          u._id === userId ? { ...u, lastSeen } : u
+        );
+        const updatedSelectedUser =
+          state.selectedUser && state.selectedUser._id === userId
+            ? { ...state.selectedUser, lastSeen }
+            : state.selectedUser;
+        return {
+          users: updatedUsers,
+          selectedUser: updatedSelectedUser
+        };
+      });
+    });
+
+    // Handle typing indicators
+    socket.on("typing", ({ senderId, isTyping }) => {
+      set((state) => ({
+        typingUsers: {
+          ...state.typingUsers,
+          [senderId]: isTyping
+        }
+      }));
+    });
+
+    // Handle real-time message reactions
+    socket.on("messageReaction", ({ messageId, reactions }) => {
+      set((state) => ({
+        messages: state.messages.map((msg) =>
+          msg._id === messageId ? { ...msg, reactions } : msg
+        )
+      }));
+    });
+
+    // Handle real-time message deletions
+    socket.on("messageDeleted", ({ messageId, isDeletedForEveryone }) => {
+      set((state) => ({
+        messages: state.messages.map((msg) =>
+          msg._id === messageId ? { ...msg, isDeletedForEveryone, text: "", image: "", reactions: [] } : msg
+        )
+      }));
+    });
   },
 
   unsubscribeFromMessages: () => {
@@ -224,11 +322,16 @@ export const useChatStore = create((set, get) => ({
     if (socket) {
       socket.off("newMessage");
       socket.off("messagesRead");
+      socket.off("disappearingTimerUpdate");
+      socket.off("userOffline");
+      socket.off("typing");
+      socket.off("messageReaction");
+      socket.off("messageDeleted");
     }
   },
 
   setSelectedUser: (selectedUser) => {
-    set({ selectedUser });
+    set({ selectedUser, isRecipientProfileOpen: false });
     if (selectedUser) {
       set((state) => ({
         unreadCounts: {
@@ -242,6 +345,106 @@ export const useChatStore = create((set, get) => ({
       if (socket && currentUser) {
         socket.emit("markAsRead", { senderId: selectedUser._id, receiverId: currentUser._id });
       }
+    }
+  },
+
+  setDisappearingTimer: async (recipientId, timer) => {
+    try {
+      const res = await axiosInstance.post(`/messages/disappearing/${recipientId}`, { timer });
+      useAuthStore.setState({ authUser: res.data });
+      toast.success(`Disappearing messages set to ${timer === "off" ? "Off" : timer}`);
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to update disappearing messages");
+    }
+  },
+
+  sendTypingStatus: (isTyping) => {
+    const socket = useAuthStore.getState().socket;
+    const { selectedUser } = get();
+    if (socket && selectedUser) {
+      socket.emit("typing", { receiverId: selectedUser._id, isTyping });
+    }
+  },
+
+  toggleReaction: async (messageId, emoji) => {
+    const { messages } = get();
+    const currentUser = useAuthStore.getState().authUser;
+    if (!currentUser) return;
+
+    // Optimistic UI update
+    set((state) => ({
+      messages: state.messages.map((msg) => {
+        if (msg._id === messageId) {
+          const reactions = msg.reactions || [];
+          const existingIndex = reactions.findIndex(
+            (r) => (r.userId === currentUser._id || r.userId?._id === currentUser._id)
+          );
+          let updatedReactions = [...reactions];
+          if (existingIndex > -1) {
+            if (updatedReactions[existingIndex].emoji === emoji) {
+              updatedReactions.splice(existingIndex, 1);
+            } else {
+              updatedReactions[existingIndex] = { ...updatedReactions[existingIndex], emoji };
+            }
+          } else {
+            updatedReactions.push({ userId: currentUser._id, emoji });
+          }
+          return { ...msg, reactions: updatedReactions };
+        }
+        return msg;
+      })
+    }));
+
+    try {
+      const res = await axiosInstance.post(`/messages/reaction/${messageId}`, { emoji });
+      set((state) => ({
+        messages: state.messages.map((msg) =>
+          msg._id === messageId ? res.data : msg
+        )
+      }));
+    } catch (error) {
+      console.error("Failed to toggle reaction:", error);
+    }
+  },
+
+  toggleContactAction: async (contactId, action) => {
+    try {
+      const res = await axiosInstance.post(`/messages/action/${contactId}`, { action });
+      useAuthStore.setState({ authUser: res.data });
+      toast.success(`${action === "favorite" ? "Favorites" : "Archived"} updated successfully`);
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to update action");
+    }
+  },
+
+  deleteMessage: async (messageId, type) => {
+    try {
+      await axiosInstance.delete(`/messages/${messageId}`, { data: { type } });
+      if (type === "me") {
+        set((state) => ({
+          messages: state.messages.filter((msg) => msg._id !== messageId)
+        }));
+        toast.success("Message deleted for you");
+      } else {
+        set((state) => ({
+          messages: state.messages.map((msg) =>
+            msg._id === messageId ? { ...msg, isDeletedForEveryone: true, text: "", image: "", reactions: [] } : msg
+          )
+        }));
+        toast.success("Message deleted for everyone");
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to delete message");
+    }
+  },
+
+  clearChatHistory: async (contactId) => {
+    try {
+      await axiosInstance.delete(`/messages/clear/${contactId}`);
+      set({ messages: [] });
+      toast.success("Conversation cleared successfully");
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to clear history");
     }
   }
 }));

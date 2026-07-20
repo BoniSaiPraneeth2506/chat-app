@@ -359,7 +359,7 @@ import { useEffect, useState, useRef } from "react";
 import { useChatStore } from "../store/useChatStore";
 import useAuthStore from "../store/useAuthStore";
 import SidebarSkeleton from "./skeletons/SidebarSkeleton";
-import { X, Search, Pin, Star, Archive } from "lucide-react";
+import { X, Search, Pin, Star, Archive, Bookmark } from "lucide-react";
 import { formatMessageTime } from "../lib/utils";
 import toast from "react-hot-toast";
 
@@ -377,8 +377,17 @@ const DoubleCheck = ({ className }) => (
 );
 
 const SideBar = () => {
-  const { getUsers, users, selectedUser, setSelectedUser, isUsersLoading, latestMessages, unreadCounts, lastReadTimestamps } =
-    useChatStore();
+  const { 
+    getUsers, 
+    users, 
+    selectedUser, 
+    setSelectedUser, 
+    isUsersLoading, 
+    latestMessages, 
+    unreadCounts, 
+    lastReadTimestamps,
+    clearChatHistory 
+  } = useChatStore();
   const { onlineUsers, authUser } = useAuthStore();
   const [searchTerm, setSearchTerm] = useState("");
   const [filterMode, setFilterMode] = useState("all");
@@ -631,6 +640,34 @@ const SideBar = () => {
           )
         )}
 
+        {/* Personal Notes (Self-Chat) */}
+        {!showArchivedOnly && (!searchTerm || "personal notes drafts you".includes(searchTerm.toLowerCase())) && (
+          <button
+            onClick={() => setSelectedUser(authUser)}
+            className={`w-full py-3.5 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors group select-none
+              ${selectedUser?._id === authUser?._id ? "bg-base-200/80" : ""}
+            `}
+          >
+            <div className="relative flex-shrink-0">
+              <div className="size-12 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+                <Bookmark className="size-5" />
+              </div>
+            </div>
+            <div className="min-w-0 flex-1 text-left">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-base-content truncate">Personal Notes (You)</span>
+              </div>
+              <div className="text-sm text-base-content/60 truncate">
+                {latestMessages[authUser?._id] ? (
+                  latestMessages[authUser?._id].text || "📷 Image"
+                ) : (
+                  <span className="text-base-content/40 italic">Drafts, links, ideas...</span>
+                )}
+              </div>
+            </div>
+          </button>
+        )}
+
         {sortedUsers.map((user) => (
           <button
             key={user._id}
@@ -775,6 +812,21 @@ const SideBar = () => {
             >
               <Archive className="size-3.5 text-neutral" />
               <span>{archivedUsers.includes(contextMenu.userId) ? "Unarchive" : "Archive"}</span>
+            </button>
+            <div className="h-[1px] bg-base-300 my-1"></div>
+            <button
+              onClick={() => {
+                if (window.confirm("Are you sure you want to delete this chat? This will clear all messages in this conversation.")) {
+                  clearChatHistory(contextMenu.userId);
+                }
+                setContextMenu(null);
+              }}
+              className="flex items-center gap-2 px-3 py-2 text-xs font-semibold hover:bg-red-500/10 rounded-md transition-colors text-left text-red-500"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              <span>Delete Chat</span>
             </button>
           </div>
         </>

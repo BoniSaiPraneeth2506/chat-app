@@ -2,6 +2,7 @@ import { generateToken } from "../lib/utils.js";
 import User from "../models/user.model.js";
 import bcrypt from 'bcryptjs'
 import cloudinary from "../lib/cloudinary.js";
+import { updateUserPrivacyState } from "../lib/socket.js";
 const signup = async (req, res) => {
     const { fullName, email, password } = req.body;
 
@@ -93,25 +94,43 @@ const logout =async (req,res)=>{
 
  const updateProfile = async (req, res) => {
   try {
-    const { profilePic } = req.body;  // Step 1: Get profilePic from request body
-    const userId = req.user._id;      // Step 2: Get logged-in user's ID (likely from token middleware)
+    const { profilePic, fullName, email, bio, link, onlinePrivacy, messageTimer } = req.body;
+    const userId = req.user._id;
 
-    if (!profilePic) {
-      return res.status(400).json({ message: "Profile pic is required" });
+    const updateData = {};
+
+    if (fullName) updateData.fullName = fullName;
+    if (email) {
+      const existingUser = await User.findOne({ email });
+      if (existingUser && existingUser._id.toString() !== userId.toString()) {
+        return res.status(400).json({ message: "Email is already taken" });
+      }
+      updateData.email = email;
     }
+    if (bio !== undefined) updateData.bio = bio;
+    if (link !== undefined) updateData.link = link;
+    if (onlinePrivacy !== undefined) {
+      updateData.onlinePrivacy = onlinePrivacy;
+      updateUserPrivacyState(userId, onlinePrivacy === false);
+    }
+    if (messageTimer !== undefined) updateData.messageTimer = messageTimer;
 
-    const uploadResponse = await cloudinary.uploader.upload(profilePic);  // Step 3: Upload image to Cloudinary
+    if (profilePic) {
+      const uploadResponse = await cloudinary.uploader.upload(profilePic);
+      updateData.profilePic = uploadResponse.secure_url;
+    }
 
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      { profilePic: uploadResponse.secure_url },  // Step 4: Save Cloudinary URL in database
+      updateData,
       { new: true }
     );
 
-    res.status(200).json(updatedUser);  // Step 5: Send updated user info back to client
+    res.status(200).json(updatedUser);
 
   } catch (error) {
     console.log("error in update profile:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 

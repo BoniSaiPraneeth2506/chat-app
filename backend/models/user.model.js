@@ -17,7 +17,38 @@ const userSchema=new mongoose.Schema({
     profilePic:{
         type:String,
         default:""
-    }
+    },
+    bio:{
+        type:String,
+        default:""
+    },
+    link:{
+        type:String,
+        default:""
+    },
+    onlinePrivacy:{
+        type:Boolean,
+        default:true
+    },
+    disappearingTimers:{
+        type:Map,
+        of:String,
+        default:new Map()
+    },
+    lastSeen:{
+        type:Date,
+        default:Date.now
+    },
+    favorites:[{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"User",
+        default:[]
+    }],
+    archived:[{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"User",
+        default:[]
+    }]
 },{timestamps:true}
 )
 
