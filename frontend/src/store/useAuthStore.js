@@ -88,7 +88,13 @@ const useAuthStore=create((set,get)=>({
   },
   connectSocket:async()=>{
       const {authUser}=get();
-      if(!authUser || get().socket?.connected) return;
+      const existingSocket = get().socket;
+      
+      // If socket already exists (even if disconnected), reuse it
+      if(!authUser || existingSocket) return;
+      
+      console.log("Creating new Socket.IO connection for user:", authUser._id);
+      
       const socket=io(BASE_URL,{
         query:{
             userId:authUser._id
@@ -104,7 +110,11 @@ const useAuthStore=create((set,get)=>({
       });
 
       socket.on('disconnect', () => {
-        console.log("Socket disconnected");
+        console.log("Socket disconnected - will attempt to reconnect");
+      });
+
+      socket.on('error', (error) => {
+        console.error("Socket error:", error);
       });
 
       socket.on('getOnlineUsers',(userIds)=>{
