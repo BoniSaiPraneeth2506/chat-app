@@ -92,14 +92,27 @@ const useAuthStore=create((set,get)=>({
       const socket=io(BASE_URL,{
         query:{
             userId:authUser._id
-        }
+        },
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        reconnectionAttempts: 5
       })
 
-      socket.connect();
-      set({socket:socket})
+      socket.on('connect', () => {
+        console.log("Socket connected successfully:", socket.id);
+      });
+
+      socket.on('disconnect', () => {
+        console.log("Socket disconnected");
+      });
+
       socket.on('getOnlineUsers',(userIds)=>{
+        console.log("Online users updated:", userIds);
         set({onlineUsers:userIds})
       })
+
+      set({socket:socket})
   },
   disconnectSocket:async()=>{
     const { socket } = get();

@@ -23,10 +23,19 @@ export function getReceiverSocketId(userId){
 const userSocketMap = {}; // Stores online users: { userId: socketId }
 
 io.on("connection", (socket) => {
-    console.log("A user Connected:", socket.id);
-
     const userId = socket.handshake.query.userId;
-    if (userId) userSocketMap[userId] = socket.id;
+    console.log("A user Connected:", socket.id, "UserID:", userId);
+
+    if (userId) {
+        // Replace old socket if user reconnects
+        if (userSocketMap[userId]) {
+            console.log(`User ${userId} already exists, replacing socket`);
+        }
+        userSocketMap[userId] = socket.id;
+        console.log("Current online users:", Object.keys(userSocketMap));
+    } else {
+        console.log("WARNING: Connection received without userId");
+    }
 
     // Notify all clients about online users
     io.emit("getOnlineUsers", Object.keys(userSocketMap));
@@ -43,10 +52,13 @@ io.on("connection", (socket) => {
     });
 
     socket.on("disconnect", () => {
-        console.log("A user Disconnected:", socket.id);
+        console.log("A user Disconnected:", socket.id, "UserID:", userId);
 
         // Remove user from userSocketMap
-        if (userId) delete userSocketMap[userId];
+        if (userId && userSocketMap[userId]) {
+            delete userSocketMap[userId];
+            console.log("User removed, current online users:", Object.keys(userSocketMap));
+        }
 
         // Notify updated online users
         io.emit("getOnlineUsers", Object.keys(userSocketMap));
