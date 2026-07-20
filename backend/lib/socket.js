@@ -26,7 +26,7 @@ const io = new Server(server, {
         },
         credentials: true
     },
-    transports: ["websocket", "polling"]
+    transports: ["websocket"]
 });
 export function getReceiverSocketId(userId){
     return userSocketMap[userId]

@@ -104,6 +104,7 @@ const useAuthStore=create((set,get)=>({
         query:{
             userId:authUser._id
         },
+        transports: ["websocket"],
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
