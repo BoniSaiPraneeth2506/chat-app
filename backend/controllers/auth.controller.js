@@ -36,7 +36,7 @@ const signup = async (req, res) => {
         await newUser.save();
 
         
-        generateToken(newUser._id, res);
+        const token = generateToken(newUser._id, res);
 
       
         res.status(201).json({
@@ -44,6 +44,7 @@ const signup = async (req, res) => {
             fullName: newUser.fullName,
             email: newUser.email,
             profilePic: newUser.profilePic,
+            token,
         });
 
     } catch (err) {
@@ -63,12 +64,13 @@ const login =async (req,res)=>{
     if(!isPassword){
       return  res.status(500).json({ message: "invalid password" });  
     }
-    generateToken(user._id,res);
+    const token = generateToken(user._id,res);
     res.status(200).json({
         _id:user._id,
         fullName:user.fullName,
         email:user.email,
-        profilePic:user.profilePic
+        profilePic:user.profilePic,
+        token
     })
    }catch(err){
     console.log(err);

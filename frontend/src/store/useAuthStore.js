@@ -19,7 +19,9 @@ const useAuthStore=create((set,get)=>({
            set({authUser:res.data});
            get().connectSocket()
         }catch(err){
-          console.log("error in checkauth",err)
+           console.log("error in checkauth",err);
+           localStorage.removeItem("token");
+           set({authUser:null});
         }finally{
             set({isCheckingAuth:false})
         }
@@ -28,12 +30,14 @@ const useAuthStore=create((set,get)=>({
         set({isSigningUp:true})
         try{
            const res=await axiosInstance.post("/auth/signup",data);
+           if (res.data && res.data.token) {
+             localStorage.setItem("token", res.data.token);
+           }
            set({authUser:res.data});
            toast.success("Account created successfully")
            get().connectSocket()
         }catch(err){
           toast.error(err.response?.data?.message || err.message || "Something went wrong");
-
         }finally{
             set({isSigningUp:false})
         }
@@ -41,24 +45,28 @@ const useAuthStore=create((set,get)=>({
     logOut:async()=>{
         try{
              await axiosInstance.post('/auth/logout');
+             localStorage.removeItem("token");
              set({authUser:null})
              get().disconnectSocket()
              toast.success("Logout successfull")
         }catch(err){
-            toast.error(err.response.data.message)
+             localStorage.removeItem("token");
+             set({authUser:null});
+             toast.error(err.response?.data?.message || err.message || "Logout failed");
         }
     },
     login:async(data)=>{
        set({isLoggingIn:true})
         try{
            const res=await axiosInstance.post("/auth/login",data);
+           if (res.data && res.data.token) {
+             localStorage.setItem("token", res.data.token);
+           }
            set({authUser:res.data});
            toast.success("Logged in successfully")
            get().connectSocket()
-
         }catch(err){
           toast.error(err.response?.data?.message || err.message || "Something went wrong");
-
         }finally{
             set({isLoggingIn:false})
         }
