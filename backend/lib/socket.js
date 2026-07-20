@@ -32,12 +32,19 @@ io.on("connection", (socket) => {
         return;
     }
 
-    // Replace old socket if user reconnects
+    // If user already has a socket (reconnect/duplicate), disconnect the OLD one
     if (userSocketMap[userId]) {
-        console.log(`User ${userId} already exists, replacing socket`);
+        const oldSocketId = userSocketMap[userId];
+        console.log(`User ${userId} already has an active socket (${oldSocketId}), closing it`);
+        const oldSocket = io.sockets.sockets.get(oldSocketId);
+        if (oldSocket) {
+            oldSocket.disconnect(true); // true = server-side disconnect
+        }
     }
+    
+    // Add the new socket
     userSocketMap[userId] = socket.id;
-    console.log("Current online users:", Object.keys(userSocketMap));
+    console.log("User added to online map. Current online users:", Object.keys(userSocketMap));
 
     // Notify all clients about online users
     io.emit("getOnlineUsers", Object.keys(userSocketMap));
@@ -56,13 +63,15 @@ io.on("connection", (socket) => {
     socket.on("disconnect", () => {
         console.log("A user Disconnected:", socket.id, "UserID:", userId);
 
-        // Remove user from userSocketMap
+        // Only remove if this socket is the current one for this user
         if (userId && userSocketMap[userId] === socket.id) {
             delete userSocketMap[userId];
-            console.log("User removed, current online users:", Object.keys(userSocketMap));
+            console.log("User removed from online map. Current online users:", Object.keys(userSocketMap));
             
-            // Notify updated online users
+            // Notify all clients about updated online users
             io.emit("getOnlineUsers", Object.keys(userSocketMap));
+        } else if (userId) {
+            console.log(`Disconnect event for old socket of user ${userId} (socket ID mismatch) - ignoring`);
         }
     });
 });

@@ -90,8 +90,13 @@ const useAuthStore=create((set,get)=>({
       const {authUser}=get();
       const existingSocket = get().socket;
       
-      // If socket already exists (even if disconnected), reuse it
-      if(!authUser || existingSocket) return;
+      // Only skip if socket exists AND is currently connected
+      if(!authUser) return;
+      
+      if(existingSocket && existingSocket.connected) {
+        console.log("Socket already connected, skipping");
+        return;
+      }
       
       console.log("Creating new Socket.IO connection for user:", authUser._id);
       
@@ -102,7 +107,7 @@ const useAuthStore=create((set,get)=>({
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
-        reconnectionAttempts: 5
+        reconnectionAttempts: 10
       })
 
       socket.on('connect', () => {
