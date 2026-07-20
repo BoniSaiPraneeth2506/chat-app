@@ -87,28 +87,20 @@ const useAuthStore=create((set,get)=>({
     }
   },
   connectSocket:async()=>{
-      const {authUser}=get();
-      const existingSocket = get().socket;
-      
+      const {authUser, socket}=get();
       if(!authUser) return;
       
-      // If socket already exists and is connected, skip
-      if(existingSocket && existingSocket.connected) {
-        console.log("Socket already connected, skipping");
-        return;
+      if(socket) {
+        if (socket.connected) {
+          console.log("Socket already connected, skipping creation");
+          return;
+        }
+        socket.disconnect();
       }
       
-      // If socket exists but is disconnected, reconnect it
-      if(existingSocket && !existingSocket.connected) {
-        console.log("Socket exists but disconnected, reconnecting...");
-        existingSocket.connect();
-        return;
-      }
-      
-      // Create new socket only if none exists
       console.log("Creating new Socket.IO connection for user:", authUser._id);
       
-      const socket=io(BASE_URL,{
+      const newSocket=io(BASE_URL,{
         query:{
             userId:authUser._id
         },
@@ -118,24 +110,24 @@ const useAuthStore=create((set,get)=>({
         reconnectionAttempts: 10
       })
 
-      socket.on('connect', () => {
-        console.log("Socket connected successfully:", socket.id);
+      newSocket.on('connect', () => {
+        console.log("Socket connected successfully:", newSocket.id);
       });
 
-      socket.on('disconnect', () => {
+      newSocket.on('disconnect', () => {
         console.log("Socket disconnected - will attempt to reconnect");
       });
 
-      socket.on('error', (error) => {
+      newSocket.on('error', (error) => {
         console.error("Socket error:", error);
       });
 
-      socket.on('getOnlineUsers',(userIds)=>{
+      newSocket.on('getOnlineUsers',(userIds)=>{
         console.log("Online users updated:", userIds);
         set({onlineUsers:userIds})
       })
 
-      set({socket:socket})
+      set({socket:newSocket})
   },
   disconnectSocket:async()=>{
     const { socket } = get();
