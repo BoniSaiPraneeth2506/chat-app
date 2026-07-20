@@ -15,15 +15,19 @@ import { app, server } from './lib/socket.js';
 app.use(cookieParser())
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:3000",
-  "https://chat-app-frontend-lvqd.onrender.com"
-];
+const isOriginAllowed = (origin) => {
+  if (!origin) return true;
+  try {
+    const hostname = new URL(origin).hostname;
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname.endsWith("onrender.com");
+  } catch {
+    return false;
+  }
+};
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (isOriginAllowed(origin)) {
       callback(null, true);
     } else {
       callback(new Error("Not allowed by CORS"));

@@ -5,13 +5,25 @@ import express from 'express';
 const app = express();
 const server = http.createServer(app);
 
+const isOriginAllowed = (origin) => {
+    if (!origin) return true;
+    try {
+        const hostname = new URL(origin).hostname;
+        return hostname === "localhost" || hostname === "127.0.0.1" || hostname.endsWith("onrender.com");
+    } catch {
+        return false;
+    }
+};
+
 const io = new Server(server, {
     cors: {
-        origin: [
-            "http://localhost:5173",
-            "http://localhost:3000",
-            "https://chat-app-frontend-lvqd.onrender.com"
-        ],
+        origin: (origin, callback) => {
+            if (isOriginAllowed(origin)) {
+                callback(null, true);
+            } else {
+                callback(new Error('Not allowed by CORS'), false);
+            }
+        },
         credentials: true
     },
     transports: ["websocket", "polling"]
