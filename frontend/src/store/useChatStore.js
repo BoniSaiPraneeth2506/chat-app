@@ -71,7 +71,7 @@ export const useChatStore = create((set, get) => ({
     set({ isUsersLoading: true });
     try {
       const res = await axiosInstance.get("/messages/users");
-      const users = res.data;
+      const users = Array.isArray(res.data) ? res.data : [];
       set({ users });
 
       // Fetch the last message for each user to populate latestMessages
@@ -80,7 +80,7 @@ export const useChatStore = create((set, get) => ({
         users.map(async (user) => {
           try {
             const msgRes = await axiosInstance.get(`/messages/${user._id}`);
-            const userMessages = msgRes.data;
+            const userMessages = Array.isArray(msgRes.data) ? msgRes.data : [];
             if (userMessages && userMessages.length > 0) {
               latestMsgs[user._id] = userMessages[userMessages.length - 1];
             }
@@ -102,9 +102,10 @@ export const useChatStore = create((set, get) => ({
     try {
       const limit = 20;
       const res = await axiosInstance.get(`/messages/${userId}?limit=${limit}&skip=0`);
+      const messages = Array.isArray(res.data) ? res.data : [];
       set({ 
-        messages: res.data,
-        hasMoreMessages: res.data.length === limit
+        messages,
+        hasMoreMessages: messages.length === limit
       });
 
       // Emit markAsRead to receiver
@@ -126,16 +127,16 @@ export const useChatStore = create((set, get) => ({
 
     try {
       const limit = 20;
-      const skip = messages.length;
+      const skip = Array.isArray(messages) ? messages.length : 0;
       const res = await axiosInstance.get(`/messages/${userId}?limit=${limit}&skip=${skip}`);
-      const newMessages = res.data;
+      const newMessages = Array.isArray(res.data) ? res.data : [];
 
       if (newMessages.length < limit) {
         set({ hasMoreMessages: false });
       }
 
       set({
-        messages: [...newMessages, ...messages] // Prepend older messages to the top
+        messages: [...newMessages, ...(Array.isArray(messages) ? messages : [])] // Prepend older messages to the top
       });
     } catch (error) {
       console.error("Failed to load more messages:", error);
