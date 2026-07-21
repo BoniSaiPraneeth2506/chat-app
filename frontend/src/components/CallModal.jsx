@@ -24,15 +24,17 @@ const CallModal = () => {
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
+      localVideoRef.current.play().catch((err) => console.log("Local play error:", err));
     }
-  }, [localStream]);
+  }, [localStream, callState]);
 
-  // Bind remote stream to video element
+  // Bind remote stream to video/audio element
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
+      remoteVideoRef.current.play().catch((err) => console.log("Remote play error:", err));
     }
-  }, [remoteStream]);
+  }, [remoteStream, callState]);
 
   // Call duration timer
   useEffect(() => {
@@ -121,6 +123,16 @@ const CallModal = () => {
             {callState === "connected" && `On Call (${formatTime(callDuration)})`}
           </p>
         </div>
+
+        {/* Hidden Remote Stream Audio Element for Phone Calls */}
+        {callState === "connected" && callType === "phone" && (
+          <audio
+            ref={remoteVideoRef}
+            autoPlay
+            playsInline
+            className="hidden"
+          />
+        )}
 
         {/* Video Streams Container (Connected Video Call) */}
         {callState === "connected" && callType === "video" && (
