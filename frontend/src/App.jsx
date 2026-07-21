@@ -58,6 +58,7 @@ import { Loader, X, MessageSquare, Phone, Info } from 'lucide-react'
 import { Toaster } from 'react-hot-toast'
 import { useThemeStore } from './store/useThemeStore'
 import { THEME_COLORS } from './constants'
+import CallModal from './components/CallModal'
 
 const ChatRedirectHandler = () => {
   const { userId } = useParams();
@@ -272,8 +273,9 @@ const App = () => {
           </div>
         </div>
       )}
+      <CallModal />
     </div>
-  )
-}
+  );
+};
 
 export default App

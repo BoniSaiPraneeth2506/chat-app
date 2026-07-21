@@ -163,6 +163,7 @@ const MessageInput = () => {
       mediaRecorder.start();
       setIsRecording(true);
       setRecordingTime(0);
+      sendTypingStatus("recording");
 
       timerIntervalRef.current = setInterval(() => {
         setRecordingTime((prev) => prev + 1);
@@ -176,6 +177,7 @@ const MessageInput = () => {
   const stopRecording = (shouldSend = true) => {
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     setIsRecording(false);
+    sendTypingStatus(false);
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       if (!shouldSend) {

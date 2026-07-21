@@ -1,6 +1,6 @@
 import { useChatStore } from "../store/useChatStore";
 import { useEffect, useRef, useLayoutEffect, useState } from "react";
-import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward } from "lucide-react";
+import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image } from "lucide-react";
 import ForwardModal from "./ForwardModal";
 import { useThemeStore } from "../store/useThemeStore";
 import { getWallpaperStyle } from "../pages/SettingsPage";
@@ -577,9 +577,50 @@ const ChatContainer = () => {
                 onClick={() => setLightboxImage(selectedUser.profilePic || "/avatar.png")}
                 className="object-cover border-4 border-base-200 rounded-full size-28 shadow-md cursor-zoom-in hover:opacity-90 transition-opacity"
               />
-              <h2 className="font-semibold text-lg text-base-content mt-3">{selectedUser.fullName}</h2>
+              <h2 className="font-semibold text-lg text-base-content mt-3">
+                {selectedUser._id === authUser._id ? "Personal Notes (You)" : selectedUser.fullName}
+              </h2>
               <span className="text-xs text-base-content/50 select-all">{selectedUser.email}</span>
             </div>
+
+            {/* Media, links and docs gallery section (WhatsApp Desktop style) */}
+            {(() => {
+              const mediaMessages = Array.isArray(messages) ? messages.filter((m) => m.image && !m.isDeletedForEveryone) : [];
+              return (
+                <div className="space-y-2.5 pt-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-base-content/80 flex items-center gap-1.5 select-none">
+                      <Image size={14} className="text-primary" />
+                      Media, links and docs
+                    </span>
+                    <span className="text-xs text-base-content/50 font-medium select-none">
+                      {mediaMessages.length}
+                    </span>
+                  </div>
+                  {mediaMessages.length > 0 ? (
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {mediaMessages.slice(-8).reverse().map((msg) => (
+                        <div 
+                          key={msg._id}
+                          onClick={() => setLightboxImage(msg.image)}
+                          className="aspect-square rounded-lg overflow-hidden border border-base-300 bg-base-200 cursor-zoom-in group relative hover:opacity-90 transition-all shadow-sm"
+                        >
+                          <img 
+                            src={msg.image} 
+                            alt="Shared media" 
+                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-200" 
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="bg-base-200/40 p-3 rounded-lg border border-base-300/30 text-center">
+                      <p className="text-xs text-base-content/40 italic">No media shared yet</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Bio info */}
             <div className="space-y-1">

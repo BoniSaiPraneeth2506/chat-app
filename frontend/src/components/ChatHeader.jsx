@@ -213,13 +213,28 @@ const ChatHeader = () => {
                     )}
                   </h3>
                   {isTyping ? (
-                    <div className="flex items-center gap-1 text-xs text-primary font-medium">
-                      <span>typing</span>
-                      <span className="flex gap-0.5 mt-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]"></span>
-                        <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:150ms]"></span>
-                        <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]"></span>
-                      </span>
+                    <div className="flex items-center gap-1.5 text-xs text-primary font-medium select-none">
+                      {isTyping === "recording" ? (
+                        <>
+                          <span className="text-red-500 font-semibold flex items-center gap-1 animate-pulse">
+                            🎙️ recording audio
+                          </span>
+                          <span className="flex items-end gap-[2px] h-3">
+                            <span className="w-0.5 h-full bg-red-500 animate-bounce [animation-delay:0ms]"></span>
+                            <span className="w-0.5 h-2/3 bg-red-500 animate-bounce [animation-delay:150ms]"></span>
+                            <span className="w-0.5 h-full bg-red-500 animate-bounce [animation-delay:300ms]"></span>
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span>typing</span>
+                          <span className="flex gap-0.5 mt-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]"></span>
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:150ms]"></span>
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]"></span>
+                          </span>
+                        </>
+                      )}
                     </div>
                   ) : (
                     <p className="flex items-center gap-1 text-sm text-base-content/70">

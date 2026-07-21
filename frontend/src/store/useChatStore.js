@@ -586,11 +586,11 @@ export const useChatStore = create((set, get) => ({
     }
   },
 
-  sendTypingStatus: (isTyping) => {
+  sendTypingStatus: (status) => {
     const socket = useAuthStore.getState().socket;
     const { selectedUser } = get();
     if (socket && selectedUser) {
-      socket.emit("typing", { receiverId: selectedUser._id, isTyping });
+      socket.emit("typing", { receiverId: selectedUser._id, isTyping: status });
     }
   },
 
