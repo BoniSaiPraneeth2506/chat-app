@@ -4,7 +4,7 @@ import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2,
 import ForwardModal from "./ForwardModal";
 import { useThemeStore } from "../store/useThemeStore";
 import { getWallpaperStyle } from "../pages/SettingsPage";
-import CallModal from "./CallModal";
+
 
 import ChatHeader from "./ChatHeader";
 import MessageInput from "./MessageInput";
@@ -698,7 +698,6 @@ const ChatContainer = () => {
           authUser={authUser}
         />
       )}
-      <CallModal />
     </div>
   );
 };

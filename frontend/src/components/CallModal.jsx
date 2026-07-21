@@ -51,24 +51,85 @@ const CallModal = () => {
     return () => clearInterval(timer);
   }, [callState]);
 
-  // Audio ringtone playback
-  const ringtoneRef = useRef(null);
+  // Audio ringtone playback using Web Audio API (highly reliable, no network delays or broken links)
+  const ringtonePlayerRef = useRef(null);
 
   useEffect(() => {
-    if (callState === "incoming") {
-      ringtoneRef.current = new Audio("https://assets.mixkit.co/active_storage/sfx/1359/1359-84.wav");
-      ringtoneRef.current.loop = true;
-      ringtoneRef.current.play().catch((err) => console.log("Audio play error:", err));
-    } else if (callState === "ringing") {
-      ringtoneRef.current = new Audio("https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav");
-      ringtoneRef.current.loop = true;
-      ringtoneRef.current.play().catch((err) => console.log("Audio play error:", err));
+    let intervalId = null;
+    let audioCtx = null;
+
+    const playTone = (freq, duration, type = "sine", delay = 0, gainVal = 0.2) => {
+      if (!audioCtx) return;
+      
+      setTimeout(() => {
+        if (!audioCtx || audioCtx.state === "closed") return;
+        if (audioCtx.state === "suspended") {
+          audioCtx.resume();
+        }
+
+        const now = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, now);
+
+        // Quick ramp up and exponential decay for clean chime sound
+        gainNode.gain.setValueAtTime(0, now);
+        gainNode.gain.linearRampToValueAtTime(gainVal, now + 0.05);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        osc.start(now);
+        osc.stop(now + duration);
+      }, delay);
+    };
+
+    const startRingtone = () => {
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioContextClass();
+
+        const triggerIncomingPattern = () => {
+          // Beautiful high-quality electronic dual-chime chord (440Hz + 880Hz)
+          playTone(440, 1.2, "sine", 0, 0.25);
+          playTone(880, 1.2, "sine", 0, 0.15);
+          
+          // Second ring pulse after 300ms
+          playTone(440, 1.2, "sine", 300, 0.25);
+          playTone(880, 1.2, "sine", 300, 0.15);
+        };
+
+        const triggerOutgoingPattern = () => {
+          // Outgoing ringback tone: 400Hz + 450Hz sine wave
+          playTone(400, 1.5, "sine", 0, 0.15);
+          playTone(450, 1.5, "sine", 0, 0.15);
+        };
+
+        if (callState === "incoming") {
+          triggerIncomingPattern();
+          intervalId = setInterval(triggerIncomingPattern, 3000);
+        } else if (callState === "ringing") {
+          triggerOutgoingPattern();
+          intervalId = setInterval(triggerOutgoingPattern, 4000);
+        }
+      } catch (err) {
+        console.error("Failed to initialize ringtone player:", err);
+      }
+    };
+
+    if (callState === "incoming" || callState === "ringing") {
+      startRingtone();
     }
 
     return () => {
-      if (ringtoneRef.current) {
-        ringtoneRef.current.pause();
-        ringtoneRef.current = null;
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+      if (audioCtx) {
+        audioCtx.close().catch(() => {});
       }
     };
   }, [callState]);
