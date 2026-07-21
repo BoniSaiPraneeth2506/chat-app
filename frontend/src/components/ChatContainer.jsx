@@ -276,6 +276,12 @@ const ChatContainer = () => {
           ref={scrollableRef}
           onScroll={handleScroll}
           onClick={() => { setMobileActionId(null); setMobileEmojiId(null); }}
+          onTouchStart={(e) => {
+            if (!e.target.closest(".chat-bubble")) {
+              setMobileActionId(null);
+              setMobileEmojiId(null);
+            }
+          }}
           className="flex-1 p-4 space-y-4 overflow-y-auto transition-all"
           style={getWallpaperStyle(activeWallpaper, theme)}
         >
