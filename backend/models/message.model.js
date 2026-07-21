@@ -70,7 +70,16 @@ const messageSchema = new Schema(
     isForwarded: {
       type: Boolean,
       default: false
-    }
+    },
+    isOneView: {
+      type: Boolean,
+      default: false
+    },
+    viewedBy: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: []
+    }]
   },
   { timestamps: true }
 );

@@ -90,6 +90,17 @@ export const useChatStore = create((set, get) => ({
   replyingToMessage: null,
   editingMessage: null,
   showArchivedOnly: false,
+  isSelectionMode: false,
+  selectedMessageIds: [],
+  setSelectionMode: (isSelectionMode) => set({ isSelectionMode, selectedMessageIds: [] }),
+  toggleMessageSelection: (messageId) => set((state) => {
+    const isSelected = state.selectedMessageIds.includes(messageId);
+    const updated = isSelected 
+      ? state.selectedMessageIds.filter(id => id !== messageId)
+      : [...state.selectedMessageIds, messageId];
+    return { selectedMessageIds: updated };
+  }),
+  clearMessageSelection: () => set({ selectedMessageIds: [] }),
 
   // Calling features states
   callState: null,
@@ -112,6 +123,11 @@ export const useChatStore = create((set, get) => ({
 
   lightboxImage: null,
   setLightboxImage: (lightboxImage) => set({ lightboxImage }),
+
+  drafts: {},
+  setDraft: (userId, text) => set((state) => ({
+    drafts: { ...state.drafts, [userId]: text }
+  })),
 
   setMessageSearchQuery: (query) => set({ messageSearchQuery: query }),
   setReplyingToMessage: (message) => set({ replyingToMessage: message }),
@@ -535,6 +551,15 @@ export const useChatStore = create((set, get) => ({
         });
       }
     });
+
+    // Handle view-once message viewed real-time update
+    socket.on("messageViewed", ({ messageId, viewedBy }) => {
+      set((state) => ({
+        messages: state.messages.map((msg) =>
+          msg._id === messageId ? { ...msg, viewedBy } : msg
+        )
+      }));
+    });
   },
 
   unsubscribeFromMessages: () => {
@@ -554,6 +579,7 @@ export const useChatStore = create((set, get) => ({
       socket.off("iceCandidate");
       socket.off("messagePinned");
       socket.off("chatWallpaperUpdate");
+      socket.off("messageViewed");
     }
   },
 
@@ -673,6 +699,43 @@ export const useChatStore = create((set, get) => ({
       toast.success("Conversation cleared successfully");
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to clear history");
+    }
+  },
+
+  viewOneViewMessage: async (messageId) => {
+    try {
+      const res = await axiosInstance.post(`/messages/view-once/${messageId}`);
+      set((state) => ({
+        messages: state.messages.map((msg) =>
+          msg._id === messageId ? res.data : msg
+        )
+      }));
+    } catch (error) {
+      console.error("Failed to view one-view message:", error);
+    }
+  },
+
+  deleteMessagesBulk: async (messageIds, type) => {
+    try {
+      await axiosInstance.post("/messages/delete-bulk", { messageIds, type });
+      if (type === "me") {
+        set((state) => ({
+          messages: state.messages.filter((msg) => !messageIds.includes(msg._id))
+        }));
+        toast.success("Selected messages deleted for you");
+      } else {
+        set((state) => ({
+          messages: state.messages.map((msg) =>
+            messageIds.includes(msg._id) 
+              ? { ...msg, isDeletedForEveryone: true, text: "", image: "", reactions: [] } 
+              : msg
+          )
+        }));
+        toast.success("Selected messages deleted for everyone");
+      }
+      set({ isSelectionMode: false, selectedMessageIds: [] });
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to delete selected messages");
     }
   },
 

@@ -75,7 +75,7 @@
 // };
 // export default ChatHeader;
 
-import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image } from "lucide-react";
+import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image, CheckSquare } from "lucide-react";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
 import { useState } from "react";
@@ -121,7 +121,9 @@ const ChatHeader = () => {
     startCall,
     toggleBlockUser,
     setConversationWallpaper,
-    setLightboxImage
+    setLightboxImage,
+    isSelectionMode,
+    setSelectionMode
   } = useChatStore();
   const { onlineUsers, authUser } = useAuthStore();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -279,6 +281,15 @@ const ChatHeader = () => {
               <Search size={18} />
             </button>
 
+            {/* Select Messages Toggle Button */}
+            <button 
+              onClick={() => setSelectionMode(!isSelectionMode)} 
+              className={`hidden sm:flex p-2 rounded-full transition-colors ${isSelectionMode ? "bg-primary text-primary-content" : "hover:bg-base-200 text-base-content/70 hover:text-primary"}`}
+              title="Select Messages"
+            >
+              <CheckSquare size={18} />
+            </button>
+
             {/* Three Dots More Options Menu (Right of Search) */}
             <div className="dropdown dropdown-bottom dropdown-end">
               <div
@@ -318,6 +329,7 @@ const ChatHeader = () => {
                           reader.onloadend = () => {
                             setPendingWallpaper(reader.result);
                             setDimLevel(35);
+                            document.activeElement.blur();
                           };
                           reader.readAsDataURL(file);
                         }
@@ -334,7 +346,10 @@ const ChatHeader = () => {
                 ].map((wp) => (
                   <li key={wp.id}>
                     <button
-                      onClick={() => setConversationWallpaper(wp.id)}
+                      onClick={() => {
+                        setConversationWallpaper(wp.id);
+                        document.activeElement.blur();
+                      }}
                       className="flex items-center justify-between py-1.5 px-3 rounded-lg hover:bg-base-200 text-xs transition-colors"
                     >
                       <div className="flex items-center gap-2">
@@ -348,9 +363,24 @@ const ChatHeader = () => {
                   </li>
                 ))}
 
+                <div className="divider my-1"></div>
+                <li>
+                  <button
+                    onClick={() => {
+                      setSelectionMode(!isSelectionMode);
+                      document.activeElement.blur();
+                    }}
+                    className="flex items-center gap-2 py-1.5 px-3 rounded-lg text-xs hover:bg-base-200 transition-colors text-base-content"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="size-3.5 text-base-content/75" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                    </svg>
+                    <span>{isSelectionMode ? "Cancel Selection" : "Select Messages"}</span>
+                  </button>
+                </li>
+
                 {!isSelf && (
                   <>
-                    <div className="divider my-1"></div>
                     <li>
                       <button
                         onClick={() => {
@@ -359,6 +389,7 @@ const ChatHeader = () => {
                           } else {
                             setShowBlockConfirm(true);
                           }
+                          document.activeElement.blur();
                         }}
                         className={`flex items-center gap-2 py-1.5 px-3 rounded-lg text-xs transition-colors ${
                           authUser?.blockedUsers?.includes(selectedUser?._id)

@@ -174,7 +174,7 @@ const getMessages = async (req, res) => {
 const sendMessage = async (req, res) => {
   try {
     const { id: receiverId } = req.params;
-    const { text, image, voice, replyTo, isForwarded } = req.body;
+    const { text, image, voice, replyTo, isForwarded, isOneView } = req.body;
     const senderId = req.user._id;
 
     // Check block list
@@ -226,7 +226,8 @@ const sendMessage = async (req, res) => {
       voice: voiceUrl || undefined,
       deleteAt,
       replyTo: replyTo || null,
-      isForwarded: isForwarded || false
+      isForwarded: isForwarded || false,
+      isOneView: isOneView || false
     });
 
     await newMessage.save();
@@ -649,6 +650,101 @@ const updateChatWallpaper = async (req, res) => {
   }
 };
 
+const viewOneViewMessage = async (req, res) => {
+  try {
+    const { id: messageId } = req.params;
+    const userId = req.user._id;
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    if (!message.isOneView) {
+      return res.status(400).json({ message: "Not a view once message" });
+    }
+
+    if (!message.viewedBy) {
+      message.viewedBy = [];
+    }
+
+    const userIdStr = userId.toString();
+    const viewedByStrs = message.viewedBy.map(id => id.toString());
+
+    if (!viewedByStrs.includes(userIdStr)) {
+      message.viewedBy.push(userId);
+      await message.save();
+
+      // Emit real-time viewed status via socket to both participants
+      const senderSocketId = getReceiverSocketId(message.senderId.toString());
+      const receiverSocketId = getReceiverSocketId(message.receiverId.toString());
+
+      const updatePayload = { messageId: message._id, viewedBy: message.viewedBy.map(id => id.toString()) };
+
+      if (senderSocketId) io.to(senderSocketId).emit("messageViewed", updatePayload);
+      if (receiverSocketId) io.to(receiverSocketId).emit("messageViewed", updatePayload);
+    }
+
+    res.status(200).json(message);
+  } catch (error) {
+    console.error("Error in viewOneViewMessage:", error);
+    res.status(500).json({ message: "Failed to view message" });
+  }
+};
+
+const deleteMessagesBulk = async (req, res) => {
+  try {
+    const { messageIds, type } = req.body; // type: "me" or "everyone"
+    const userId = req.user._id;
+
+    if (!Array.isArray(messageIds) || messageIds.length === 0) {
+      return res.status(400).json({ message: "No messages selected" });
+    }
+
+    if (type === "me") {
+      // Add user to deletedFor list in all selected messages
+      await Message.updateMany(
+        { _id: { $in: messageIds } },
+        { $addToSet: { deletedFor: userId } }
+      );
+    } else {
+      // Delete for everyone: verify sender ownership and delete
+      // We will update isDeletedForEveryone to true and clear attachments
+      const messages = await Message.find({ _id: { $in: messageIds }, senderId: userId });
+      const validIds = messages.map((m) => m._id);
+
+      await Message.updateMany(
+        { _id: { $in: validIds } },
+        {
+          $set: {
+            isDeletedForEveryone: true,
+            text: "",
+            image: "",
+            voice: "",
+            reactions: []
+          }
+        }
+      );
+
+      // Emit socket event to update everyone
+      messages.forEach((msg) => {
+        const receiverSocketId = getReceiverSocketId(msg.receiverId.toString());
+        const senderSocketId = getReceiverSocketId(msg.senderId.toString());
+
+        const payload = { messageId: msg._id, isDeletedForEveryone: true };
+
+        if (receiverSocketId) io.to(receiverSocketId).emit("messageDeleted", payload);
+        if (senderSocketId) io.to(senderSocketId).emit("messageDeleted", payload);
+      });
+    }
+
+    res.status(200).json({ message: "Messages deleted successfully" });
+  } catch (error) {
+    console.error("Error in deleteMessagesBulk:", error);
+    res.status(500).json({ message: "Failed to delete messages in bulk" });
+  }
+};
+
 export { 
   getUsersForSidebar, 
   getMessages, 
@@ -662,5 +758,7 @@ export {
   toggleBlockUser,
   createCallLog,
   togglePinMessage,
-  updateChatWallpaper
+  updateChatWallpaper,
+  viewOneViewMessage,
+  deleteMessagesBulk
 };

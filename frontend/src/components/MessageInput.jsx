@@ -7,6 +7,7 @@ import toast from "react-hot-toast";
 const MessageInput = () => {
   const [text, setText] = useState("");
   const [imagePreview, setImagePreview] = useState(null);
+  const [isOneView, setIsOneView] = useState(false);
   const fileInputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
 
@@ -25,18 +26,27 @@ const MessageInput = () => {
     setEditingMessage,
     editMessage,
     sendTypingStatus, 
-    selectedUser 
+    selectedUser,
+    drafts,
+    setDraft
   } = useChatStore();
   const { authUser } = useAuthStore();
 
   const isBlocked = authUser?.blockedUsers?.includes(selectedUser?._id);
 
+  // Load draft when switching users
+  useEffect(() => {
+    if (selectedUser) {
+      setText(drafts[selectedUser._id] || "");
+    } else {
+      setText("");
+    }
+  }, [selectedUser]);
+
   useEffect(() => {
     if (editingMessage) {
       setText(editingMessage.text || "");
       if (replyingToMessage) setReplyingToMessage(null); // Cancel reply if editing
-    } else {
-      setText("");
     }
   }, [editingMessage]);
 
@@ -84,11 +94,16 @@ const MessageInput = () => {
 
   const removeImage = () => {
     setImagePreview(null);
+    setIsOneView(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleTextChange = (e) => {
-    setText(e.target.value);
+    const val = e.target.value;
+    setText(val);
+    if (selectedUser) {
+      setDraft(selectedUser._id, val);
+    }
 
     // Emit typing status to socket
     sendTypingStatus(true);
@@ -115,12 +130,17 @@ const MessageInput = () => {
         await sendMessage({
           text: text.trim(),
           image: imagePreview,
+          isOneView: isOneView
         });
       }
 
-      // Clear form
+      // Clear form & draft
       setText("");
+      if (selectedUser) {
+        setDraft(selectedUser._id, "");
+      }
       setImagePreview(null);
+      setIsOneView(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (error) {
       console.error("Failed to send message:", error);
@@ -264,6 +284,19 @@ const MessageInput = () => {
               type="button"
             >
               <X className="size-3" />
+            </button>
+            <button
+              onClick={() => setIsOneView(!isOneView)}
+              className={`absolute -bottom-1.5 -right-1.5 w-6 h-6 rounded-full flex items-center justify-center shadow-md font-bold text-xs transition-all border select-none
+                ${isOneView 
+                  ? "bg-emerald-500 text-white border-emerald-600 ring-2 ring-emerald-500/20 scale-110" 
+                  : "bg-base-300 text-base-content border-base-300 hover:bg-base-200"
+                }
+              `}
+              title={isOneView ? "View Once Photo enabled" : "Set as View Once Photo"}
+              type="button"
+            >
+              1
             </button>
           </div>
         </div>

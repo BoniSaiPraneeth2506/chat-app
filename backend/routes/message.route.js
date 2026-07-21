@@ -13,7 +13,9 @@ import {
   toggleBlockUser,
   createCallLog,
   togglePinMessage,
-  updateChatWallpaper
+  updateChatWallpaper,
+  viewOneViewMessage,
+  deleteMessagesBulk
 } from "../controllers/message.controller.js";
 
 const router=express.Router();
@@ -29,6 +31,8 @@ router.post('/block/:id',protectRoute,toggleBlockUser)
 router.post('/call-log',protectRoute,createCallLog)
 router.put('/pin/:id',protectRoute,togglePinMessage)
 router.post('/wallpaper/:id',protectRoute,updateChatWallpaper)
+router.post('/view-once/:id',protectRoute,viewOneViewMessage)
+router.post('/delete-bulk',protectRoute,deleteMessagesBulk)
 router.delete('/:id',protectRoute,deleteMessage)
 router.delete('/clear/:id',protectRoute,clearChatHistory)
 
