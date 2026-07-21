@@ -659,13 +659,10 @@ export const useChatStore = create((set, get) => ({
 
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
-      const remoteStream = new MediaStream();
-      set({ remoteStream });
-
       pc.ontrack = (event) => {
-        event.streams[0].getTracks().forEach((track) => {
-          remoteStream.addTrack(track);
-        });
+        if (event.streams && event.streams[0]) {
+          set({ remoteStream: event.streams[0] });
+        }
       };
 
       pc.onicecandidate = (event) => {
@@ -724,13 +721,10 @@ export const useChatStore = create((set, get) => ({
 
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
-      const remoteStream = new MediaStream();
-      set({ remoteStream });
-
       pc.ontrack = (event) => {
-        event.streams[0].getTracks().forEach((track) => {
-          remoteStream.addTrack(track);
-        });
+        if (event.streams && event.streams[0]) {
+          set({ remoteStream: event.streams[0] });
+        }
       };
 
       pc.onicecandidate = (event) => {
