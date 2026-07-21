@@ -360,6 +360,104 @@ const ChatContainer = () => {
                     </div>
                   )}
 
+                  {/* ── Mobile: emoji bar — long press (inline near message) ── */}
+                  {mobileEmojiId === message._id && (
+                    <div 
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute right-0 top-[-38px] lg:hidden animate-in zoom-in-95 duration-150 flex items-center bg-base-200 border border-base-300 rounded-full px-2 py-1 shadow-lg z-30 gap-1.5"
+                    >
+                      {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((emoji) => (
+                        <button 
+                          key={emoji} 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            toggleReaction(message._id, emoji); 
+                            setMobileEmojiId(null); 
+                          }} 
+                          className="text-base active:scale-125 transition-transform"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── Mobile: action bar — single tap (inline near message) ── */}
+                  {mobileActionId === message._id && (
+                    <div 
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute right-0 top-[-38px] lg:hidden animate-in zoom-in-95 duration-150 flex items-center bg-base-200 border border-base-300 rounded-full px-2 py-1 shadow-lg z-30 gap-1.5"
+                    >
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setReplyingToMessage(message); setMobileActionId(null); }} 
+                        className="text-base-content/70 active:text-primary transition-colors flex items-center p-0.5" 
+                        title="Reply"
+                      >
+                        <CornerUpLeft size={13} />
+                      </button>
+                      {!message.isDeletedForEveryone && (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); setForwardingMessage(message); setMobileActionId(null); }} 
+                          className="text-base-content/70 active:text-primary transition-colors flex items-center p-0.5" 
+                          title="Forward"
+                        >
+                          <Forward size={13} />
+                        </button>
+                      )}
+                      {message.senderId === authUser?._id && !message.isDeletedForEveryone && message.text && (Date.now() - new Date(message.createdAt).getTime() <= 15 * 60 * 1000) && (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); setEditingMessage(message); setMobileActionId(null); }} 
+                          className="text-base-content/70 active:text-primary transition-colors flex items-center p-0.5" 
+                          title="Edit"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                      )}
+                      {!message.isDeletedForEveryone && (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); togglePinMessage(message._id); setMobileActionId(null); }} 
+                          className={`transition-colors flex items-center p-0.5 ${message.isPinned ? "text-amber-500" : "text-base-content/70 active:text-amber-500"}`} 
+                          title={message.isPinned ? "Unpin" : "Pin"}
+                        >
+                          <Pin size={13} />
+                        </button>
+                      )}
+                      {!message.isDeletedForEveryone && (
+                        <div className="dropdown dropdown-bottom dropdown-end flex items-center">
+                          <div 
+                            tabIndex={0} 
+                            role="button" 
+                            onClick={(e) => e.stopPropagation()} 
+                            className="text-base-content/70 active:text-red-500 transition-colors flex items-center p-0.5 cursor-pointer" 
+                            title="Delete"
+                          >
+                            <Trash2 size={13} />
+                          </div>
+                          <ul tabIndex={0} className="dropdown-content z-50 menu p-1 shadow-xl bg-base-100 border border-base-300 rounded-box w-36 text-xs text-base-content mt-1">
+                            <li>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); deleteMessage(message._id, "me"); setMobileActionId(null); }} 
+                                className="hover:bg-base-200 py-1.5 text-left font-medium"
+                              >
+                                Delete for me
+                              </button>
+                            </li>
+                            {message.senderId === authUser._id && (
+                              <li>
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); deleteMessage(message._id, "everyone"); setMobileActionId(null); }} 
+                                  className="hover:bg-red-500 hover:text-white py-1.5 text-left font-medium text-red-500"
+                                >
+                                  Delete for everyone
+                                </button>
+                              </li>
+                            )}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* ── Desktop: full hover bar (emojis + actions) ── */}
                   <div className="absolute right-0 top-[-30px] opacity-0 group-hover:opacity-100 transition-all duration-200 hidden lg:flex items-center bg-base-200 border border-base-300 rounded-full px-2 py-1 shadow-md z-10 gap-1.5 pointer-events-auto">
                     {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((emoji) => (
@@ -542,117 +640,6 @@ const ChatContainer = () => {
           </div>
         </div>
       )}
-      {/* Mobile Emoji Bar Overlay */}
-      {mobileEmojiId && (
-        <div
-          className="fixed inset-0 z-[150] bg-black/30 backdrop-blur-[1px] lg:hidden flex items-end justify-center p-4 animate-in fade-in duration-150"
-          onClick={() => setMobileEmojiId(null)}
-        >
-          <div
-            className="bg-base-100 border border-base-300 rounded-full px-4 py-3 shadow-2xl flex items-center gap-3 animate-in slide-in-from-bottom duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((emoji) => (
-              <button
-                key={emoji}
-                onClick={() => {
-                  toggleReaction(mobileEmojiId, emoji);
-                  setMobileEmojiId(null);
-                }}
-                className="text-2xl active:scale-125 transition-transform"
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Mobile Action Bar Overlay */}
-      {mobileActionId && (
-        <div
-          className="fixed inset-0 z-[150] bg-black/30 backdrop-blur-[1px] lg:hidden flex items-end justify-center p-4 animate-in fade-in duration-150"
-          onClick={() => setMobileActionId(null)}
-        >
-          <div
-            className="bg-base-100 border border-base-300 rounded-2xl p-3 shadow-2xl flex items-center justify-around w-full max-w-xs animate-in slide-in-from-bottom duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {(() => {
-              const msg = messages.find((m) => m._id === mobileActionId);
-              if (!msg) return null;
-              return (
-                <>
-                  <button
-                    onClick={() => {
-                      setReplyingToMessage(msg);
-                      setMobileActionId(null);
-                    }}
-                    className="flex flex-col items-center gap-1 text-xs text-base-content/70 active:text-primary"
-                  >
-                    <CornerUpLeft size={18} />
-                    <span>Reply</span>
-                  </button>
-                  {!msg.isDeletedForEveryone && (
-                    <button
-                      onClick={() => {
-                        setForwardingMessage(msg);
-                        setMobileActionId(null);
-                      }}
-                      className="flex flex-col items-center gap-1 text-xs text-base-content/70 active:text-primary"
-                    >
-                      <Forward size={18} />
-                      <span>Forward</span>
-                    </button>
-                  )}
-                  {msg.senderId === authUser?._id &&
-                    !msg.isDeletedForEveryone &&
-                    msg.text &&
-                    Date.now() - new Date(msg.createdAt).getTime() <= 15 * 60 * 1000 && (
-                      <button
-                        onClick={() => {
-                          setEditingMessage(msg);
-                          setMobileActionId(null);
-                        }}
-                        className="flex flex-col items-center gap-1 text-xs text-base-content/70 active:text-primary"
-                      >
-                        <Pencil size={18} />
-                        <span>Edit</span>
-                      </button>
-                    )}
-                  {!msg.isDeletedForEveryone && (
-                    <button
-                      onClick={() => {
-                        togglePinMessage(msg._id);
-                        setMobileActionId(null);
-                      }}
-                      className={`flex flex-col items-center gap-1 text-xs ${
-                        msg.isPinned ? "text-amber-500" : "text-base-content/70 active:text-amber-500"
-                      }`}
-                    >
-                      <Pin size={18} />
-                      <span>{msg.isPinned ? "Unpin" : "Pin"}</span>
-                    </button>
-                  )}
-                  {!msg.isDeletedForEveryone && (
-                    <button
-                      onClick={() => {
-                        deleteMessage(msg._id, "me");
-                        setMobileActionId(null);
-                      }}
-                      className="flex flex-col items-center gap-1 text-xs text-red-500 active:text-red-600"
-                    >
-                      <Trash2 size={18} />
-                      <span>Delete</span>
-                    </button>
-                  )}
-                </>
-              );
-            })()}
-          </div>
-        </div>
-      )}
-
       {/* Forward Modal */}
       {forwardingMessage && (
         <ForwardModal
