@@ -303,32 +303,6 @@ export const useChatStore = create((set, get) => ({
           console.error("Failed to play notification sound:", err);
         }
       }
-
-      // Web Push Notification logic (if tab is hidden or message from unselected user)
-      if (typeof window !== "undefined" && "Notification" in window) {
-        if (Notification.permission === "granted" && (document.hidden || !selectedUser || selectedUser._id !== newMessage.senderId)) {
-          const sender = get().users.find((u) => u._id === newMessage.senderId);
-          const senderName = sender ? sender.fullName : "New Message";
-          const bodyText = newMessage.image ? "📷 Photo" : newMessage.voice ? "🎙️ Voice Message" : newMessage.text || "Sent a message";
-          
-          try {
-            const notif = new Notification(senderName, {
-              body: bodyText,
-              icon: sender?.profilePic || "/avatar.png",
-              tag: newMessage.senderId, // Groups notifications per sender
-            });
-            notif.onclick = () => {
-              window.focus();
-              if (sender) get().setSelectedUser(sender);
-              notif.close();
-            };
-          } catch (e) {
-            console.log("Push notification error:", e);
-          }
-        } else if (Notification.permission === "default") {
-          Notification.requestPermission();
-        }
-      }
       
       // Update latest message for the sender
       set((state) => ({
