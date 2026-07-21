@@ -120,7 +120,8 @@ const ChatHeader = () => {
     typingUsers,
     startCall,
     toggleBlockUser,
-    setConversationWallpaper
+    setConversationWallpaper,
+    setLightboxImage
   } = useChatStore();
   const { onlineUsers, authUser } = useAuthStore();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -191,7 +192,13 @@ const ChatHeader = () => {
                 className="flex items-center gap-3 cursor-pointer select-none group"
               >
                 {/* Avatar */}
-                <div className="avatar group-hover:opacity-90 transition-opacity">
+                <div 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLightboxImage(selectedUser.profilePic || "/avatar.png");
+                  }}
+                  className="avatar hover:opacity-80 transition-opacity cursor-zoom-in"
+                >
                   <div className="relative rounded-full size-10">
                     <img src={selectedUser.profilePic || "/avatar.png"} alt={selectedUser.fullName} />
                   </div>

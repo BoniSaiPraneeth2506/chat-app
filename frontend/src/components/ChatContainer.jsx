@@ -47,6 +47,7 @@ const ChatContainer = () => {
     deleteMessage,
     pinnedMessage,
     togglePinMessage,
+    setLightboxImage,
   } = useChatStore();
   const { authUser, onlineUsers } = useAuthStore();
   const { theme, wallpaper, privacyReadReceipts } = useThemeStore();
@@ -438,7 +439,8 @@ const ChatContainer = () => {
               <img 
                 src={selectedUser.profilePic || "/avatar.png"} 
                 alt={selectedUser.fullName}
-                className="object-cover border-4 border-base-200 rounded-full size-28 shadow-md"
+                onClick={() => setLightboxImage(selectedUser.profilePic || "/avatar.png")}
+                className="object-cover border-4 border-base-200 rounded-full size-28 shadow-md cursor-zoom-in hover:opacity-90 transition-opacity"
               />
               <h2 className="font-semibold text-lg text-base-content mt-3">{selectedUser.fullName}</h2>
               <span className="text-xs text-base-content/50 select-all">{selectedUser.email}</span>

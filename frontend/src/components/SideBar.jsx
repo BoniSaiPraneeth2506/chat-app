@@ -386,7 +386,8 @@ const SideBar = () => {
     latestMessages, 
     unreadCounts, 
     lastReadTimestamps,
-    clearChatHistory 
+    clearChatHistory,
+    setProfilePreviewUser
   } = useChatStore();
   const { onlineUsers, authUser } = useAuthStore();
   const [searchTerm, setSearchTerm] = useState("");
@@ -556,7 +557,6 @@ const SideBar = () => {
     return <SingleCheck className="w-[13px] h-[13px] text-zinc-400 flex-shrink-0" />;
   };
 
-  if (isUsersLoading) return <SidebarSkeleton />;
 
   return (
     <aside
@@ -614,156 +614,178 @@ const SideBar = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {/* Archived Chats Header/Toggle row */}
-        {showArchivedOnly ? (
-          <div className="w-full px-4 py-3 flex items-center gap-3 bg-base-200 select-none">
-            <button
-              onClick={() => setShowArchivedOnly(false)}
-              className="p-1 hover:bg-base-300 rounded-full transition-colors"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="size-4 text-base-content" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
-            </button>
-            <span className="font-semibold text-xs text-base-content">Archived Chats</span>
-          </div>
+        {isUsersLoading ? (
+          Array(8).fill(null).map((_, idx) => (
+            <div key={idx} className="flex items-center w-full gap-3 py-3.5 px-4 animate-pulse">
+              <div className="relative mx-0 flex-shrink-0">
+                <div className="rounded-full bg-base-300 size-12" />
+              </div>
+              <div className="flex-1 min-w-0 text-left space-y-2">
+                <div className="w-32 h-4 bg-base-300 rounded" />
+                <div className="w-16 h-3 bg-base-300 rounded" />
+              </div>
+            </div>
+          ))
         ) : (
-          archivedUsers.length > 0 && (
-            <button
-              onClick={() => setShowArchivedOnly(true)}
-              className="w-full px-4 py-3.5 flex items-center justify-between hover:bg-base-200/40 transition-colors select-none"
-            >
-              <div className="flex items-center gap-3">
-                <svg xmlns="http://www.w3.org/2000/svg" className="size-4.5 text-neutral" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                </svg>
-                <span className="font-semibold text-xs text-base-content">Archived</span>
+          <>
+            {/* Archived Chats Header/Toggle row */}
+            {showArchivedOnly ? (
+              <div className="w-full px-4 py-3 flex items-center gap-3 bg-base-200 select-none">
+                <button
+                  onClick={() => setShowArchivedOnly(false)}
+                  className="p-1 hover:bg-base-300 rounded-full transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="size-4 text-base-content" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                  </svg>
+                </button>
+                <span className="font-semibold text-xs text-base-content">Archived Chats</span>
               </div>
-              <span className="text-xs font-semibold text-primary">{archivedUsers.length}</span>
-            </button>
-          )
-        )}
+            ) : (
+              archivedUsers.length > 0 && (
+                <button
+                  onClick={() => setShowArchivedOnly(true)}
+                  className="w-full px-4 py-3.5 flex items-center justify-between hover:bg-base-200/40 transition-colors select-none"
+                >
+                  <div className="flex items-center gap-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="size-4.5 text-neutral" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                    </svg>
+                    <span className="font-semibold text-xs text-base-content">Archived</span>
+                  </div>
+                  <span className="text-xs font-semibold text-primary">{archivedUsers.length}</span>
+                </button>
+              )
+            )}
 
-        {/* Personal Notes (Self-Chat) */}
-        {!showArchivedOnly && (!searchTerm || "personal notes drafts you".includes(searchTerm.toLowerCase())) && (
-          <button
-            onClick={() => setSelectedUser(authUser)}
-            className={`w-full py-3.5 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors group select-none
-              ${selectedUser?._id === authUser?._id ? "bg-base-200/80" : ""}
-            `}
-          >
-            <div className="relative flex-shrink-0">
-              <div className="size-12 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
-                <Bookmark className="size-5" />
-              </div>
-            </div>
-            <div className="min-w-0 flex-1 text-left">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-base-content truncate">Personal Notes (You)</span>
-              </div>
-              <div className="text-sm text-base-content/60 truncate">
-                {latestMessages[authUser?._id] ? (
-                  latestMessages[authUser?._id].text || "📷 Image"
-                ) : (
-                  <span className="text-base-content/40 italic">Drafts, links, ideas...</span>
-                )}
-              </div>
-            </div>
-          </button>
-        )}
-
-        {sortedUsers.map((user) => (
-          <button
-            key={user._id}
-            onClick={() => {
-              setSelectedUser(user);
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              setContextMenu({
-                x: e.clientX,
-                y: e.clientY,
-                userId: user._id
-              });
-            }}
-            onTouchStart={(e) => handleTouchStart(user._id, e)}
-            onTouchEnd={handleTouchEnd}
-            onTouchMove={handleTouchEnd}
-            className={`w-full py-3.5 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors group select-none
-              ${
-                selectedUser?._id === user._id
-                  ? "bg-base-200/80"
-                  : ""
-              }
-            `}
-          >
-            {/* Avatar and Online Indicator */}
-            <div className="relative flex-shrink-0">
-              <img
-                src={user.profilePic || "/avatar.png"}
-                alt={user.fullName}
-                className="object-cover rounded-full size-12"
-              />
-              {onlineUsers.includes(user._id) && (
-                <span className="absolute bottom-0 right-0 bg-green-500 rounded-full size-3 ring-2 ring-zinc-900" />
-              )}
-            </div>
-
-            {/* User Details */}
-            <div className="min-w-0 flex-1">
-              {/* Row 1: Name & Time */}
-              <div className="flex items-center justify-between">
-                <div className="font-medium truncate text-base-content flex items-center gap-1.5 min-w-0">
-                  <span className="truncate">{user.fullName}</span>
-                  {favoriteUsers.includes(user._id) && (
-                    <Star className="size-3 text-yellow-500 fill-yellow-500 flex-shrink-0" />
-                  )}
+            {/* Personal Notes (Self-Chat) */}
+            {!showArchivedOnly && (!searchTerm || "personal notes drafts you".includes(searchTerm.toLowerCase())) && (
+              <button
+                onClick={() => setSelectedUser(authUser)}
+                className={`w-full py-3.5 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors group select-none
+                  ${selectedUser?._id === authUser?._id ? "bg-base-200/80" : ""}
+                `}
+              >
+                <div className="relative flex-shrink-0">
+                  <div className="size-12 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+                    <Bookmark className="size-5" />
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5 ml-1.5 flex-shrink-0">
-                  {pinnedUserIds.includes(user._id) && (
-                    <Pin className="size-3 text-base-content/35 rotate-45" />
-                  )}
-                  {latestMessages[user._id] && (
-                    <span className="text-xs text-base-content/50">
-                      {formatMessageTime(latestMessages[user._id].createdAt)}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Row 2: Latest Message & Unread Badge */}
-              <div className="flex items-center justify-between mt-0.5">
-                <div className="text-sm text-base-content/60 truncate pr-2 flex-1 text-left flex items-center gap-1">
-                  {latestMessages[user._id] && latestMessages[user._id].senderId === authUser?._id && (
-                    renderTicks(latestMessages[user._id])
-                  )}
-                  <span className="truncate">
-                    {latestMessages[user._id] ? (
-                      latestMessages[user._id].image ? (
-                        "📷 Image"
-                      ) : (
-                        latestMessages[user._id].text
-                      )
+                <div className="min-w-0 flex-1 text-left">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-base-content truncate">Personal Notes (You)</span>
+                  </div>
+                  <div className="text-sm text-base-content/60 truncate">
+                    {latestMessages[authUser?._id] ? (
+                      latestMessages[authUser?._id].text || "📷 Image"
                     ) : (
-                      <span className="text-base-content/40 italic">No messages</span>
+                      <span className="text-base-content/40 italic">Drafts, links, ideas...</span>
                     )}
-                  </span>
+                  </div>
+                </div>
+              </button>
+            )}
+
+            {sortedUsers.map((user) => (
+              <button
+                key={user._id}
+                onClick={() => {
+                  setSelectedUser(user);
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setContextMenu({
+                    x: e.clientX,
+                    y: e.clientY,
+                    userId: user._id
+                  });
+                }}
+                onTouchStart={(e) => handleTouchStart(user._id, e)}
+                onTouchEnd={handleTouchEnd}
+                onTouchMove={handleTouchEnd}
+                className={`w-full py-3.5 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors group select-none
+                  ${
+                    selectedUser?._id === user._id
+                      ? "bg-base-200/80"
+                      : ""
+                  }
+                `}
+              >
+                {/* Avatar and Online Indicator */}
+                <div 
+                  className="relative flex-shrink-0 cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setProfilePreviewUser(user);
+                  }}
+                >
+                  <img
+                    src={user.profilePic || "/avatar.png"}
+                    alt={user.fullName}
+                    className="object-cover rounded-full size-12 hover:opacity-90 active:scale-95 transition-all"
+                  />
+                  {onlineUsers.includes(user._id) && (
+                    <span className="absolute bottom-0 right-0 bg-green-500 rounded-full size-3 ring-2 ring-zinc-900" />
+                  )}
                 </div>
 
-                {unreadCounts[user._id] > 0 && (
-                  <span className="flex items-center justify-center min-w-5 h-5 px-1.5 text-[10px] font-bold text-white bg-primary rounded-full flex-shrink-0">
-                    {unreadCounts[user._id]}
-                  </span>
-                )}
-              </div>
-            </div>
-          </button>
-        ))}
+                {/* User Details */}
+                <div className="min-w-0 flex-1">
+                  {/* Row 1: Name & Time */}
+                  <div className="flex items-center justify-between">
+                    <div className="font-medium truncate text-base-content flex items-center gap-1.5 min-w-0">
+                      <span className="truncate">{user.fullName}</span>
+                      {favoriteUsers.includes(user._id) && (
+                        <Star className="size-3 text-yellow-500 fill-yellow-500 flex-shrink-0" />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 ml-1.5 flex-shrink-0">
+                      {pinnedUserIds.includes(user._id) && (
+                        <Pin className="size-3 text-base-content/35 rotate-45" />
+                      )}
+                      {latestMessages[user._id] && (
+                        <span className="text-xs text-base-content/50">
+                          {formatMessageTime(latestMessages[user._id].createdAt)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
 
-        {sortedUsers.length === 0 && (
-          <div className="py-4 text-center text-zinc-500">
-            No users found
-          </div>
+                  {/* Row 2: Latest Message & Unread Badge */}
+                  <div className="flex items-center justify-between mt-0.5">
+                    <div className="text-sm text-base-content/60 truncate pr-2 flex-1 text-left flex items-center gap-1">
+                      {latestMessages[user._id] && latestMessages[user._id].senderId === authUser?._id && (
+                        renderTicks(latestMessages[user._id])
+                      )}
+                      <span className="truncate">
+                        {latestMessages[user._id] ? (
+                          latestMessages[user._id].image ? (
+                            "📷 Image"
+                          ) : (
+                            latestMessages[user._id].text
+                          )
+                        ) : (
+                          <span className="text-base-content/40 italic">No messages</span>
+                        )}
+                      </span>
+                    </div>
+
+                    {unreadCounts[user._id] > 0 && (
+                      <span className="flex items-center justify-center min-w-5 h-5 px-1.5 text-[10px] font-bold text-white bg-primary rounded-full flex-shrink-0">
+                        {unreadCounts[user._id]}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </button>
+            ))}
+
+            {sortedUsers.length === 0 && (
+              <div className="py-4 text-center text-zinc-500">
+                No users found
+              </div>
+            )}
+          </>
         )}
       </div>
 

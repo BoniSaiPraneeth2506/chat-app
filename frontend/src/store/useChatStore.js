@@ -107,6 +107,12 @@ export const useChatStore = create((set, get) => ({
   pinnedMessage: null,
   setPinnedMessage: (pinnedMessage) => set({ pinnedMessage }),
 
+  profilePreviewUser: null,
+  setProfilePreviewUser: (profilePreviewUser) => set({ profilePreviewUser }),
+
+  lightboxImage: null,
+  setLightboxImage: (lightboxImage) => set({ lightboxImage }),
+
   setMessageSearchQuery: (query) => set({ messageSearchQuery: query }),
   setReplyingToMessage: (message) => set({ replyingToMessage: message }),
   setEditingMessage: (message) => set({ editingMessage: message }),
