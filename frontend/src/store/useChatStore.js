@@ -149,7 +149,8 @@ export const useChatStore = create((set, get) => ({
   },
 
   getMessages: async (userId) => {
-    set({ isMessagesLoading: true, hasMoreMessages: true });
+    // Clear messages immediately so old chat doesn't flash while new one loads
+    set({ isMessagesLoading: true, hasMoreMessages: true, messages: [] });
     try {
       const limit = 20;
       const res = await axiosInstance.get(`/messages/${userId}?limit=${limit}&skip=0`);
@@ -226,6 +227,41 @@ export const useChatStore = create((set, get) => ({
       toast.error(error.response?.data?.message || error.message || "Failed to send message");
     }
   },
+
+  forwardMessage: async (message, recipientIds) => {
+    try {
+      // Build forward payload from original message content
+      const payload = { isForwarded: true };
+      if (!message.isDeletedForEveryone) {
+        if (message.text) payload.text = message.text;
+        if (message.image) payload.image = message.image;
+        if (message.voice) payload.voice = message.voice;
+      }
+
+      const results = await Promise.all(
+        recipientIds.map((id) => axiosInstance.post(`/messages/send/${id}`, payload))
+      );
+
+      // Update latestMessages and current chat messages for each forwarded recipient
+      results.forEach((res, idx) => {
+        const sentMsg = res.data;
+        const { selectedUser } = get();
+        set((state) => ({
+          latestMessages: { ...state.latestMessages, [recipientIds[idx]]: sentMsg },
+        }));
+        if (selectedUser && recipientIds[idx] === selectedUser._id) {
+          set((state) => ({ messages: [...state.messages, sentMsg] }));
+        }
+      });
+
+      toast.success(
+        `Forwarded to ${recipientIds.length} chat${recipientIds.length > 1 ? "s" : ""}`
+      );
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to forward message");
+    }
+  },
+
   subscribeToMessages: () => {
     const socket = useAuthStore.getState().socket;
     if (!socket) return;
@@ -522,7 +558,8 @@ export const useChatStore = create((set, get) => ({
   },
 
   setSelectedUser: (selectedUser) => {
-    set({ selectedUser, isRecipientProfileOpen: false, pinnedMessage: null });
+    // Clear messages immediately on user switch to prevent stale flash
+    set({ selectedUser, isRecipientProfileOpen: false, pinnedMessage: null, messages: [] });
     if (selectedUser) {
       set((state) => ({
         unreadCounts: {

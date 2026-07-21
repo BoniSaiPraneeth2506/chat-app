@@ -174,7 +174,7 @@ const getMessages = async (req, res) => {
 const sendMessage = async (req, res) => {
   try {
     const { id: receiverId } = req.params;
-    const { text, image, voice, replyTo } = req.body;
+    const { text, image, voice, replyTo, isForwarded } = req.body;
     const senderId = req.user._id;
 
     // Check block list
@@ -225,7 +225,8 @@ const sendMessage = async (req, res) => {
       image: imageUrl,
       voice: voiceUrl || undefined,
       deleteAt,
-      replyTo: replyTo || null
+      replyTo: replyTo || null,
+      isForwarded: isForwarded || false
     });
 
     await newMessage.save();

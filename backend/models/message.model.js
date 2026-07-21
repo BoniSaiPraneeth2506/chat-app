@@ -66,6 +66,10 @@ const messageSchema = new Schema(
     isPinned: {
       type: Boolean,
       default: false
+    },
+    isForwarded: {
+      type: Boolean,
+      default: false
     }
   },
   { timestamps: true }

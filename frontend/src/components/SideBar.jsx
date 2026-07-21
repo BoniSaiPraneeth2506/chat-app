@@ -560,11 +560,11 @@ const SideBar = () => {
 
   return (
     <aside
-      className={`flex flex-col h-full transition-all duration-300 border-r border-base-300 bg-base-100 w-full lg:w-72
+      className={`flex flex-col h-full transition-all duration-300 border-r border-base-300 bg-base-100 w-full
         ${selectedUser ? "hidden lg:flex" : "flex"}
       `}
     >
-      <div className="w-full pt-1.5 px-4 pb-3">
+      <div className="w-full pt-3 px-4 pb-3.5">
         {/* Search Bar */}
         <div className="relative w-full">
           <Search className="absolute -translate-y-1/2 left-4 top-1/2 size-4 text-base-content/40 pointer-events-none" />
@@ -586,7 +586,7 @@ const SideBar = () => {
         </div>
 
         {/* Filter Capsules */}
-        <div className="flex items-center gap-2 mt-3 overflow-x-auto no-scrollbar pb-0.5">
+        <div className="flex items-center gap-2 mt-3.5 overflow-x-auto no-scrollbar pb-0.5">
           {[
             { id: "all", label: "All" },
             { id: "unread", label: "Unread" },

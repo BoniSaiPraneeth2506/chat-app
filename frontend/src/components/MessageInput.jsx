@@ -202,7 +202,7 @@ const MessageInput = () => {
   }
 
   return (
-    <div className="w-full px-4 py-3 bg-base-200/50 flex flex-col gap-2 relative border-t border-base-300">
+    <div className="w-full px-4 py-3 bg-base-200/50 flex flex-col gap-2 relative border-t border-base-300 lg:border-t-0">
       {/* Quoted Reply Banner */}
       {replyingToMessage && (
         <div className="flex items-center justify-between bg-base-200/90 px-4 py-2 border-l-4 border-primary rounded-r-lg mb-1 relative text-left">

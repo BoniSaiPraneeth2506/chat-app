@@ -1,6 +1,7 @@
 import { useChatStore } from "../store/useChatStore";
-import { useEffect, useRef, useLayoutEffect } from "react";
-import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin } from "lucide-react";
+import { useEffect, useRef, useLayoutEffect, useState } from "react";
+import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward } from "lucide-react";
+import ForwardModal from "./ForwardModal";
 import { useThemeStore } from "../store/useThemeStore";
 import { getWallpaperStyle } from "../pages/SettingsPage";
 import CallModal from "./CallModal";
@@ -29,6 +30,29 @@ const DoubleCheck = ({ className }) => (
   </svg>
 );
 
+// ── Date separator helpers ──
+const getDateLabel = (dateStr) => {
+  const msgDate = new Date(dateStr);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (msgDate.toDateString() === today.toDateString()) return "Today";
+  if (msgDate.toDateString() === yesterday.toDateString()) return "Yesterday";
+  const diffDays = Math.floor((today - msgDate) / (1000 * 60 * 60 * 24));
+  if (diffDays < 7) return msgDate.toLocaleDateString("en-US", { weekday: "long" });
+  return msgDate.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+};
+
+const DateSeparator = ({ date }) => (
+  <div className="flex items-center gap-3 my-3 select-none px-2">
+    <div className="flex-1 h-px bg-base-300/50" />
+    <span className="text-[10px] font-medium text-base-content/40 bg-base-200/50 px-3 py-1 rounded-full whitespace-nowrap">
+      {getDateLabel(date)}
+    </span>
+    <div className="flex-1 h-px bg-base-300/50" />
+  </div>
+);
+
 const ChatContainer = () => {
   const {
     messages,
@@ -48,6 +72,8 @@ const ChatContainer = () => {
     pinnedMessage,
     togglePinMessage,
     setLightboxImage,
+    typingUsers,
+    users,
   } = useChatStore();
   const { authUser, onlineUsers } = useAuthStore();
   const { theme, wallpaper, privacyReadReceipts } = useThemeStore();
@@ -59,6 +85,11 @@ const ChatContainer = () => {
   const prevScrollHeightRef = useRef(0);
   const prevScrollTopRef = useRef(0);
   const isPrependingRef = useRef(false);
+  const [forwardingMessage, setForwardingMessage] = useState(null);
+  // Mobile-only: tap = actions, long press = emoji picker
+  const [mobileActionId, setMobileActionId] = useState(null);
+  const [mobileEmojiId, setMobileEmojiId] = useState(null);
+  const longPressTimerRef = useRef(null);
 
   const scrollToMessage = (messageId) => {
     const element = document.getElementById(`msg-${messageId}`);
@@ -244,6 +275,7 @@ const ChatContainer = () => {
         <div 
           ref={scrollableRef}
           onScroll={handleScroll}
+          onClick={() => { setMobileActionId(null); setMobileEmojiId(null); }}
           className="flex-1 p-4 space-y-4 overflow-y-auto transition-all"
           style={getWallpaperStyle(activeWallpaper, theme)}
         >
@@ -252,9 +284,14 @@ const ChatContainer = () => {
               <span className="loading loading-spinner loading-md text-primary/60"></span>
             </div>
           ) : (
-            Array.isArray(messages) && messages.map((message) => {
+            Array.isArray(messages) && messages.flatMap((message, index) => {
+              const isNewDay = index === 0 ||
+                new Date(messages[index - 1].createdAt).toDateString() !==
+                new Date(message.createdAt).toDateString();
+
               if (message.isCallLog) {
-                return (
+                return [
+                  isNewDay && <DateSeparator key={`sep-${message._id}`} date={message.createdAt} />,
                   <div key={message._id} className="flex justify-center my-3 select-none w-full animate-in fade-in duration-200">
                     <div className="bg-base-200/80 border border-base-300 rounded-full px-4 py-1.5 flex items-center gap-2 text-xs text-base-content/75 font-medium shadow-sm">
                       {message.callType === "video" ? (
@@ -270,14 +307,38 @@ const ChatContainer = () => {
                       </span>
                     </div>
                   </div>
-                );
+                ].filter(Boolean);
               }
 
-              return (
+              return [
+                isNewDay && <DateSeparator key={`sep-${message._id}-d`} date={message.createdAt} />,
                 <div
                   key={message._id}
                   id={`msg-${message._id}`}
                   className={`chat ${message.senderId === authUser._id ? "chat-end" : "chat-start"} group relative`}
+                  onClick={(e) => e.stopPropagation()}
+                  onTouchStart={() => {
+                    longPressTimerRef.current = setTimeout(() => {
+                      setMobileEmojiId(message._id);
+                      setMobileActionId(null);
+                      longPressTimerRef.current = null;
+                    }, 500);
+                  }}
+                  onTouchEnd={(e) => {
+                    if (longPressTimerRef.current) {
+                      clearTimeout(longPressTimerRef.current);
+                      longPressTimerRef.current = null;
+                      e.preventDefault();
+                      setMobileActionId((prev) => (prev === message._id ? null : message._id));
+                      setMobileEmojiId(null);
+                    }
+                  }}
+                  onTouchMove={() => {
+                    if (longPressTimerRef.current) {
+                      clearTimeout(longPressTimerRef.current);
+                      longPressTimerRef.current = null;
+                    }
+                  }}
                 >
                 {/* Chat Bubble Wrapper with group-hover reactions panel */}
                 <div 
@@ -299,63 +360,24 @@ const ChatContainer = () => {
                     </div>
                   )}
 
-                  {/* Hover Reactions Action Bar */}
-                  <div className="absolute right-0 top-[-30px] opacity-0 group-hover:opacity-100 transition-all duration-200 flex items-center bg-base-200 border border-base-300 rounded-full px-2 py-1 shadow-md z-10 gap-1.5 pointer-events-auto">
+                  {/* ── Desktop: full hover bar (emojis + actions) ── */}
+                  <div className="absolute right-0 top-[-30px] opacity-0 group-hover:opacity-100 transition-all duration-200 hidden lg:flex items-center bg-base-200 border border-base-300 rounded-full px-2 py-1 shadow-md z-10 gap-1.5 pointer-events-auto">
                     {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((emoji) => (
-                      <button
-                        key={emoji}
-                        onClick={() => toggleReaction(message._id, emoji)}
-                        className="hover:scale-125 transition-transform duration-100 text-sm"
-                      >
+                      <button key={emoji} onClick={() => toggleReaction(message._id, emoji)} className="hover:scale-125 transition-transform duration-100 text-sm">
                         {emoji}
                       </button>
                     ))}
-                    <div className="w-[1px] h-3 bg-base-300 mx-1"></div>
-                    <button
-                      onClick={() => setReplyingToMessage(message)}
-                      className="text-base-content/60 hover:text-primary transition-colors flex items-center"
-                      title="Reply"
-                    >
-                      <CornerUpLeft size={13} />
-                    </button>
-                    {message.senderId === authUser?._id && !message.isDeletedForEveryone && message.text && (Date.now() - new Date(message.createdAt).getTime() <= 15 * 60 * 1000) && (
-                      <button
-                        onClick={() => setEditingMessage(message)}
-                        className="text-base-content/60 hover:text-primary transition-colors flex items-center"
-                        title="Edit"
-                      >
-                        <Pencil size={13} />
-                      </button>
-                    )}
-                    {!message.isDeletedForEveryone && (
-                      <button
-                        onClick={() => togglePinMessage(message._id)}
-                        className={`transition-colors flex items-center ${
-                          message.isPinned ? "text-amber-500 hover:text-amber-600" : "text-base-content/60 hover:text-amber-500"
-                        }`}
-                        title={message.isPinned ? "Unpin message" : "Pin message"}
-                      >
-                        <Pin size={13} />
-                      </button>
-                    )}
+                    <div className="w-[1px] h-3 bg-base-300 mx-1" />
+                    <button onClick={() => setReplyingToMessage(message)} className="text-base-content/60 hover:text-primary transition-colors flex items-center" title="Reply"><CornerUpLeft size={13} /></button>
+                    {!message.isDeletedForEveryone && (<button onClick={(e) => { e.stopPropagation(); setForwardingMessage(message); }} className="text-base-content/60 hover:text-primary transition-colors flex items-center" title="Forward"><Forward size={13} /></button>)}
+                    {message.senderId === authUser?._id && !message.isDeletedForEveryone && message.text && (Date.now() - new Date(message.createdAt).getTime() <= 15 * 60 * 1000) && (<button onClick={() => setEditingMessage(message)} className="text-base-content/60 hover:text-primary transition-colors flex items-center" title="Edit"><Pencil size={13} /></button>)}
+                    {!message.isDeletedForEveryone && (<button onClick={() => togglePinMessage(message._id)} className={`transition-colors flex items-center ${message.isPinned ? "text-amber-500 hover:text-amber-600" : "text-base-content/60 hover:text-amber-500"}`} title={message.isPinned ? "Unpin" : "Pin"}><Pin size={13} /></button>)}
                     {!message.isDeletedForEveryone && (
                       <div className="dropdown dropdown-bottom dropdown-end flex items-center">
-                        <div tabIndex={0} role="button" className="text-base-content/60 hover:text-red-500 transition-colors flex items-center p-0.5 cursor-pointer" title="Delete message">
-                          <Trash2 size={13} />
-                        </div>
+                        <div tabIndex={0} role="button" className="text-base-content/60 hover:text-red-500 transition-colors flex items-center p-0.5 cursor-pointer" title="Delete"><Trash2 size={13} /></div>
                         <ul tabIndex={0} className="dropdown-content z-50 menu p-1 shadow-xl bg-base-100 border border-base-300 rounded-box w-36 text-xs text-base-content mt-1">
-                          <li>
-                            <button onClick={() => deleteMessage(message._id, "me")} className="hover:bg-base-200 py-1.5 text-left font-medium">
-                              Delete for me
-                            </button>
-                          </li>
-                          {message.senderId === authUser._id && (
-                            <li>
-                              <button onClick={() => deleteMessage(message._id, "everyone")} className="hover:bg-red-500 hover:text-white py-1.5 text-left font-medium text-red-500">
-                                Delete for everyone
-                              </button>
-                            </li>
-                          )}
+                          <li><button onClick={() => deleteMessage(message._id, "me")} className="hover:bg-base-200 py-1.5 text-left font-medium">Delete for me</button></li>
+                          {message.senderId === authUser._id && (<li><button onClick={() => deleteMessage(message._id, "everyone")} className="hover:bg-red-500 hover:text-white py-1.5 text-left font-medium text-red-500">Delete for everyone</button></li>)}
                         </ul>
                       </div>
                     )}
@@ -370,6 +392,13 @@ const ChatContainer = () => {
                     </p>
                   ) : (
                     <>
+                      {/* Forwarded label */}
+                      {message.isForwarded && (
+                        <span className="flex items-center gap-1 text-[9px] font-medium text-base-content/45 mb-1 select-none">
+                          <Forward size={9} className="opacity-60" />
+                          Forwarded
+                        </span>
+                      )}
                       {/* Message Media */}
                       {message.image && (
                         <img
@@ -409,7 +438,7 @@ const ChatContainer = () => {
                   {!message.isDeletedForEveryone && renderReactions(message)}
                 </div>
               </div>
-              );
+              ].filter(Boolean);
             })
           )}
           <div ref={messageEndRef} />
@@ -512,6 +541,126 @@ const ChatContainer = () => {
             </div>
           </div>
         </div>
+      )}
+      {/* Mobile Emoji Bar Overlay */}
+      {mobileEmojiId && (
+        <div
+          className="fixed inset-0 z-[150] bg-black/30 backdrop-blur-[1px] lg:hidden flex items-end justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setMobileEmojiId(null)}
+        >
+          <div
+            className="bg-base-100 border border-base-300 rounded-full px-4 py-3 shadow-2xl flex items-center gap-3 animate-in slide-in-from-bottom duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((emoji) => (
+              <button
+                key={emoji}
+                onClick={() => {
+                  toggleReaction(mobileEmojiId, emoji);
+                  setMobileEmojiId(null);
+                }}
+                className="text-2xl active:scale-125 transition-transform"
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Action Bar Overlay */}
+      {mobileActionId && (
+        <div
+          className="fixed inset-0 z-[150] bg-black/30 backdrop-blur-[1px] lg:hidden flex items-end justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setMobileActionId(null)}
+        >
+          <div
+            className="bg-base-100 border border-base-300 rounded-2xl p-3 shadow-2xl flex items-center justify-around w-full max-w-xs animate-in slide-in-from-bottom duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {(() => {
+              const msg = messages.find((m) => m._id === mobileActionId);
+              if (!msg) return null;
+              return (
+                <>
+                  <button
+                    onClick={() => {
+                      setReplyingToMessage(msg);
+                      setMobileActionId(null);
+                    }}
+                    className="flex flex-col items-center gap-1 text-xs text-base-content/70 active:text-primary"
+                  >
+                    <CornerUpLeft size={18} />
+                    <span>Reply</span>
+                  </button>
+                  {!msg.isDeletedForEveryone && (
+                    <button
+                      onClick={() => {
+                        setForwardingMessage(msg);
+                        setMobileActionId(null);
+                      }}
+                      className="flex flex-col items-center gap-1 text-xs text-base-content/70 active:text-primary"
+                    >
+                      <Forward size={18} />
+                      <span>Forward</span>
+                    </button>
+                  )}
+                  {msg.senderId === authUser?._id &&
+                    !msg.isDeletedForEveryone &&
+                    msg.text &&
+                    Date.now() - new Date(msg.createdAt).getTime() <= 15 * 60 * 1000 && (
+                      <button
+                        onClick={() => {
+                          setEditingMessage(msg);
+                          setMobileActionId(null);
+                        }}
+                        className="flex flex-col items-center gap-1 text-xs text-base-content/70 active:text-primary"
+                      >
+                        <Pencil size={18} />
+                        <span>Edit</span>
+                      </button>
+                    )}
+                  {!msg.isDeletedForEveryone && (
+                    <button
+                      onClick={() => {
+                        togglePinMessage(msg._id);
+                        setMobileActionId(null);
+                      }}
+                      className={`flex flex-col items-center gap-1 text-xs ${
+                        msg.isPinned ? "text-amber-500" : "text-base-content/70 active:text-amber-500"
+                      }`}
+                    >
+                      <Pin size={18} />
+                      <span>{msg.isPinned ? "Unpin" : "Pin"}</span>
+                    </button>
+                  )}
+                  {!msg.isDeletedForEveryone && (
+                    <button
+                      onClick={() => {
+                        deleteMessage(msg._id, "me");
+                        setMobileActionId(null);
+                      }}
+                      className="flex flex-col items-center gap-1 text-xs text-red-500 active:text-red-600"
+                    >
+                      <Trash2 size={18} />
+                      <span>Delete</span>
+                    </button>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* Forward Modal */}
+      {forwardingMessage && (
+        <ForwardModal
+          message={forwardingMessage}
+          onClose={() => setForwardingMessage(null)}
+          users={users || []}
+          authUser={authUser}
+        />
       )}
       <CallModal />
     </div>
