@@ -597,6 +597,57 @@ const togglePinMessage = async (req, res) => {
   }
 };
 
+const updateChatWallpaper = async (req, res) => {
+  try {
+    const { id: recipientId } = req.params;
+    let { wallpaper } = req.body;
+    const myId = req.user._id;
+
+    let dimTag = "";
+    if (wallpaper && wallpaper.includes("#dim=")) {
+      const parts = wallpaper.split("#dim=");
+      wallpaper = parts[0];
+      dimTag = `#dim=${parts[1]}`;
+    }
+
+    if (wallpaper && wallpaper.startsWith("data:image")) {
+      const uploadResponse = await cloudinary.uploader.upload(wallpaper);
+      wallpaper = uploadResponse.secure_url + dimTag;
+    } else if (dimTag) {
+      wallpaper = wallpaper + dimTag;
+    }
+
+    const myUser = await User.findById(myId);
+    if (!myUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (!myUser.chatWallpapers) myUser.chatWallpapers = new Map();
+    myUser.chatWallpapers.set(recipientId.toString(), wallpaper);
+    await myUser.save();
+
+    const recipientUser = await User.findById(recipientId);
+    if (recipientUser) {
+      if (!recipientUser.chatWallpapers) recipientUser.chatWallpapers = new Map();
+      recipientUser.chatWallpapers.set(myId.toString(), wallpaper);
+      await recipientUser.save();
+    }
+
+    const receiverSocketId = getReceiverSocketId(recipientId.toString());
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("chatWallpaperUpdate", {
+        updatedBy: myId.toString(),
+        wallpaper
+      });
+    }
+
+    res.status(200).json({ myUser, wallpaper });
+  } catch (error) {
+    console.error("Error in updateChatWallpaper:", error);
+    res.status(500).json({ message: "Failed to update chat wallpaper" });
+  }
+};
+
 export { 
   getUsersForSidebar, 
   getMessages, 
@@ -609,5 +660,6 @@ export {
   editMessage,
   toggleBlockUser,
   createCallLog,
-  togglePinMessage
+  togglePinMessage,
+  updateChatWallpaper
 };

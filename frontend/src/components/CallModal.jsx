@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useChatStore } from "../store/useChatStore";
-import { Phone, PhoneOff, Video, Mic, MicOff, VideoOff } from "lucide-react";
+import { Phone, PhoneOff, Video, Mic, MicOff, VideoOff, Minus, Maximize2 } from "lucide-react";
 
 const CallModal = () => {
   const {
@@ -11,7 +11,9 @@ const CallModal = () => {
     remoteStream,
     acceptCall,
     rejectCall,
-    endCall
+    endCall,
+    isCallMinimized,
+    toggleCallMinimize
   } = useChatStore();
 
   const localVideoRef = useRef(null);
@@ -97,10 +99,58 @@ const CallModal = () => {
     }
   };
 
+  if (isCallMinimized) {
+    return (
+      <div 
+        onClick={toggleCallMinimize}
+        className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-zinc-900/95 border border-zinc-700 text-white px-4 py-2 rounded-full shadow-2xl flex items-center gap-3 cursor-pointer hover:bg-zinc-800 transition-all select-none animate-in slide-in-from-top duration-200"
+      >
+        <span className="relative flex h-3 w-3">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+          <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+        </span>
+        <span className="text-xs font-semibold tracking-wide">
+          {callPartner?.fullName} • {callState === "connected" ? formatTime(callDuration) : "Ringing..."}
+        </span>
+        <div className="flex items-center gap-1.5 ml-2">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleCallMinimize();
+            }}
+            className="p-1 hover:bg-zinc-700 rounded-full transition-colors text-zinc-300"
+            title="Expand Call"
+          >
+            <Maximize2 size={13} />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              endCall();
+            }}
+            className="p-1.5 bg-red-600 hover:bg-red-700 rounded-full transition-colors text-white"
+            title="End Call"
+          >
+            <PhoneOff size={12} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-md text-white select-none">
       <div className="relative flex flex-col items-center justify-between w-full h-full max-w-lg p-8 sm:h-[600px] sm:rounded-2xl sm:border sm:border-zinc-800 bg-zinc-950 shadow-2xl">
         
+        {/* Top Header minimize action */}
+        <button
+          onClick={toggleCallMinimize}
+          className="absolute top-4 right-4 z-30 p-2 hover:bg-zinc-800/80 rounded-full text-zinc-400 hover:text-white transition-colors"
+          title="Minimize call"
+        >
+          <Minus size={20} />
+        </button>
+
         {/* Top details */}
         <div className="flex flex-col items-center gap-3 mt-8">
           <div className="relative">
@@ -124,8 +174,8 @@ const CallModal = () => {
           </p>
         </div>
 
-        {/* Remote Stream Audio Element for Phone Calls */}
-        {callState === "connected" && callType === "phone" && (
+        {/* Remote Stream Audio Element for Phone/Voice Calls */}
+        {callState === "connected" && (callType === "phone" || callType === "voice") && (
           <video
             ref={remoteVideoRef}
             autoPlay

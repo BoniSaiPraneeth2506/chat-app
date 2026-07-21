@@ -9,6 +9,25 @@ const PREVIEW_MESSAGES = [
 ];
 
 export const getWallpaperStyle = (wallpaper, theme) => {
+  if (wallpaper && (wallpaper.startsWith("http://") || wallpaper.startsWith("https://") || wallpaper.startsWith("data:image"))) {
+    let dim = 0.35;
+    let cleanUrl = wallpaper;
+    if (wallpaper.includes("#dim=")) {
+      const parts = wallpaper.split("#dim=");
+      cleanUrl = parts[0];
+      const parsedDim = Number(parts[1]);
+      if (!isNaN(parsedDim)) {
+        dim = parsedDim / 100;
+      }
+    }
+    return {
+      backgroundImage: `linear-gradient(rgba(0, 0, 0, ${dim}), rgba(0, 0, 0, ${dim})), url('${cleanUrl}')`,
+      backgroundSize: "cover",
+      backgroundPosition: "center",
+      backgroundRepeat: "no-repeat"
+    };
+  }
+
   const isDarkTheme = ["dark", "halloween", "forest", "luxury", "dracula", "synthwave", "black", "business", "night", "coffee"].includes(theme);
   
   if (isDarkTheme) {

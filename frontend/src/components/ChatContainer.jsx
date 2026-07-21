@@ -50,6 +50,7 @@ const ChatContainer = () => {
   } = useChatStore();
   const { authUser, onlineUsers } = useAuthStore();
   const { theme, wallpaper, privacyReadReceipts } = useThemeStore();
+  const activeWallpaper = authUser?.chatWallpapers?.[selectedUser?._id] || selectedUser?.chatWallpapers?.[authUser?._id] || wallpaper;
   const messageEndRef = useRef(null);
   const scrollableRef = useRef(null);
   const prevMessagesLengthRef = useRef(0);
@@ -243,7 +244,7 @@ const ChatContainer = () => {
           ref={scrollableRef}
           onScroll={handleScroll}
           className="flex-1 p-4 space-y-4 overflow-y-auto transition-all"
-          style={getWallpaperStyle(wallpaper, theme)}
+          style={getWallpaperStyle(activeWallpaper, theme)}
         >
           {isMessagesLoading && (!Array.isArray(messages) || messages.length === 0) ? (
             <div className="h-full w-full flex items-center justify-center">

@@ -53,7 +53,12 @@ const userSchema=new mongoose.Schema({
         type:mongoose.Schema.Types.ObjectId,
         ref:"User",
         default:[]
-    }]
+    }],
+    chatWallpapers:{
+        type:Map,
+        of:String,
+        default:new Map()
+    }
 },{timestamps:true}
 )
 

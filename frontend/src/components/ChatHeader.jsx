@@ -75,10 +75,11 @@
 // };
 // export default ChatHeader;
 
-import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck } from "lucide-react";
+import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image } from "lucide-react";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
 import { useState } from "react";
+import toast from "react-hot-toast";
 
 const formatLastSeen = (lastSeenTime) => {
   if (!lastSeenTime) return "Offline";
@@ -118,11 +119,14 @@ const ChatHeader = () => {
     setMessageSearchQuery,
     typingUsers,
     startCall,
-    toggleBlockUser
+    toggleBlockUser,
+    setConversationWallpaper
   } = useChatStore();
   const { onlineUsers, authUser } = useAuthStore();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
+  const [pendingWallpaper, setPendingWallpaper] = useState(null);
+  const [dimLevel, setDimLevel] = useState(35);
 
   const isSelf = selectedUser?._id === authUser?._id;
   const isOnline = onlineUsers.includes(selectedUser?._id);
@@ -223,8 +227,8 @@ const ChatHeader = () => {
             )}
           </div>
 
-          {/* Right Section: Call, Block, Search & Close */}
-          <div className="flex items-center gap-1 sm:gap-2">
+          {/* Right Section: Calls, Search, Three Dots Menu & Close */}
+          <div className="flex items-center gap-1 sm:gap-1.5">
             {!isSelf && (
               <>
                 <button 
@@ -241,26 +245,10 @@ const ChatHeader = () => {
                 >
                   <Phone size={18} />
                 </button>
-                <button 
-                  onClick={() => {
-                    if (authUser?.blockedUsers?.includes(selectedUser?._id)) {
-                      toggleBlockUser(selectedUser._id);
-                    } else {
-                      setShowBlockConfirm(true);
-                    }
-                  }} 
-                  className={`p-2 hover:bg-base-200 rounded-full transition-colors ${
-                    authUser?.blockedUsers?.includes(selectedUser?._id)
-                      ? "text-red-500 hover:text-red-600" 
-                      : "text-base-content/70 hover:text-red-500"
-                  }`}
-                  title={authUser?.blockedUsers?.includes(selectedUser?._id) ? "Unblock User" : "Block User"}
-                >
-                  {authUser?.blockedUsers?.includes(selectedUser?._id) ? <UserCheck size={18} /> : <UserX size={18} />}
-                </button>
               </>
             )}
 
+            {/* Search Icon (Left of Three Dots) */}
             <button 
               onClick={() => setIsSearchOpen(true)} 
               className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
@@ -268,6 +256,111 @@ const ChatHeader = () => {
             >
               <Search size={18} />
             </button>
+
+            {/* Three Dots More Options Menu (Right of Search) */}
+            <div className="dropdown dropdown-bottom dropdown-end">
+              <div
+                tabIndex={0}
+                role="button"
+                className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary cursor-pointer"
+                title="More options"
+              >
+                <MoreVertical size={18} />
+              </div>
+              <ul
+                tabIndex={0}
+                className="dropdown-content z-50 menu p-2 shadow-2xl bg-base-100 border border-base-300 rounded-2xl w-56 text-xs text-base-content mt-1 space-y-1"
+              >
+                <li className="menu-title text-[10px] uppercase tracking-wider text-base-content/50 font-bold px-2 py-1 select-none flex items-center gap-1">
+                  <Palette size={12} />
+                  Chat Theme
+                </li>
+                <li>
+                  <label className="flex items-center justify-between py-2 px-3 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary text-xs font-semibold cursor-pointer transition-colors mb-1">
+                    <div className="flex items-center gap-2">
+                      <Image size={14} />
+                      <span>Upload from Gallery</span>
+                    </div>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          if (file.size > 5 * 1024 * 1024) {
+                            toast.error("Image size must be less than 5MB");
+                            return;
+                          }
+                          const reader = new FileReader();
+                          reader.onloadend = () => {
+                            setPendingWallpaper(reader.result);
+                            setDimLevel(35);
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                    />
+                  </label>
+                </li>
+                {[
+                  { id: "default", name: "Default", color: "bg-base-300" },
+                  { id: "sage", name: "Sage", color: "bg-[#e5ddd5]" },
+                  { id: "sky", name: "Sky", color: "bg-[#d4e6f1]" },
+                  { id: "lavender", name: "Lavender", color: "bg-[#ebdef0]" },
+                  { id: "sunset", name: "Sunset", color: "bg-gradient-to-br from-amber-200 to-rose-200" },
+                ].map((wp) => (
+                  <li key={wp.id}>
+                    <button
+                      onClick={() => setConversationWallpaper(wp.id)}
+                      className="flex items-center justify-between py-1.5 px-3 rounded-lg hover:bg-base-200 text-xs transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`size-3 rounded-full ${wp.color} border border-base-content/10`} />
+                        <span>{wp.name}</span>
+                      </div>
+                      {((authUser?.chatWallpapers?.[selectedUser?._id] || selectedUser?.chatWallpapers?.[authUser?._id]) === wp.id) && (
+                        <span className="text-primary font-bold text-xs">✓</span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+
+                {!isSelf && (
+                  <>
+                    <div className="divider my-1"></div>
+                    <li>
+                      <button
+                        onClick={() => {
+                          if (authUser?.blockedUsers?.includes(selectedUser?._id)) {
+                            toggleBlockUser(selectedUser._id);
+                          } else {
+                            setShowBlockConfirm(true);
+                          }
+                        }}
+                        className={`flex items-center gap-2 py-1.5 px-3 rounded-lg text-xs transition-colors ${
+                          authUser?.blockedUsers?.includes(selectedUser?._id)
+                            ? "text-red-500 font-semibold hover:bg-red-50"
+                            : "text-red-500 hover:bg-red-500/10"
+                        }`}
+                      >
+                        {authUser?.blockedUsers?.includes(selectedUser?._id) ? (
+                          <>
+                            <UserCheck size={14} />
+                            <span>Unblock User</span>
+                          </>
+                        ) : (
+                          <>
+                            <UserX size={14} />
+                            <span>Block User</span>
+                          </>
+                        )}
+                      </button>
+                    </li>
+                  </>
+                )}
+              </ul>
+            </div>
 
             {/* Close Button - hidden on mobile since we have back arrow */}
             <button 
@@ -303,6 +396,82 @@ const ChatHeader = () => {
                 className="btn btn-sm btn-error text-white font-semibold"
               >
                 Block
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dimness Adjustment Modal */}
+      {pendingWallpaper && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 select-none animate-in fade-in duration-200">
+          <div className="bg-base-100 border border-base-300 rounded-3xl p-6 max-w-sm w-full shadow-2xl flex flex-col items-center gap-5 text-left">
+            <div className="w-full text-center">
+              <h3 className="font-bold text-lg text-base-content">
+                Adjust Wallpaper Dimness
+              </h3>
+              <p className="text-xs text-base-content/60 mt-0.5">
+                Set background brightness for optimal message contrast
+              </p>
+            </div>
+
+            {/* Live Preview Box */}
+            <div 
+              className="w-full h-44 rounded-2xl overflow-hidden border border-base-300 relative flex flex-col justify-end p-3 shadow-inner transition-all"
+              style={{
+                backgroundImage: `linear-gradient(rgba(0, 0, 0, ${dimLevel / 100}), rgba(0, 0, 0, ${dimLevel / 100})), url('${pendingWallpaper}')`,
+                backgroundSize: "cover",
+                backgroundPosition: "center"
+              }}
+            >
+              {/* Sample Message Bubbles for Live Preview */}
+              <div className="space-y-2 w-full select-none">
+                <div className="bg-base-200/90 text-base-content px-3 py-1.5 rounded-2xl text-[11px] w-fit max-w-[80%] shadow-sm">
+                  Hey! How does this look?
+                </div>
+                <div className="bg-primary text-primary-content px-3 py-1.5 rounded-2xl text-[11px] w-fit max-w-[80%] ml-auto shadow-sm">
+                  Looks great! Messages are super clear.
+                </div>
+              </div>
+            </div>
+
+            {/* Dimness Slider Controls */}
+            <div className="w-full space-y-2">
+              <div className="flex justify-between items-center text-xs font-semibold text-base-content/80">
+                <span>Wallpaper Dim Level</span>
+                <span className="text-primary font-bold">{dimLevel}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="80"
+                value={dimLevel}
+                onChange={(e) => setDimLevel(Number(e.target.value))}
+                className="range range-primary range-xs w-full cursor-pointer"
+              />
+              <div className="flex justify-between text-[10px] text-base-content/50 font-medium">
+                <span>Original (0%)</span>
+                <span>Dark (80%)</span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3 w-full mt-1">
+              <button
+                onClick={() => setPendingWallpaper(null)}
+                className="btn btn-ghost flex-1 text-xs rounded-xl"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const finalWallpaper = `${pendingWallpaper}#dim=${dimLevel}`;
+                  setConversationWallpaper(finalWallpaper);
+                  setPendingWallpaper(null);
+                }}
+                className="btn btn-primary flex-1 text-xs rounded-xl shadow-md text-primary-content"
+              >
+                Set Wallpaper
               </button>
             </div>
           </div>

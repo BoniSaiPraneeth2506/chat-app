@@ -12,7 +12,8 @@ import {
   editMessage,
   toggleBlockUser,
   createCallLog,
-  togglePinMessage
+  togglePinMessage,
+  updateChatWallpaper
 } from "../controllers/message.controller.js";
 
 const router=express.Router();
@@ -27,6 +28,7 @@ router.put('/edit/:id',protectRoute,editMessage)
 router.post('/block/:id',protectRoute,toggleBlockUser)
 router.post('/call-log',protectRoute,createCallLog)
 router.put('/pin/:id',protectRoute,togglePinMessage)
+router.post('/wallpaper/:id',protectRoute,updateChatWallpaper)
 router.delete('/:id',protectRoute,deleteMessage)
 router.delete('/clear/:id',protectRoute,clearChatHistory)
 

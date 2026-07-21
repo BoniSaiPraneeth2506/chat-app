@@ -96,11 +96,13 @@ export const useChatStore = create((set, get) => ({
   callType: null,
   callPartner: null,
   isCaller: false,
+  isCallMinimized: false,
   localStream: null,
   remoteStream: null,
   peerConnection: null,
   incomingSignal: null,
   setPeerConnection: (pc) => set({ peerConnection: pc }),
+  toggleCallMinimize: () => set((state) => ({ isCallMinimized: !state.isCallMinimized })),
 
   pinnedMessage: null,
   setPinnedMessage: (pinnedMessage) => set({ pinnedMessage }),
@@ -479,6 +481,18 @@ export const useChatStore = create((set, get) => ({
         }));
       }
     });
+
+    // Handle chat wallpaper update
+    socket.on("chatWallpaperUpdate", ({ updatedBy, wallpaper }) => {
+      const authUser = useAuthStore.getState().authUser;
+      if (authUser) {
+        const currentWallpapers = authUser.chatWallpapers ? { ...authUser.chatWallpapers } : {};
+        currentWallpapers[updatedBy] = wallpaper;
+        useAuthStore.setState({
+          authUser: { ...authUser, chatWallpapers: currentWallpapers }
+        });
+      }
+    });
   },
 
   unsubscribeFromMessages: () => {
@@ -497,6 +511,7 @@ export const useChatStore = create((set, get) => ({
       socket.off("callEnded");
       socket.off("iceCandidate");
       socket.off("messagePinned");
+      socket.off("chatWallpaperUpdate");
     }
   },
 
@@ -843,6 +858,18 @@ export const useChatStore = create((set, get) => ({
       toast.success(updatedMessage.isPinned ? "Message pinned" : "Message unpinned");
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to toggle pin");
+    }
+  },
+
+  setConversationWallpaper: async (wallpaper) => {
+    const selectedUser = get().selectedUser;
+    if (!selectedUser) return;
+    try {
+      const res = await axiosInstance.post(`/messages/wallpaper/${selectedUser._id}`, { wallpaper });
+      useAuthStore.setState({ authUser: res.data.myUser });
+      toast.success("Chat theme updated for both");
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to update chat theme");
     }
   }
 }));
