@@ -691,6 +691,15 @@ const ChatContainer = () => {
                   {/* Chat Bubble Wrapper with group-hover reactions panel */}
                   <div 
                     onDoubleClick={() => !isSelectionMode && toggleReaction(message._id, "❤️")}
+                    onClick={(e) => {
+                      if (isSelectionMode) return;
+                      if (e.target.closest(".mobile-action-bar") || e.target.closest("button") || e.target.closest("a") || e.target.closest("input") || e.target.closest("audio") || e.target.closest("video") || e.target.closest("iframe")) return;
+                      if (window.innerWidth < 1024) {
+                        e.stopPropagation();
+                        setMobileEmojiId(null);
+                        setMobileActionId((prev) => (prev === message._id ? null : message._id));
+                      }
+                    }}
                     onTouchStart={(e) => {
                       if (isSelectionMode) return;
                       if (e.target.closest(".mobile-action-bar")) return;
