@@ -322,15 +322,17 @@ const ChatContainer = () => {
                       setMobileEmojiId(message._id);
                       setMobileActionId(null);
                       longPressTimerRef.current = null;
-                    }, 500);
+                    }, 400);
                   }}
                   onTouchEnd={(e) => {
                     if (longPressTimerRef.current) {
                       clearTimeout(longPressTimerRef.current);
                       longPressTimerRef.current = null;
-                      e.preventDefault();
-                      setMobileActionId((prev) => (prev === message._id ? null : message._id));
-                      setMobileEmojiId(null);
+                      // Only toggle mobileActionId if we aren't tapping an active action bar child
+                      if (!e.target.closest(".mobile-action-bar")) {
+                        setMobileActionId((prev) => (prev === message._id ? null : message._id));
+                        setMobileEmojiId(null);
+                      }
                     }
                   }}
                   onTouchMove={() => {
@@ -364,7 +366,8 @@ const ChatContainer = () => {
                   {mobileEmojiId === message._id && (
                     <div 
                       onClick={(e) => e.stopPropagation()}
-                      className="absolute right-0 top-[-38px] lg:hidden animate-in zoom-in-95 duration-150 flex items-center bg-base-200 border border-base-300 rounded-full px-2 py-1 shadow-lg z-30 gap-1.5"
+                      onTouchEnd={(e) => e.stopPropagation()}
+                      className="mobile-action-bar absolute right-0 top-[-44px] lg:hidden animate-in zoom-in-95 duration-150 flex items-center bg-base-100 border border-base-300 rounded-full px-3 py-1.5 shadow-xl z-30 gap-2"
                     >
                       {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((emoji) => (
                         <button 
@@ -374,7 +377,12 @@ const ChatContainer = () => {
                             toggleReaction(message._id, emoji); 
                             setMobileEmojiId(null); 
                           }} 
-                          className="text-base active:scale-125 transition-transform"
+                          onTouchEnd={(e) => {
+                            e.stopPropagation();
+                            toggleReaction(message._id, emoji);
+                            setMobileEmojiId(null);
+                          }}
+                          className="text-xl active:scale-125 transition-transform p-1"
                         >
                           {emoji}
                         </button>
@@ -386,40 +394,45 @@ const ChatContainer = () => {
                   {mobileActionId === message._id && (
                     <div 
                       onClick={(e) => e.stopPropagation()}
-                      className="absolute right-0 top-[-38px] lg:hidden animate-in zoom-in-95 duration-150 flex items-center bg-base-200 border border-base-300 rounded-full px-2 py-1 shadow-lg z-30 gap-1.5"
+                      onTouchEnd={(e) => e.stopPropagation()}
+                      className="mobile-action-bar absolute right-0 top-[-44px] lg:hidden animate-in zoom-in-95 duration-150 flex items-center bg-base-100 border border-base-300 rounded-full px-3 py-1.5 shadow-xl z-30 gap-2.5"
                     >
                       <button 
                         onClick={(e) => { e.stopPropagation(); setReplyingToMessage(message); setMobileActionId(null); }} 
-                        className="text-base-content/70 active:text-primary transition-colors flex items-center p-0.5" 
+                        onTouchEnd={(e) => { e.stopPropagation(); setReplyingToMessage(message); setMobileActionId(null); }}
+                        className="text-base-content/80 active:text-primary transition-colors flex items-center p-1" 
                         title="Reply"
                       >
-                        <CornerUpLeft size={13} />
+                        <CornerUpLeft size={18} />
                       </button>
                       {!message.isDeletedForEveryone && (
                         <button 
                           onClick={(e) => { e.stopPropagation(); setForwardingMessage(message); setMobileActionId(null); }} 
-                          className="text-base-content/70 active:text-primary transition-colors flex items-center p-0.5" 
+                          onTouchEnd={(e) => { e.stopPropagation(); setForwardingMessage(message); setMobileActionId(null); }}
+                          className="text-base-content/80 active:text-primary transition-colors flex items-center p-1" 
                           title="Forward"
                         >
-                          <Forward size={13} />
+                          <Forward size={18} />
                         </button>
                       )}
                       {message.senderId === authUser?._id && !message.isDeletedForEveryone && message.text && (Date.now() - new Date(message.createdAt).getTime() <= 15 * 60 * 1000) && (
                         <button 
                           onClick={(e) => { e.stopPropagation(); setEditingMessage(message); setMobileActionId(null); }} 
-                          className="text-base-content/70 active:text-primary transition-colors flex items-center p-0.5" 
+                          onTouchEnd={(e) => { e.stopPropagation(); setEditingMessage(message); setMobileActionId(null); }}
+                          className="text-base-content/80 active:text-primary transition-colors flex items-center p-1" 
                           title="Edit"
                         >
-                          <Pencil size={13} />
+                          <Pencil size={18} />
                         </button>
                       )}
                       {!message.isDeletedForEveryone && (
                         <button 
                           onClick={(e) => { e.stopPropagation(); togglePinMessage(message._id); setMobileActionId(null); }} 
-                          className={`transition-colors flex items-center p-0.5 ${message.isPinned ? "text-amber-500" : "text-base-content/70 active:text-amber-500"}`} 
+                          onTouchEnd={(e) => { e.stopPropagation(); togglePinMessage(message._id); setMobileActionId(null); }}
+                          className={`transition-colors flex items-center p-1 ${message.isPinned ? "text-amber-500" : "text-base-content/80 active:text-amber-500"}`} 
                           title={message.isPinned ? "Unpin" : "Pin"}
                         >
-                          <Pin size={13} />
+                          <Pin size={18} />
                         </button>
                       )}
                       {!message.isDeletedForEveryone && (
@@ -428,16 +441,18 @@ const ChatContainer = () => {
                             tabIndex={0} 
                             role="button" 
                             onClick={(e) => e.stopPropagation()} 
-                            className="text-base-content/70 active:text-red-500 transition-colors flex items-center p-0.5 cursor-pointer" 
+                            onTouchEnd={(e) => e.stopPropagation()}
+                            className="text-base-content/80 active:text-red-500 transition-colors flex items-center p-1 cursor-pointer" 
                             title="Delete"
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={18} />
                           </div>
-                          <ul tabIndex={0} className="dropdown-content z-50 menu p-1 shadow-xl bg-base-100 border border-base-300 rounded-box w-36 text-xs text-base-content mt-1">
+                          <ul tabIndex={0} className="dropdown-content z-50 menu p-1.5 shadow-xl bg-base-100 border border-base-300 rounded-box w-40 text-xs text-base-content mt-1">
                             <li>
                               <button 
                                 onClick={(e) => { e.stopPropagation(); deleteMessage(message._id, "me"); setMobileActionId(null); }} 
-                                className="hover:bg-base-200 py-1.5 text-left font-medium"
+                                onTouchEnd={(e) => { e.stopPropagation(); deleteMessage(message._id, "me"); setMobileActionId(null); }}
+                                className="hover:bg-base-200 py-2 text-left font-medium"
                               >
                                 Delete for me
                               </button>
@@ -446,7 +461,8 @@ const ChatContainer = () => {
                               <li>
                                 <button 
                                   onClick={(e) => { e.stopPropagation(); deleteMessage(message._id, "everyone"); setMobileActionId(null); }} 
-                                  className="hover:bg-red-500 hover:text-white py-1.5 text-left font-medium text-red-500"
+                                  onTouchEnd={(e) => { e.stopPropagation(); deleteMessage(message._id, "everyone"); setMobileActionId(null); }}
+                                  className="hover:bg-red-500 hover:text-white py-2 text-left font-medium text-red-500"
                                 >
                                   Delete for everyone
                                 </button>
