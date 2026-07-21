@@ -124,13 +124,13 @@ const CallModal = () => {
           </p>
         </div>
 
-        {/* Hidden Remote Stream Audio Element for Phone Calls */}
+        {/* Remote Stream Audio Element for Phone Calls */}
         {callState === "connected" && callType === "phone" && (
-          <audio
+          <video
             ref={remoteVideoRef}
             autoPlay
             playsInline
-            className="hidden"
+            className="w-0 h-0 opacity-0 pointer-events-none absolute"
           />
         )}
 
