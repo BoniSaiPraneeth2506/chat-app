@@ -420,8 +420,12 @@ const SideBar = () => {
   const pressTimerRef = useRef(null);
 
   useEffect(() => {
-    getUsers();
-  }, [getUsers]);
+    const delayDebounceFn = setTimeout(() => {
+      getUsers(searchTerm);
+    }, searchTerm ? 400 : 0);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [getUsers, searchTerm]);
 
   const toggleFavorite = (e, userId) => {
     if (e && e.stopPropagation) e.stopPropagation();

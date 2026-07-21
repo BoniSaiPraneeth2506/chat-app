@@ -110,6 +110,37 @@ io.on("connection", async (socket) => {
         }
     });
 
+    socket.on("callUser", ({ userToCall, signalData, from, type }) => {
+        console.log(`[Socket Server] User ${from} is calling User ${userToCall} (${type})`);
+        const receiverSocketId = getReceiverSocketId(userToCall);
+        if (receiverSocketId) {
+            io.to(receiverSocketId).emit("callUser", { signal: signalData, from, type });
+        }
+    });
+
+    socket.on("answerCall", ({ signal, to }) => {
+        console.log(`[Socket Server] User ${userId} accepted call from User ${to}`);
+        const receiverSocketId = getReceiverSocketId(to);
+        if (receiverSocketId) {
+            io.to(receiverSocketId).emit("callAccepted", { signal });
+        }
+    });
+
+    socket.on("endCall", ({ to }) => {
+        console.log(`[Socket Server] User ${userId} ended call with User ${to}`);
+        const receiverSocketId = getReceiverSocketId(to);
+        if (receiverSocketId) {
+            io.to(receiverSocketId).emit("callEnded");
+        }
+    });
+
+    socket.on("iceCandidate", ({ candidate, to }) => {
+        const receiverSocketId = getReceiverSocketId(to);
+        if (receiverSocketId) {
+            io.to(receiverSocketId).emit("iceCandidate", { candidate });
+        }
+    });
+
     socket.on("disconnect", async () => {
         console.log("A user Disconnected:", socket.id, "UserID:", userId);
 

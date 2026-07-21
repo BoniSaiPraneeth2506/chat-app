@@ -1,12 +1,32 @@
-import  {useChatStore}  from "../store/useChatStore";
+import { useEffect } from "react";
+import { useChatStore } from "../store/useChatStore";
 import NoChatSelected from "../components/NoChatSelected";
 import ChatContainer from "../components/ChatContainer";
 import SideBar from "../components/SideBar";
 
-
-
 const HomePage = () => {
-  const { selectedUser } = useChatStore();
+  const { selectedUser, setSelectedUser } = useChatStore();
+
+  useEffect(() => {
+    if (selectedUser) {
+      // Push state to history so back button/gesture closes chat instead of navigating away
+      window.history.pushState({ chatOpen: true }, "");
+
+      const handlePopState = (event) => {
+        setSelectedUser(null);
+      };
+
+      window.addEventListener("popstate", handlePopState);
+
+      return () => {
+        window.removeEventListener("popstate", handlePopState);
+        // If chat was closed via UI action (not popstate), pop the history state to keep it in sync
+        if (window.history.state?.chatOpen) {
+          window.history.back();
+        }
+      };
+    }
+  }, [selectedUser, setSelectedUser]);
 
   return (
     <div className="h-screen bg-base-200">

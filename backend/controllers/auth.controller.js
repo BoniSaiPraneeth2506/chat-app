@@ -45,6 +45,7 @@ const signup = async (req, res) => {
             fullName: newUser.fullName,
             email: newUser.email,
             profilePic: newUser.profilePic,
+            blockedUsers: newUser.blockedUsers || [],
             token,
         });
 
@@ -71,6 +72,7 @@ const login =async (req,res)=>{
         fullName:user.fullName,
         email:user.email,
         profilePic:user.profilePic,
+        blockedUsers: user.blockedUsers || [],
         token
     })
    }catch(err){

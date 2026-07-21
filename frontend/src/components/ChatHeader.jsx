@@ -75,7 +75,7 @@
 // };
 // export default ChatHeader;
 
-import { X, ArrowLeft, Bookmark, Clock, Search } from "lucide-react";
+import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck } from "lucide-react";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
 import { useState } from "react";
@@ -97,14 +97,14 @@ const formatLastSeen = (lastSeenTime) => {
   const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
   if (diffDays === 0) {
-    return `Last seen today at ${timeStr}`;
+    return `Today at ${timeStr}`;
   } else if (diffDays === 1) {
-    return `Last seen yesterday at ${timeStr}`;
+    return `Yesterday at ${timeStr}`;
   } else {
     const year = date.getFullYear();
     const month = pad(date.getMonth() + 1);
     const day = pad(date.getDate());
-    return `Last seen on ${year}-${month}-${day} at ${timeStr}`;
+    return `${year}-${month}-${day} at ${timeStr}`;
   }
 };
 
@@ -116,10 +116,13 @@ const ChatHeader = () => {
     setIsRecipientProfileOpen,
     messageSearchQuery,
     setMessageSearchQuery,
-    typingUsers
+    typingUsers,
+    startCall,
+    toggleBlockUser
   } = useChatStore();
   const { onlineUsers, authUser } = useAuthStore();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [showBlockConfirm, setShowBlockConfirm] = useState(false);
 
   const isSelf = selectedUser?._id === authUser?._id;
   const isOnline = onlineUsers.includes(selectedUser?._id);
@@ -220,8 +223,44 @@ const ChatHeader = () => {
             )}
           </div>
 
-          {/* Right Section: Search & Sidebar Toggle */}
-          <div className="flex items-center gap-2">
+          {/* Right Section: Call, Block, Search & Close */}
+          <div className="flex items-center gap-1 sm:gap-2">
+            {!isSelf && (
+              <>
+                <button 
+                  onClick={() => startCall("video")} 
+                  className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+                  title="Video Call"
+                >
+                  <Video size={18} />
+                </button>
+                <button 
+                  onClick={() => startCall("voice")} 
+                  className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+                  title="Voice Call"
+                >
+                  <Phone size={18} />
+                </button>
+                <button 
+                  onClick={() => {
+                    if (authUser?.blockedUsers?.includes(selectedUser?._id)) {
+                      toggleBlockUser(selectedUser._id);
+                    } else {
+                      setShowBlockConfirm(true);
+                    }
+                  }} 
+                  className={`p-2 hover:bg-base-200 rounded-full transition-colors ${
+                    authUser?.blockedUsers?.includes(selectedUser?._id)
+                      ? "text-red-500 hover:text-red-600" 
+                      : "text-base-content/70 hover:text-red-500"
+                  }`}
+                  title={authUser?.blockedUsers?.includes(selectedUser?._id) ? "Unblock User" : "Block User"}
+                >
+                  {authUser?.blockedUsers?.includes(selectedUser?._id) ? <UserCheck size={18} /> : <UserX size={18} />}
+                </button>
+              </>
+            )}
+
             <button 
               onClick={() => setIsSearchOpen(true)} 
               className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
@@ -240,6 +279,33 @@ const ChatHeader = () => {
             </button>
           </div>
 
+        </div>
+      )}
+
+      {/* Block Confirmation Modal */}
+      {showBlockConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[1.5px] animate-in fade-in duration-200">
+          <div className="bg-base-100 p-6 rounded-2xl border border-base-300 shadow-2xl max-w-sm w-full mx-4 animate-in zoom-in-95 duration-200 text-left">
+            <h3 className="font-bold text-lg text-base-content mb-2">Block {selectedUser?.fullName}?</h3>
+            <p className="text-sm text-base-content/70 mb-6">Are you sure you want to block this user? You will not be able to send or receive messages from them.</p>
+            <div className="flex justify-end gap-3">
+              <button 
+                onClick={() => setShowBlockConfirm(false)} 
+                className="btn btn-sm btn-ghost hover:bg-base-200 text-base-content"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => {
+                  toggleBlockUser(selectedUser._id);
+                  setShowBlockConfirm(false);
+                }} 
+                className="btn btn-sm btn-error text-white font-semibold"
+              >
+                Block
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

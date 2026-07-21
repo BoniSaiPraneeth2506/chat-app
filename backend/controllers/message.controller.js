@@ -72,12 +72,47 @@ import { getReceiverSocketId, io } from "../lib/socket.js";
 
 const getUsersForSidebar = async (req, res) => {
   try {
+    const { search } = req.query;
     const loggedInUserId = req.user._id;
-    const filteredUsers = await User.find({ 
-      _id: { $ne: loggedInUserId },
+
+    if (search) {
+      const filteredUsers = await User.find({
+        _id: { $ne: loggedInUserId },
+        fullName: { $regex: search, $options: "i" }
+      }).select("-password");
+      return res.status(200).json(filteredUsers);
+    }
+
+    // 1. Get IDs of users the logged-in user has chatted with
+    const chattedUserIds = await Message.distinct("receiverId", { senderId: loggedInUserId });
+    const chattedUserIds2 = await Message.distinct("senderId", { receiverId: loggedInUserId });
+
+    const chattedSet = new Set([
+      ...chattedUserIds.map(id => id.toString()),
+      ...chattedUserIds2.map(id => id.toString())
+    ]);
+    chattedSet.delete(loggedInUserId.toString());
+    const chattedIds = Array.from(chattedSet);
+
+    // 2. Fetch the chatted users
+    const chattedUsers = await User.find({
+      _id: { $in: chattedIds, $ne: loggedInUserId },
       fullName: { $exists: true, $ne: "" }
     }).select("-password");
-    res.status(200).json(filteredUsers);
+
+    // 3. Fetch up to 4 dummy seeded users (excluding the logged-in user, and excluding already chatted users)
+    const dummyUsers = await User.find({
+      _id: { $ne: loggedInUserId, $nin: chattedIds },
+      fullName: { $exists: true, $ne: "" },
+      email: { $regex: "@example\\.com$" }
+    })
+    .limit(4)
+    .select("-password");
+
+    // 4. Combine chatted users and dummy users
+    const combinedUsers = [...chattedUsers, ...dummyUsers];
+
+    return res.status(200).json(combinedUsers);
   } catch (err) {
     console.log(err);
     res.status(500).json({ message: "Internal server error" });
@@ -91,8 +126,20 @@ const getMessages = async (req, res) => {
     const limit = parseInt(req.query.limit) || 0;
     const skip = parseInt(req.query.skip) || 0;
 
+    const pinnedMessage = await Message.findOne({
+      $or: [
+        { senderId: myId, receiverId: userToChatId },
+        { senderId: userToChatId, receiverId: myId }
+      ],
+      isPinned: true,
+      deletedFor: { $ne: myId }
+    }).populate("replyTo");
+
+    if (pinnedMessage) {
+      res.setHeader("X-Pinned-Message", encodeURIComponent(JSON.stringify(pinnedMessage)));
+    }
+
     if (limit > 0) {
-      // Find the most recent messages: sort descending, skip, limit, then return reversed (ascending)
       const messages = await Message.find({
         $or: [
           { senderId: myId, receiverId: userToChatId },
@@ -127,17 +174,35 @@ const getMessages = async (req, res) => {
 const sendMessage = async (req, res) => {
   try {
     const { id: receiverId } = req.params;
-    const { text, image, replyTo } = req.body;
+    const { text, image, voice, replyTo } = req.body;
     const senderId = req.user._id;
 
-    let imageUrl = "";
+    // Check block list
+    const sender = await User.findById(senderId);
+    const recipient = await User.findById(receiverId);
+    if (!recipient || !sender) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    const isSenderBlocked = recipient.blockedUsers && recipient.blockedUsers.includes(senderId);
+    const isRecipientBlocked = sender.blockedUsers && sender.blockedUsers.includes(receiverId);
+    if (isSenderBlocked || isRecipientBlocked) {
+      return res.status(403).json({ message: "You cannot send messages due to blocking" });
+    }
 
+    let imageUrl = "";
     if (image) {
       const uploadResponse = await cloudinary.uploader.upload(image);
       imageUrl = uploadResponse.secure_url;
     }
 
-    const sender = await User.findById(senderId).select("disappearingTimers");
+    let voiceUrl = "";
+    if (voice) {
+      const uploadResponse = await cloudinary.uploader.upload(voice, {
+        resource_type: "video"
+      });
+      voiceUrl = uploadResponse.secure_url;
+    }
+
     const timer = sender?.disappearingTimers?.get(receiverId) || "off";
 
     let deleteAt = undefined;
@@ -158,6 +223,7 @@ const sendMessage = async (req, res) => {
       receiverId,
       text,
       image: imageUrl,
+      voice: voiceUrl || undefined,
       deleteAt,
       replyTo: replyTo || null
     });
@@ -381,6 +447,156 @@ const clearChatHistory = async (req, res) => {
   }
 };
 
+const editMessage = async (req, res) => {
+  try {
+    const { id: messageId } = req.params;
+    const { text } = req.body;
+    const userId = req.user._id;
+
+    const message = await Message.findById(messageId).populate("replyTo");
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    if (message.senderId.toString() !== userId.toString()) {
+      return res.status(403).json({ message: "You can only edit your own messages" });
+    }
+
+    const fifteenMinutes = 15 * 60 * 1000;
+    if (Date.now() - new Date(message.createdAt).getTime() > fifteenMinutes) {
+      return res.status(400).json({ message: "Messages can only be edited within 15 minutes of sending" });
+    }
+
+    message.text = text;
+    message.isEdited = true;
+    await message.save();
+
+    const receiverId = message.receiverId.toString();
+    const receiverSocketId = getReceiverSocketId(receiverId);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("messageEdited", message);
+    }
+
+    res.status(200).json(message);
+  } catch (error) {
+    console.error("Error in editMessage:", error);
+    res.status(500).json({ message: "Failed to edit message" });
+  }
+};
+
+const toggleBlockUser = async (req, res) => {
+  try {
+    const { id: targetId } = req.params;
+    const userId = req.user._id;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const idx = user.blockedUsers.indexOf(targetId);
+    let isBlocked = false;
+    if (idx > -1) {
+      user.blockedUsers.splice(idx, 1);
+    } else {
+      user.blockedUsers.push(targetId);
+      isBlocked = true;
+    }
+
+    await user.save();
+    res.status(200).json({ user, isBlocked });
+  } catch (error) {
+    console.error("Error in toggleBlockUser:", error);
+    res.status(500).json({ message: "Failed to update block state" });
+  }
+};
+
+const createCallLog = async (req, res) => {
+  try {
+    const { receiverId, callType, callDuration, callStatus } = req.body;
+    const senderId = req.user._id;
+
+    let text = "";
+    if (callStatus === "completed") {
+      const minutes = Math.floor(callDuration / 60);
+      const seconds = callDuration % 60;
+      const durationStr = `${minutes}:${seconds < 10 ? "0" : ""}${seconds}`;
+      text = `${callType === "video" ? "📹 Video Call" : "📞 Voice Call"} (${durationStr})`;
+    } else if (callStatus === "missed") {
+      text = `Missed ${callType} call`;
+    } else if (callStatus === "declined") {
+      text = `Declined ${callType} call`;
+    }
+
+    const newMessage = new Message({
+      senderId,
+      receiverId,
+      text,
+      isCallLog: true,
+      callType,
+      callDuration,
+      callStatus
+    });
+
+    await newMessage.save();
+
+    const receiverSocketId = getReceiverSocketId(receiverId);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("newMessage", newMessage);
+    }
+
+    res.status(201).json(newMessage);
+  } catch (error) {
+    console.error("Error in createCallLog:", error);
+    res.status(500).json({ message: "Failed to create call log" });
+  }
+};
+
+const togglePinMessage = async (req, res) => {
+  try {
+    const { id: messageId } = req.params;
+    const userId = req.user._id;
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    if (message.senderId.toString() !== userId.toString() && message.receiverId.toString() !== userId.toString()) {
+      return res.status(403).json({ message: "Unauthorized action" });
+    }
+
+    const otherUser = message.senderId.toString() === userId.toString() ? message.receiverId : message.senderId;
+    const isPinning = !message.isPinned;
+
+    if (isPinning) {
+      await Message.updateMany(
+        {
+          $or: [
+            { senderId: userId, receiverId: otherUser },
+            { senderId: otherUser, receiverId: userId }
+          ],
+          isPinned: true
+        },
+        { $set: { isPinned: false } }
+      );
+    }
+
+    message.isPinned = isPinning;
+    await message.save();
+
+    const receiverSocketId = getReceiverSocketId(otherUser.toString());
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("messagePinned", message);
+    }
+
+    res.status(200).json(message);
+  } catch (error) {
+    console.error("Error in togglePinMessage:", error);
+    res.status(500).json({ message: "Failed to toggle pin state" });
+  }
+};
+
 export { 
   getUsersForSidebar, 
   getMessages, 
@@ -389,5 +605,9 @@ export {
   toggleMessageReaction,
   toggleContactAction,
   deleteMessage,
-  clearChatHistory
+  clearChatHistory,
+  editMessage,
+  toggleBlockUser,
+  createCallLog,
+  togglePinMessage
 };

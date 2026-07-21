@@ -19,6 +19,26 @@ const messageSchema = new Schema(
     image: {
       type: String,
     },
+    voice: {
+      type: String,
+    },
+    isEdited: {
+      type: Boolean,
+      default: false
+    },
+    isCallLog: {
+      type: Boolean,
+      default: false
+    },
+    callType: {
+      type: String, // "voice" or "video"
+    },
+    callDuration: {
+      type: Number, // duration in seconds
+    },
+    callStatus: {
+      type: String, // "completed", "missed", "declined"
+    },
     deleteAt: {
       type: Date,
       expires: 0
@@ -40,6 +60,10 @@ const messageSchema = new Schema(
       default: []
     }],
     isDeletedForEveryone: {
+      type: Boolean,
+      default: false
+    },
+    isPinned: {
       type: Boolean,
       default: false
     }

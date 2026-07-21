@@ -56,6 +56,7 @@ import axiosInstance from "../lib/axios";
 import useAuthStore from "./useAuthStore";
 import { useThemeStore } from "./useThemeStore";
 
+let callStartTime = null;
 
 export const useChatStore = create((set, get) => ({
   messages: [],
@@ -74,16 +75,32 @@ export const useChatStore = create((set, get) => ({
   typingUsers: {},
   messageSearchQuery: "",
   replyingToMessage: null,
+  editingMessage: null,
   showArchivedOnly: false,
+
+  // Calling features states
+  callState: null,
+  callType: null,
+  callPartner: null,
+  isCaller: false,
+  localStream: null,
+  remoteStream: null,
+  peerConnection: null,
+  incomingSignal: null,
+  setPeerConnection: (pc) => set({ peerConnection: pc }),
+
+  pinnedMessage: null,
+  setPinnedMessage: (pinnedMessage) => set({ pinnedMessage }),
 
   setMessageSearchQuery: (query) => set({ messageSearchQuery: query }),
   setReplyingToMessage: (message) => set({ replyingToMessage: message }),
+  setEditingMessage: (message) => set({ editingMessage: message }),
   setShowArchivedOnly: (show) => set({ showArchivedOnly: show }),
 
-  getUsers: async () => {
+  getUsers: async (search = "") => {
     set({ isUsersLoading: true });
     try {
-      const res = await axiosInstance.get("/messages/users");
+      const res = await axiosInstance.get(`/messages/users?search=${search}`);
       const users = Array.isArray(res.data) ? res.data : [];
       set({ users });
 
@@ -116,9 +133,21 @@ export const useChatStore = create((set, get) => ({
       const limit = 20;
       const res = await axiosInstance.get(`/messages/${userId}?limit=${limit}&skip=0`);
       const messages = Array.isArray(res.data) ? res.data : [];
+
+      const pinnedHeader = res.headers["x-pinned-message"];
+      let pinnedMessage = null;
+      if (pinnedHeader) {
+        try {
+          pinnedMessage = JSON.parse(decodeURIComponent(pinnedHeader));
+        } catch (e) {
+          console.error("Failed to parse pinned message header", e);
+        }
+      }
+
       set({ 
         messages,
-        hasMoreMessages: messages.length === limit
+        hasMoreMessages: messages.length === limit,
+        pinnedMessage
       });
 
       // Emit markAsRead to receiver
@@ -186,6 +215,11 @@ export const useChatStore = create((set, get) => ({
     socket.off("typing");
     socket.off("messageReaction");
     socket.off("messageDeleted");
+    socket.off("messageEdited");
+    socket.off("callUser");
+    socket.off("callAccepted");
+    socket.off("callEnded");
+    socket.off("iceCandidate");
 
     // Emit read receipt for current active chat immediately if any
     const { selectedUser } = get();
@@ -315,6 +349,118 @@ export const useChatStore = create((set, get) => ({
         )
       }));
     });
+
+    // Handle message editing
+    socket.on("messageEdited", (editedMessage) => {
+      set((state) => ({
+        messages: state.messages.map((msg) =>
+          msg._id === editedMessage._id ? editedMessage : msg
+        )
+      }));
+    });
+
+    // Handle call User
+    socket.on("callUser", async ({ signal, from, type }) => {
+      const users = get().users;
+      const caller = users.find((u) => u._id === from) || { _id: from, fullName: "Someone" };
+      set({
+        callState: "incoming",
+        callType: type,
+        callPartner: caller,
+        incomingSignal: signal,
+        isCaller: false
+      });
+    });
+
+    // Handle call accepted
+    socket.on("callAccepted", async ({ signal }) => {
+      const pc = get().peerConnection;
+      if (pc) {
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(signal));
+          set({ callState: "connected" });
+          callStartTime = Date.now();
+        } catch (e) {
+          console.error("Error setting remote description on callAccepted", e);
+        }
+      }
+    });
+
+    // Handle call ended
+    socket.on("callEnded", () => {
+      const { peerConnection, localStream, isCaller, callPartner, callType, callState } = get();
+      
+      // If we are the caller, we save the call log message to the database
+      if (isCaller && callPartner) {
+        let callStatus = "missed";
+        let callDuration = 0;
+        if (callState === "connected" && callStartTime) {
+          callStatus = "completed";
+          callDuration = Math.round((Date.now() - callStartTime) / 1000);
+        }
+
+        axiosInstance.post("/messages/call-log", {
+          receiverId: callPartner._id,
+          callType,
+          callDuration,
+          callStatus
+        }).then((res) => {
+          set((state) => ({
+            messages: [...state.messages, res.data]
+          }));
+        }).catch((err) => {
+          console.error("Failed to save call log", err);
+        });
+      }
+
+      callStartTime = null;
+      if (peerConnection) {
+        try {
+          peerConnection.close();
+        } catch (e) {}
+      }
+      if (localStream) {
+        try {
+          localStream.getTracks().forEach((track) => track.stop());
+        } catch (e) {}
+      }
+      set({
+        callState: null,
+        callType: null,
+        callPartner: null,
+        localStream: null,
+        remoteStream: null,
+        peerConnection: null,
+        incomingSignal: null,
+        isCaller: false
+      });
+      toast("Call ended");
+    });
+
+    // Handle ICE candidates
+    socket.on("iceCandidate", async ({ candidate }) => {
+      const pc = get().peerConnection;
+      if (pc) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (e) {
+          console.error("Error adding ice candidate", e);
+        }
+      }
+    });
+
+    // Handle message pinning
+    socket.on("messagePinned", (pinnedMsg) => {
+      const { selectedUser } = get();
+      if (selectedUser && (pinnedMsg.senderId === selectedUser._id || pinnedMsg.receiverId === selectedUser._id)) {
+        set((state) => ({
+          messages: state.messages.map((msg) =>
+            msg._id === pinnedMsg._id ? pinnedMsg : (pinnedMsg.isPinned ? { ...msg, isPinned: false } : msg)
+          ),
+          pinnedMessage: pinnedMsg.isPinned ? pinnedMsg : null
+        }));
+      }
+    });
   },
 
   unsubscribeFromMessages: () => {
@@ -327,11 +473,17 @@ export const useChatStore = create((set, get) => ({
       socket.off("typing");
       socket.off("messageReaction");
       socket.off("messageDeleted");
+      socket.off("messageEdited");
+      socket.off("callUser");
+      socket.off("callAccepted");
+      socket.off("callEnded");
+      socket.off("iceCandidate");
+      socket.off("messagePinned");
     }
   },
 
   setSelectedUser: (selectedUser) => {
-    set({ selectedUser, isRecipientProfileOpen: false });
+    set({ selectedUser, isRecipientProfileOpen: false, pinnedMessage: null });
     if (selectedUser) {
       set((state) => ({
         unreadCounts: {
@@ -445,6 +597,214 @@ export const useChatStore = create((set, get) => ({
       toast.success("Conversation cleared successfully");
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to clear history");
+    }
+  },
+
+  editMessage: async (messageId, newText) => {
+    try {
+      const res = await axiosInstance.put(`/messages/edit/${messageId}`, { text: newText });
+      const updatedMessage = res.data;
+      set((state) => ({
+        messages: state.messages.map((msg) =>
+          msg._id === messageId ? updatedMessage : msg
+        )
+      }));
+      toast.success("Message edited");
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to edit message");
+    }
+  },
+
+  toggleBlockUser: async (targetId) => {
+    try {
+      const res = await axiosInstance.post(`/messages/block/${targetId}`);
+      const { user, isBlocked } = res.data;
+      useAuthStore.setState({ authUser: user });
+      toast.success(isBlocked ? "User blocked" : "User unblocked");
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to change block status");
+    }
+  },
+
+  startCall: async (type) => {
+    const selectedUser = get().selectedUser;
+    const socket = useAuthStore.getState().socket;
+    const authUser = useAuthStore.getState().authUser;
+    if (!selectedUser || !socket || !authUser) return;
+
+    set({ callState: "ringing", callType: type, callPartner: selectedUser, isCaller: true });
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: type === "video",
+        audio: true
+      });
+      set({ localStream: stream });
+
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+      });
+
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+      const remoteStream = new MediaStream();
+      set({ remoteStream });
+
+      pc.ontrack = (event) => {
+        event.streams[0].getTracks().forEach((track) => {
+          remoteStream.addTrack(track);
+        });
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("iceCandidate", { candidate: event.candidate, to: selectedUser._id });
+        }
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      socket.emit("callUser", {
+        userToCall: selectedUser._id,
+        signalData: offer,
+        from: authUser._id,
+        type
+      });
+
+      get().setPeerConnection(pc);
+    } catch (err) {
+      console.error("Failed to start call", err);
+      toast.error("Could not access camera/microphone");
+      get().endCall();
+    }
+  },
+
+  acceptCall: async () => {
+    const { callPartner, incomingSignal, callType } = get();
+    const socket = useAuthStore.getState().socket;
+    if (!callPartner || !incomingSignal || !socket) return;
+
+    set({ callState: "connected" });
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: callType === "video",
+        audio: true
+      });
+      set({ localStream: stream });
+
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+      });
+
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+      const remoteStream = new MediaStream();
+      set({ remoteStream });
+
+      pc.ontrack = (event) => {
+        event.streams[0].getTracks().forEach((track) => {
+          remoteStream.addTrack(track);
+        });
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("iceCandidate", { candidate: event.candidate, to: callPartner._id });
+        }
+      };
+
+      await pc.setRemoteDescription(new RTCSessionDescription(incomingSignal));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      socket.emit("answerCall", { signal: answer, to: callPartner._id });
+
+      get().setPeerConnection(pc);
+      callStartTime = Date.now();
+    } catch (err) {
+      console.error("Failed to accept call", err);
+      toast.error("Could not accept call");
+      get().endCall();
+    }
+  },
+
+  rejectCall: () => {
+    get().endCall();
+  },
+
+  endCall: () => {
+    const { peerConnection, localStream, callPartner, callType, callState, isCaller } = get();
+    const socket = useAuthStore.getState().socket;
+
+    if (isCaller && callPartner) {
+      let callStatus = "missed";
+      let callDuration = 0;
+      if (callState === "connected" && callStartTime) {
+        callStatus = "completed";
+        callDuration = Math.round((Date.now() - callStartTime) / 1000);
+      }
+
+      axiosInstance.post("/messages/call-log", {
+        receiverId: callPartner._id,
+        callType,
+        callDuration,
+        callStatus
+      }).then((res) => {
+        set((state) => ({
+          messages: [...state.messages, res.data]
+        }));
+      }).catch((err) => {
+        console.error("Failed to save call log", err);
+      });
+    }
+
+    if (callPartner && socket) {
+      socket.emit("endCall", { to: callPartner._id });
+    }
+
+    callStartTime = null;
+
+    if (peerConnection) {
+      try {
+        peerConnection.close();
+      } catch (e) {}
+    }
+
+    if (localStream) {
+      try {
+        localStream.getTracks().forEach((track) => track.stop());
+      } catch (e) {}
+    }
+
+    set({
+      callState: null,
+      callType: null,
+      callPartner: null,
+      localStream: null,
+      remoteStream: null,
+      peerConnection: null,
+      incomingSignal: null,
+      isCaller: false
+    });
+  },
+
+  togglePinMessage: async (messageId) => {
+    try {
+      const res = await axiosInstance.put(`/messages/pin/${messageId}`);
+      const updatedMessage = res.data;
+      
+      set((state) => ({
+        messages: state.messages.map((msg) =>
+          msg._id === messageId ? updatedMessage : (updatedMessage.isPinned ? { ...msg, isPinned: false } : msg)
+        ),
+        pinnedMessage: updatedMessage.isPinned ? updatedMessage : null
+      }));
+
+      toast.success(updatedMessage.isPinned ? "Message pinned" : "Message unpinned");
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to toggle pin");
     }
   }
 }));

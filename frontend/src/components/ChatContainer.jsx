@@ -1,14 +1,21 @@
 import { useChatStore } from "../store/useChatStore";
 import { useEffect, useRef, useLayoutEffect } from "react";
-import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2 } from "lucide-react";
+import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin } from "lucide-react";
 import { useThemeStore } from "../store/useThemeStore";
 import { getWallpaperStyle } from "../pages/SettingsPage";
+import CallModal from "./CallModal";
 
 import ChatHeader from "./ChatHeader";
 import MessageInput from "./MessageInput";
 import MessageSkeleton from "./skeletons/MessageSkeleton";
 import useAuthStore from "../store/useAuthStore";
 import { formatMessageTime } from "../lib/utils";
+
+const formatCallDuration = (secs) => {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${s < 10 ? "0" : ""}${s}`;
+};
 const SingleCheck = ({ className }) => (
   <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
     <path d="M3 8.5L6.5 12L13.5 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -35,8 +42,11 @@ const ChatContainer = () => {
     setDisappearingTimer,
     messageSearchQuery,
     setReplyingToMessage,
+    setEditingMessage,
     toggleReaction,
     deleteMessage,
+    pinnedMessage,
+    togglePinMessage,
   } = useChatStore();
   const { authUser, onlineUsers } = useAuthStore();
   const { theme, wallpaper, privacyReadReceipts } = useThemeStore();
@@ -191,10 +201,43 @@ const ChatContainer = () => {
   }, [messages]);
 
   return (
-    <div className="flex-1 flex h-full overflow-hidden relative">
+    <div className="flex-1 flex h-full max-h-full overflow-hidden relative">
       {/* Left Column: Chat View */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden bg-base-100">
+      <div className="flex-1 flex flex-col h-full max-h-full overflow-hidden bg-base-100">
         <ChatHeader />
+
+        {/* Pinned Message Sticky Banner */}
+        {pinnedMessage && !pinnedMessage.isDeletedForEveryone && (
+          <div 
+            onClick={() => {
+              const el = document.getElementById(`msg-${pinnedMessage._id}`);
+              if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+            }}
+            className="bg-base-200/90 hover:bg-base-200 border-b border-base-300 px-4 py-2 flex items-center justify-between cursor-pointer transition-colors z-30 shadow-sm text-left animate-in slide-in-from-top duration-200"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Pin size={14} className="text-amber-500 flex-shrink-0 fill-amber-500/20" />
+              <div className="text-xs min-w-0">
+                <span className="font-semibold text-amber-500 block text-[10px] uppercase tracking-wider">
+                  Pinned Message
+                </span>
+                <p className="text-base-content/80 truncate font-medium max-w-[200px] sm:max-w-[400px]">
+                  {pinnedMessage.text || (pinnedMessage.image ? "📷 Photo" : pinnedMessage.voice ? "🎙️ Voice Message" : "Message")}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePinMessage(pinnedMessage._id);
+              }}
+              className="p-1 hover:bg-base-300 rounded-full transition-colors text-base-content/50 hover:text-red-500"
+              title="Unpin message"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
         <div 
           ref={scrollableRef}
@@ -207,12 +250,33 @@ const ChatContainer = () => {
               <span className="loading loading-spinner loading-md text-primary/60"></span>
             </div>
           ) : (
-            Array.isArray(messages) && messages.map((message) => (
-              <div
-                key={message._id}
-                id={`msg-${message._id}`}
-                className={`chat ${message.senderId === authUser._id ? "chat-end" : "chat-start"} group relative`}
-              >
+            Array.isArray(messages) && messages.map((message) => {
+              if (message.isCallLog) {
+                return (
+                  <div key={message._id} className="flex justify-center my-3 select-none w-full animate-in fade-in duration-200">
+                    <div className="bg-base-200/80 border border-base-300 rounded-full px-4 py-1.5 flex items-center gap-2 text-xs text-base-content/75 font-medium shadow-sm">
+                      {message.callType === "video" ? (
+                        <Video size={13} className={message.callStatus === "missed" ? "text-red-500" : "text-emerald-500"} />
+                      ) : (
+                        <Phone size={13} className={message.callStatus === "missed" ? "text-red-500" : "text-emerald-500"} />
+                      )}
+                      <span className="capitalize">
+                        {message.senderId === authUser._id ? "Outgoing" : "Incoming"} {message.callType} call • {message.callStatus === "completed" ? `duration ${formatCallDuration(message.callDuration)}` : message.callStatus}
+                      </span>
+                      <span className="text-[10px] opacity-60">
+                        {formatMessageTime(message.createdAt)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  key={message._id}
+                  id={`msg-${message._id}`}
+                  className={`chat ${message.senderId === authUser._id ? "chat-end" : "chat-start"} group relative`}
+                >
                 {/* Chat Bubble Wrapper with group-hover reactions panel */}
                 <div 
                   onDoubleClick={() => toggleReaction(message._id, "❤️")}
@@ -228,7 +292,7 @@ const ChatContainer = () => {
                         {message.replyTo.senderId === authUser._id ? "You" : selectedUser?.fullName}
                       </span>
                       <p className="truncate opacity-80 text-base-content/90 max-w-[200px] sm:max-w-[300px]">
-                        {message.replyTo.text || (message.replyTo.image ? "📷 Photo" : "Message")}
+                        {message.replyTo.text || (message.replyTo.image ? "📷 Photo" : message.replyTo.voice ? "🎙️ Voice Message" : "Message")}
                       </p>
                     </div>
                   )}
@@ -252,6 +316,26 @@ const ChatContainer = () => {
                     >
                       <CornerUpLeft size={13} />
                     </button>
+                    {message.senderId === authUser?._id && !message.isDeletedForEveryone && message.text && (Date.now() - new Date(message.createdAt).getTime() <= 15 * 60 * 1000) && (
+                      <button
+                        onClick={() => setEditingMessage(message)}
+                        className="text-base-content/60 hover:text-primary transition-colors flex items-center"
+                        title="Edit"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                    )}
+                    {!message.isDeletedForEveryone && (
+                      <button
+                        onClick={() => togglePinMessage(message._id)}
+                        className={`transition-colors flex items-center ${
+                          message.isPinned ? "text-amber-500 hover:text-amber-600" : "text-base-content/60 hover:text-amber-500"
+                        }`}
+                        title={message.isPinned ? "Unpin message" : "Pin message"}
+                      >
+                        <Pin size={13} />
+                      </button>
+                    )}
                     {!message.isDeletedForEveryone && (
                       <div className="dropdown dropdown-bottom dropdown-end flex items-center">
                         <div tabIndex={0} role="button" className="text-base-content/60 hover:text-red-500 transition-colors flex items-center p-0.5 cursor-pointer" title="Delete message">
@@ -292,6 +376,15 @@ const ChatContainer = () => {
                           className="sm:max-w-[180px] rounded-md mb-1.5"
                         />
                       )}
+                      {message.voice && (
+                        <div className="py-1 pr-14 select-none">
+                          <audio
+                            src={message.voice}
+                            controls
+                            className="max-w-[200px] sm:max-w-[260px] h-10 outline-none rounded-lg"
+                          />
+                        </div>
+                      )}
                       {message.text && (
                         <p className="text-sm leading-relaxed break-words pr-14 select-text">
                           {highlightText(message.text, messageSearchQuery)}
@@ -301,6 +394,7 @@ const ChatContainer = () => {
                   )}
                   
                   <div className="absolute bottom-1 right-2 flex items-center gap-0.5 text-[9px] opacity-60 select-none">
+                    {message.isEdited && <span className="mr-1 italic font-medium opacity-70">(edited)</span>}
                     <span>{formatMessageTime(message.createdAt)}</span>
                     {message.senderId === authUser._id && (
                       <span className="scale-75 origin-bottom-right">
@@ -313,7 +407,8 @@ const ChatContainer = () => {
                   {!message.isDeletedForEveryone && renderReactions(message)}
                 </div>
               </div>
-            ))
+              );
+            })
           )}
           <div ref={messageEndRef} />
         </div>
@@ -415,6 +510,7 @@ const ChatContainer = () => {
           </div>
         </div>
       )}
+      <CallModal />
     </div>
   );
 };
