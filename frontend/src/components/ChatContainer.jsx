@@ -317,22 +317,26 @@ const ChatContainer = () => {
                   id={`msg-${message._id}`}
                   className={`chat ${message.senderId === authUser._id ? "chat-end" : "chat-start"} group relative`}
                   onClick={(e) => e.stopPropagation()}
-                  onTouchStart={() => {
+                >
+                {/* Chat Bubble Wrapper with group-hover reactions panel */}
+                <div 
+                  onDoubleClick={() => toggleReaction(message._id, "❤️")}
+                  onTouchStart={(e) => {
+                    if (e.target.closest(".mobile-action-bar")) return;
                     longPressTimerRef.current = setTimeout(() => {
                       setMobileEmojiId(message._id);
                       setMobileActionId(null);
                       longPressTimerRef.current = null;
-                    }, 400);
+                    }, 450);
                   }}
                   onTouchEnd={(e) => {
+                    if (e.target.closest(".mobile-action-bar")) return;
                     if (longPressTimerRef.current) {
                       clearTimeout(longPressTimerRef.current);
                       longPressTimerRef.current = null;
-                      // Only toggle mobileActionId if we aren't tapping an active action bar child
-                      if (!e.target.closest(".mobile-action-bar")) {
-                        setMobileActionId((prev) => (prev === message._id ? null : message._id));
-                        setMobileEmojiId(null);
-                      }
+                      // Single tap behavior: if emoji bar was open, close it and open actions; otherwise toggle actions
+                      setMobileEmojiId(null);
+                      setMobileActionId((prev) => (prev === message._id ? null : message._id));
                     }
                   }}
                   onTouchMove={() => {
@@ -341,10 +345,6 @@ const ChatContainer = () => {
                       longPressTimerRef.current = null;
                     }
                   }}
-                >
-                {/* Chat Bubble Wrapper with group-hover reactions panel */}
-                <div 
-                  onDoubleClick={() => toggleReaction(message._id, "❤️")}
                   className={`flex flex-col py-1.5 px-3 chat-bubble relative min-w-[85px] transition-colors duration-300 select-none cursor-default ${message.reactions?.length > 0 ? "pb-5" : "pb-4"}`}
                 >
                   {/* Reply Quote Display */}
@@ -366,7 +366,6 @@ const ChatContainer = () => {
                   {mobileEmojiId === message._id && (
                     <div 
                       onClick={(e) => e.stopPropagation()}
-                      onTouchEnd={(e) => e.stopPropagation()}
                       className="mobile-action-bar absolute right-0 top-[-44px] lg:hidden animate-in zoom-in-95 duration-150 flex items-center bg-base-100 border border-base-300 rounded-full px-3 py-1.5 shadow-xl z-30 gap-2"
                     >
                       {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((emoji) => (
@@ -377,11 +376,6 @@ const ChatContainer = () => {
                             toggleReaction(message._id, emoji); 
                             setMobileEmojiId(null); 
                           }} 
-                          onTouchEnd={(e) => {
-                            e.stopPropagation();
-                            toggleReaction(message._id, emoji);
-                            setMobileEmojiId(null);
-                          }}
                           className="text-xl active:scale-125 transition-transform p-1"
                         >
                           {emoji}
@@ -394,12 +388,10 @@ const ChatContainer = () => {
                   {mobileActionId === message._id && (
                     <div 
                       onClick={(e) => e.stopPropagation()}
-                      onTouchEnd={(e) => e.stopPropagation()}
                       className="mobile-action-bar absolute right-0 top-[-44px] lg:hidden animate-in zoom-in-95 duration-150 flex items-center bg-base-100 border border-base-300 rounded-full px-3 py-1.5 shadow-xl z-30 gap-2.5"
                     >
                       <button 
                         onClick={(e) => { e.stopPropagation(); setReplyingToMessage(message); setMobileActionId(null); }} 
-                        onTouchEnd={(e) => { e.stopPropagation(); setReplyingToMessage(message); setMobileActionId(null); }}
                         className="text-base-content/80 active:text-primary transition-colors flex items-center p-1" 
                         title="Reply"
                       >
@@ -408,7 +400,6 @@ const ChatContainer = () => {
                       {!message.isDeletedForEveryone && (
                         <button 
                           onClick={(e) => { e.stopPropagation(); setForwardingMessage(message); setMobileActionId(null); }} 
-                          onTouchEnd={(e) => { e.stopPropagation(); setForwardingMessage(message); setMobileActionId(null); }}
                           className="text-base-content/80 active:text-primary transition-colors flex items-center p-1" 
                           title="Forward"
                         >
@@ -418,7 +409,6 @@ const ChatContainer = () => {
                       {message.senderId === authUser?._id && !message.isDeletedForEveryone && message.text && (Date.now() - new Date(message.createdAt).getTime() <= 15 * 60 * 1000) && (
                         <button 
                           onClick={(e) => { e.stopPropagation(); setEditingMessage(message); setMobileActionId(null); }} 
-                          onTouchEnd={(e) => { e.stopPropagation(); setEditingMessage(message); setMobileActionId(null); }}
                           className="text-base-content/80 active:text-primary transition-colors flex items-center p-1" 
                           title="Edit"
                         >
@@ -428,7 +418,6 @@ const ChatContainer = () => {
                       {!message.isDeletedForEveryone && (
                         <button 
                           onClick={(e) => { e.stopPropagation(); togglePinMessage(message._id); setMobileActionId(null); }} 
-                          onTouchEnd={(e) => { e.stopPropagation(); togglePinMessage(message._id); setMobileActionId(null); }}
                           className={`transition-colors flex items-center p-1 ${message.isPinned ? "text-amber-500" : "text-base-content/80 active:text-amber-500"}`} 
                           title={message.isPinned ? "Unpin" : "Pin"}
                         >
@@ -441,7 +430,6 @@ const ChatContainer = () => {
                             tabIndex={0} 
                             role="button" 
                             onClick={(e) => e.stopPropagation()} 
-                            onTouchEnd={(e) => e.stopPropagation()}
                             className="text-base-content/80 active:text-red-500 transition-colors flex items-center p-1 cursor-pointer" 
                             title="Delete"
                           >
@@ -451,7 +439,6 @@ const ChatContainer = () => {
                             <li>
                               <button 
                                 onClick={(e) => { e.stopPropagation(); deleteMessage(message._id, "me"); setMobileActionId(null); }} 
-                                onTouchEnd={(e) => { e.stopPropagation(); deleteMessage(message._id, "me"); setMobileActionId(null); }}
                                 className="hover:bg-base-200 py-2 text-left font-medium"
                               >
                                 Delete for me
@@ -461,7 +448,6 @@ const ChatContainer = () => {
                               <li>
                                 <button 
                                   onClick={(e) => { e.stopPropagation(); deleteMessage(message._id, "everyone"); setMobileActionId(null); }} 
-                                  onTouchEnd={(e) => { e.stopPropagation(); deleteMessage(message._id, "everyone"); setMobileActionId(null); }}
                                   className="hover:bg-red-500 hover:text-white py-2 text-left font-medium text-red-500"
                                 >
                                   Delete for everyone
