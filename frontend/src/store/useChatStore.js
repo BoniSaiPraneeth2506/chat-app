@@ -57,6 +57,19 @@ import useAuthStore from "./useAuthStore";
 import { useThemeStore } from "./useThemeStore";
 
 let callStartTime = null;
+let pendingIceCandidates = [];
+
+const processPendingIceCandidates = async (pc) => {
+  if (!pc || !pc.remoteDescription) return;
+  while (pendingIceCandidates.length > 0) {
+    const candidate = pendingIceCandidates.shift();
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (e) {
+      console.error("Error adding queued ice candidate", e);
+    }
+  }
+};
 
 export const useChatStore = create((set, get) => ({
   messages: [],
@@ -378,6 +391,7 @@ export const useChatStore = create((set, get) => ({
       if (pc) {
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(signal));
+          await processPendingIceCandidates(pc);
           set({ callState: "connected" });
           callStartTime = Date.now();
         } catch (e) {
@@ -414,6 +428,8 @@ export const useChatStore = create((set, get) => ({
       }
 
       callStartTime = null;
+      pendingIceCandidates = [];
+
       if (peerConnection) {
         try {
           peerConnection.close();
@@ -440,12 +456,14 @@ export const useChatStore = create((set, get) => ({
     // Handle ICE candidates
     socket.on("iceCandidate", async ({ candidate }) => {
       const pc = get().peerConnection;
-      if (pc) {
+      if (pc && pc.remoteDescription && pc.remoteDescription.type) {
         try {
           await pc.addIceCandidate(new RTCIceCandidate(candidate));
         } catch (e) {
           console.error("Error adding ice candidate", e);
         }
+      } else {
+        pendingIceCandidates.push(candidate);
       }
     });
 
@@ -734,6 +752,7 @@ export const useChatStore = create((set, get) => ({
       };
 
       await pc.setRemoteDescription(new RTCSessionDescription(incomingSignal));
+      await processPendingIceCandidates(pc);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
@@ -783,6 +802,7 @@ export const useChatStore = create((set, get) => ({
     }
 
     callStartTime = null;
+    pendingIceCandidates = [];
 
     if (peerConnection) {
       try {
