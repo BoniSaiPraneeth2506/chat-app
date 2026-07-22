@@ -8,6 +8,7 @@ const MessageInput = () => {
   const [text, setText] = useState("");
   const [imagePreview, setImagePreview] = useState(null);
   const [isOneView, setIsOneView] = useState(false);
+  const [isSendingAnimation, setIsSendingAnimation] = useState(false);
   const fileInputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
 
@@ -121,6 +122,9 @@ const MessageInput = () => {
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     sendTypingStatus(false);
+    
+    setIsSendingAnimation(true);
+    setTimeout(() => setIsSendingAnimation(false), 400);
 
     try {
       if (editingMessage) {
@@ -226,83 +230,83 @@ const MessageInput = () => {
   return (
     <div className="w-full px-4 py-3 bg-base-200/50 flex flex-col gap-2 relative border-t border-base-300 lg:border-t-0">
       {/* Quoted Reply Banner */}
-      {replyingToMessage && (
-        <div className="flex items-center justify-between bg-base-200/90 px-4 py-2 border-l-4 border-primary rounded-r-lg mb-1 relative text-left">
-          <div className="text-xs">
-            <span className="text-primary font-semibold select-none flex items-center gap-1">
-              <CornerDownLeft size={10} />
-              Replying to {replyingToMessage.senderId === authUser?._id ? "yourself" : selectedUser?.fullName}
-            </span>
-            <p className="text-base-content/75 truncate max-w-[200px] sm:max-w-[400px] mt-0.5">
-              {replyingToMessage.text || (replyingToMessage.image ? "📷 Photo" : replyingToMessage.voice ? "🎙️ Voice Message" : "Message")}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setReplyingToMessage(null)}
-            className="p-1 hover:bg-base-300 rounded-full transition-colors text-base-content/50"
-            title="Cancel reply"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
-      {/* Editing Message Banner */}
-      {editingMessage && (
-        <div className="flex items-center justify-between bg-base-200/90 px-4 py-2 border-l-4 border-warning rounded-r-lg mb-1 relative text-left">
-          <div className="text-xs">
-            <span className="text-warning font-semibold select-none flex items-center gap-1">
-              Editing Message
-            </span>
-            <p className="text-base-content/75 truncate max-w-[200px] sm:max-w-[400px] mt-0.5">
-              {editingMessage.text}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setEditingMessage(null)}
-            className="p-1 hover:bg-base-300 rounded-full transition-colors text-base-content/50"
-            title="Cancel edit"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
-
-      {imagePreview && (
-        <div className="flex items-center gap-2 mb-1 animate-in slide-in-from-bottom duration-200">
-          <div className="relative">
-            <img
-              src={imagePreview}
-              alt="Preview"
-              className="object-cover w-20 h-20 border rounded-lg border-zinc-700"
-            />
+        {replyingToMessage && (
+          <div className="flex items-center justify-between bg-base-200/90 px-4 py-2 border-l-4 border-primary rounded-r-lg mb-1 relative text-left">
+            <div className="text-xs">
+              <span className="text-primary font-semibold select-none flex items-center gap-1">
+                <CornerDownLeft size={10} />
+                Replying to {replyingToMessage.senderId === authUser?._id ? "yourself" : selectedUser?.fullName}
+              </span>
+              <p className="text-base-content/75 truncate max-w-[200px] sm:max-w-[400px] mt-0.5">
+                {replyingToMessage.text || (replyingToMessage.image ? "📷 Photo" : replyingToMessage.voice ? "🎙️ Voice Message" : "Message")}
+              </p>
+            </div>
             <button
-              onClick={removeImage}
-              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-base-300
-              flex items-center justify-center shadow-sm"
               type="button"
+              onClick={() => setReplyingToMessage(null)}
+              className="p-1 hover:bg-base-300 rounded-full transition-colors text-base-content/50"
+              title="Cancel reply"
             >
-              <X className="size-3" />
-            </button>
-            <button
-              onClick={() => setIsOneView(!isOneView)}
-              className={`absolute -bottom-1.5 -right-1.5 w-6 h-6 rounded-full flex items-center justify-center shadow-md font-bold text-xs transition-all border select-none
-                ${isOneView 
-                  ? "bg-emerald-500 text-white border-emerald-600 ring-2 ring-emerald-500/20 scale-110" 
-                  : "bg-base-300 text-base-content border-base-300 hover:bg-base-200"
-                }
-              `}
-              title={isOneView ? "View Once Photo enabled" : "Set as View Once Photo"}
-              type="button"
-            >
-              1
+              <X size={14} />
             </button>
           </div>
-        </div>
-      )}
+        )}
+        {/* Editing Message Banner */}
+        {editingMessage && (
+          <div className="flex items-center justify-between bg-base-200/90 px-4 py-2 border-l-4 border-warning rounded-r-lg mb-1 relative text-left">
+            <div className="text-xs">
+              <span className="text-warning font-semibold select-none flex items-center gap-1">
+                Editing Message
+              </span>
+              <p className="text-base-content/75 truncate max-w-[200px] sm:max-w-[400px] mt-0.5">
+                {editingMessage.text}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setEditingMessage(null)}
+              className="p-1 hover:bg-base-300 rounded-full transition-colors text-base-content/50"
+              title="Cancel edit"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
-      <form onSubmit={handleSendMessage} className="flex items-center gap-3">
+        {imagePreview && (
+          <div className="flex items-center gap-2 mb-1 animate-in slide-in-from-bottom duration-200">
+            <div className="relative">
+              <img
+                src={imagePreview}
+                alt="Preview"
+                className="object-cover w-20 h-20 border rounded-lg border-zinc-700"
+              />
+              <button
+                onClick={removeImage}
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-base-300
+                flex items-center justify-center shadow-sm"
+                type="button"
+              >
+                <X className="size-3" />
+              </button>
+              <button
+                onClick={() => setIsOneView(!isOneView)}
+                className={`absolute -bottom-1.5 -right-1.5 w-6 h-6 rounded-full flex items-center justify-center shadow-md font-bold text-xs transition-all border select-none
+                  ${isOneView 
+                    ? "bg-emerald-500 text-white border-emerald-600 ring-2 ring-emerald-500/20 scale-110" 
+                    : "bg-base-300 text-base-content border-base-300 hover:bg-base-200"
+                  }
+                `}
+                title={isOneView ? "View Once Photo enabled" : "Set as View Once Photo"}
+                type="button"
+              >
+                1
+              </button>
+            </div>
+          </div>
+        )}
+
+        <form onSubmit={handleSendMessage} className="flex items-center gap-3">
         <div className="flex-1 flex items-center gap-3 bg-base-100 rounded-full px-4 py-1.5 min-h-[42px] border border-base-300/30 shadow-sm">
           {isRecording ? (
             <div className="flex items-center justify-between w-full px-2">
@@ -361,22 +365,29 @@ const MessageInput = () => {
           </button>
         ) : (
           <button
-            type={text.trim() || imagePreview ? "submit" : "button"}
-            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-md flex-shrink-0
+            type={text.trim() || imagePreview || isSendingAnimation ? "submit" : "button"}
+            className={`relative w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-md flex-shrink-0 overflow-hidden
               ${
-                text.trim() || imagePreview
+                text.trim() || imagePreview || isSendingAnimation
                   ? "bg-primary text-primary-content hover:scale-105 active:scale-95"
                   : "bg-base-100 text-base-content/40 border border-base-300/30 hover:bg-base-200"
               }
             `}
             onClick={(e) => {
-              if (!text.trim() && !imagePreview) {
+              if (!text.trim() && !imagePreview && !isSendingAnimation) {
                 e.preventDefault();
                 startRecording();
               }
             }}
           >
-            {text.trim() || imagePreview ? <Send size={16} className="ml-0.5" /> : <Mic size={18} />}
+            {text.trim() || imagePreview || isSendingAnimation ? (
+              <Send 
+                size={16} 
+                className={`ml-0.5 transition-all duration-300 ease-in-out ${isSendingAnimation ? "translate-x-5 -translate-y-5 opacity-0 scale-50" : "translate-x-0 translate-y-0 opacity-100 scale-100"}`} 
+              />
+            ) : (
+              <Mic size={18} />
+            )}
           </button>
         )}
       </form>

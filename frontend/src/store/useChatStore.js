@@ -56,6 +56,8 @@ import axiosInstance from "../lib/axios";
 import useAuthStore from "./useAuthStore";
 import { useThemeStore } from "./useThemeStore";
 
+
+
 let callStartTime = null;
 let pendingIceCandidates = [];
 
@@ -191,7 +193,7 @@ export const useChatStore = create((set, get) => ({
       // Emit markAsRead to receiver
       const socket = useAuthStore.getState().socket;
       const currentUser = useAuthStore.getState().authUser;
-      if (socket && currentUser) {
+      if (socket && currentUser && useThemeStore.getState().privacyReadReceipts) {
         socket.emit("markAsRead", { senderId: userId, receiverId: currentUser._id });
       }
     } catch (error) {
@@ -231,6 +233,7 @@ export const useChatStore = create((set, get) => ({
 
       const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, payload);
       const sentMessage = res.data;
+
       set({ 
         messages: [...messages, sentMessage],
         replyingToMessage: null,
@@ -297,7 +300,7 @@ export const useChatStore = create((set, get) => ({
     // Emit read receipt for current active chat immediately if any
     const { selectedUser } = get();
     const currentUser = useAuthStore.getState().authUser;
-    if (selectedUser && currentUser) {
+    if (selectedUser && currentUser && useThemeStore.getState().privacyReadReceipts) {
       console.log(`[Socket Client] Emitting markAsRead on initialization for user: ${selectedUser._id}`);
       socket.emit("markAsRead", { senderId: selectedUser._id, receiverId: currentUser._id });
     }
@@ -309,17 +312,6 @@ export const useChatStore = create((set, get) => ({
       if (newMessage.senderId === currentUser?._id && newMessage.receiverId === currentUser?._id) {
         return;
       }
-      
-      if (useThemeStore.getState().soundEnabled) {
-        try {
-          const audio = new Audio("https://assets.mixkit.co/active_storage/sfx/2568/2568-84.wav");
-          audio.volume = 0.5;
-          audio.play();
-        } catch (err) {
-          console.error("Failed to play notification sound:", err);
-        }
-      }
-      
       // Update latest message for the sender
       set((state) => ({
         latestMessages: {
@@ -333,8 +325,8 @@ export const useChatStore = create((set, get) => ({
         set({
           messages: [...messages, newMessage],
         });
-        // Emit read receipt back immediately
-        if (currentUser) {
+        // Emit read receipt back immediately if privacy setting allows it
+        if (currentUser && useThemeStore.getState().privacyReadReceipts) {
           console.log(`[Socket Client] Active chat message received. Emitting markAsRead for: ${selectedUser._id}`);
           socket.emit("markAsRead", { senderId: selectedUser._id, receiverId: currentUser._id });
         }
