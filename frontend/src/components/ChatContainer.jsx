@@ -576,7 +576,7 @@ const ChatContainer = () => {
       isPrependingRef.current = false;
     } else if (prevMessagesLengthRef.current === 0 || latestMessageId !== lastMessageIdRef.current) {
       if (messageEndRef.current) {
-        messageEndRef.current.scrollIntoView({ behavior: "auto" });
+        messageEndRef.current.scrollIntoView({ behavior: "smooth" });
       }
     }
 

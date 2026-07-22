@@ -120,32 +120,37 @@ const MessageInput = () => {
     e.preventDefault();
     if (!text.trim() && !imagePreview) return;
 
+    const messageText = text.trim();
+    const messageImage = imagePreview;
+    const messageOneView = isOneView;
+    const currentEditing = editingMessage;
+
+    // Clear form & draft INSTANTLY before network request (0ms latency)
+    setText("");
+    if (selectedUser) {
+      setDraft(selectedUser._id, "");
+    }
+    setImagePreview(null);
+    setIsOneView(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     sendTypingStatus(false);
     
     setIsSendingAnimation(true);
-    setTimeout(() => setIsSendingAnimation(false), 400);
+    setTimeout(() => setIsSendingAnimation(false), 250);
 
     try {
-      if (editingMessage) {
-        await editMessage(editingMessage._id, text.trim());
+      if (currentEditing) {
+        await editMessage(currentEditing._id, messageText);
         setEditingMessage(null);
       } else {
         await sendMessage({
-          text: text.trim(),
-          image: imagePreview,
-          isOneView: isOneView
+          text: messageText,
+          image: messageImage,
+          isOneView: messageOneView
         });
       }
-
-      // Clear form & draft
-      setText("");
-      if (selectedUser) {
-        setDraft(selectedUser._id, "");
-      }
-      setImagePreview(null);
-      setIsOneView(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (error) {
       console.error("Failed to send message:", error);
     }

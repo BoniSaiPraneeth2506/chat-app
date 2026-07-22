@@ -225,7 +225,34 @@ export const useChatStore = create((set, get) => ({
     }
   },
   sendMessage: async (messageData) => {
-    const { selectedUser, messages, replyingToMessage } = get();
+    const { selectedUser, replyingToMessage } = get();
+    const authUser = useAuthStore.getState().authUser;
+    if (!selectedUser || !authUser) return;
+
+    const tempId = "temp-" + Date.now();
+    const optimisticMsg = {
+      _id: tempId,
+      senderId: authUser._id,
+      receiverId: selectedUser._id,
+      text: messageData.text || "",
+      image: messageData.image || "",
+      voice: messageData.voice || "",
+      isOneView: messageData.isOneView || false,
+      replyTo: replyingToMessage,
+      createdAt: new Date().toISOString(),
+      isSending: true,
+    };
+
+    // Optimistically append message to UI instantly (0ms delay)
+    set((state) => ({
+      messages: [...state.messages, optimisticMsg],
+      replyingToMessage: null,
+      latestMessages: {
+        ...state.latestMessages,
+        [selectedUser._id]: optimisticMsg
+      }
+    }));
+
     try {
       const payload = replyingToMessage 
         ? { ...messageData, replyTo: replyingToMessage._id } 
@@ -234,15 +261,19 @@ export const useChatStore = create((set, get) => ({
       const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, payload);
       const sentMessage = res.data;
 
-      set({ 
-        messages: [...messages, sentMessage],
-        replyingToMessage: null,
+      // Replace temporary optimistic message with confirmed server message
+      set((state) => ({ 
+        messages: state.messages.map((m) => (m._id === tempId ? sentMessage : m)),
         latestMessages: {
-          ...get().latestMessages,
+          ...state.latestMessages,
           [selectedUser._id]: sentMessage
         }
-      });
+      }));
     } catch (error) {
+      // Revert temporary message if network request fails
+      set((state) => ({
+        messages: state.messages.filter((m) => m._id !== tempId)
+      }));
       toast.error(error.response?.data?.message || error.message || "Failed to send message");
     }
   },
