@@ -69,6 +69,54 @@ import Message from "../models/message.model.js";
 import User from "../models/user.model.js";
 import cloudinary from "../lib/cloudinary.js";
 import { getReceiverSocketId, io } from "../lib/socket.js";
+import sanitizeHtml from "sanitize-html";
+
+// ── Security Helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Escape special regex characters to prevent ReDoS / NoSQL injection
+ * when building $regex queries from user input.
+ */
+const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Strip all HTML/JS from message text.
+ * Stores plain text only — safe to render anywhere.
+ */
+const sanitizeText = (text) =>
+  sanitizeHtml(text, { allowedTags: [], allowedAttributes: {} });
+
+/** Validate image data URI: type whitelist + size cap */
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+const MAX_IMG_BYTES = 8_000_000; // ~6 MB actual after base64
+
+const validateImage = (dataUri) => {
+  if (!dataUri.startsWith("data:")) return { valid: false, reason: "Invalid image format" };
+  const mime = dataUri.split(";")[0].split(":")[1];
+  if (!ALLOWED_IMAGE_TYPES.includes(mime)) {
+    return { valid: false, reason: "Only JPEG, PNG, GIF, and WebP images are allowed" };
+  }
+  if (dataUri.length > MAX_IMG_BYTES) {
+    return { valid: false, reason: "Image file too large (max 6 MB)" };
+  }
+  return { valid: true };
+};
+
+/** Validate audio/voice data URI */
+const ALLOWED_AUDIO_TYPES = ["audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/wav"];
+const MAX_VOICE_BYTES = 15_000_000; // ~11 MB actual
+
+const validateVoice = (dataUri) => {
+  if (!dataUri.startsWith("data:")) return { valid: false, reason: "Invalid voice format" };
+  const mime = dataUri.split(";")[0].split(":")[1];
+  if (!ALLOWED_AUDIO_TYPES.includes(mime)) {
+    return { valid: false, reason: "Unsupported audio format" };
+  }
+  if (dataUri.length > MAX_VOICE_BYTES) {
+    return { valid: false, reason: "Voice message too large (max 11 MB)" };
+  }
+  return { valid: true };
+};
 
 const getUsersForSidebar = async (req, res) => {
   try {
@@ -76,9 +124,11 @@ const getUsersForSidebar = async (req, res) => {
     const loggedInUserId = req.user._id;
 
     if (search) {
+      // Escape special regex chars to prevent ReDoS / NoSQL injection
+      const safeSearch = escapeRegex(search.trim().slice(0, 60));
       const filteredUsers = await User.find({
         _id: { $ne: loggedInUserId },
-        fullName: { $regex: search, $options: "i" }
+        fullName: { $regex: safeSearch, $options: "i" }
       }).select("-password");
       return res.status(200).json(filteredUsers);
     }
@@ -191,12 +241,20 @@ const sendMessage = async (req, res) => {
 
     let imageUrl = "";
     if (image) {
+      const imgValidation = validateImage(image);
+      if (!imgValidation.valid) {
+        return res.status(400).json({ message: imgValidation.reason });
+      }
       const uploadResponse = await cloudinary.uploader.upload(image);
       imageUrl = uploadResponse.secure_url;
     }
 
     let voiceUrl = "";
     if (voice) {
+      const voiceValidation = validateVoice(voice);
+      if (!voiceValidation.valid) {
+        return res.status(400).json({ message: voiceValidation.reason });
+      }
       const uploadResponse = await cloudinary.uploader.upload(voice, {
         resource_type: "video"
       });
@@ -221,7 +279,7 @@ const sendMessage = async (req, res) => {
     const newMessage = new Message({
       senderId,
       receiverId,
-      text,
+      text: text ? sanitizeText(text) : text, // strip HTML/JS from message text
       image: imageUrl,
       voice: voiceUrl || undefined,
       deleteAt,
@@ -469,7 +527,7 @@ const editMessage = async (req, res) => {
       return res.status(400).json({ message: "Messages can only be edited within 15 minutes of sending" });
     }
 
-    message.text = text;
+    message.text = text ? sanitizeText(text) : text; // strip HTML/JS on edit too
     message.isEdited = true;
     await message.save();
 

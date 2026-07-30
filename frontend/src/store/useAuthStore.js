@@ -101,15 +101,19 @@ const useAuthStore=create((set,get)=>({
       
       console.log("Creating new Socket.IO connection for user:", authUser._id);
       
-      const newSocket=io(BASE_URL,{
-        query:{
-            userId:authUser._id
+      const token = localStorage.getItem("token");
+      const newSocket = io(BASE_URL, {
+        auth: {
+          token,  // verified by Socket.IO JWT middleware on the server
+        },
+        query: {
+          userId: authUser._id  // kept for legacy display only, NOT used for auth
         },
         transports: ["websocket"],
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
-        reconnectionAttempts: 10
+        reconnectionAttempts: 10,
       })
 
       newSocket.on('connect', () => {

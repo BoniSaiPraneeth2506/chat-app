@@ -1,6 +1,7 @@
 import { Server } from 'socket.io';
 import http from 'http';
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import User from '../models/user.model.js';
 
 const app = express();
@@ -9,12 +10,10 @@ const server = http.createServer(app);
 const isOriginAllowed = (origin) => {
     if (process.env.NODE_ENV !== "production") return true;
     if (!origin) return true;
-    try {
-        const hostname = new URL(origin).hostname;
-        return hostname === "localhost" || hostname === "127.0.0.1" || hostname.endsWith("onrender.com");
-    } catch {
-        return false;
-    }
+    const allowed = process.env.ALLOWED_ORIGIN
+        ? [process.env.ALLOWED_ORIGIN, "http://localhost:5173"]
+        : ["http://localhost:5173", "http://localhost:5001"];
+    return allowed.includes(origin);
 };
 
 const io = new Server(server, {
@@ -26,16 +25,34 @@ const io = new Server(server, {
                 callback(new Error('Not allowed by CORS'), false);
             }
         },
-        credentials: true
+        credentials: true,
     },
-    transports: ["websocket"]
+    transports: ["websocket"],
+    maxHttpBufferSize: 1e6, // 1 MB max per socket message
 });
-export function getReceiverSocketId(userId){
-    return userSocketMap[userId]
+
+// ── Socket.IO JWT Auth Middleware ─────────────────────────────────────────────
+io.use((socket, next) => {
+    try {
+        // Accept token from auth.token (preferred) or query.token (fallback)
+        const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+        if (!token) {
+            return next(new Error("Unauthorized: No token provided"));
+        }
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        socket.userId = decoded.userId; // attach verified userId to socket
+        next();
+    } catch (err) {
+        next(new Error("Unauthorized: Invalid or expired token"));
+    }
+});
+
+export function getReceiverSocketId(userId) {
+    return userSocketMap[userId];
 }
 
-const userSocketMap = {}; // Stores online users: { userId: socketId }
-const privateUsersSet = new Set(); // Stores online users who chose to hide online status
+const userSocketMap = {}; // { userId: socketId }
+const privateUsersSet = new Set(); // users who hide online status
 
 const broadcastOnlineUsers = () => {
     const visibleOnlineUsers = Object.keys(userSocketMap).filter(id => !privateUsersSet.has(id));
@@ -52,14 +69,9 @@ export function updateUserPrivacyState(userId, isPrivate) {
 }
 
 io.on("connection", async (socket) => {
-    const userId = socket.handshake.query.userId;
+    // userId is now always verified from JWT — not from client query
+    const userId = socket.userId;
     console.log("A user Connected:", socket.id, "UserID:", userId);
-
-    if (!userId) {
-        console.log("WARNING: Connection received without userId - disconnecting");
-        socket.disconnect();
-        return;
-    }
 
     // Store the new socket (silently replace old one if exists)
     const oldSocketId = userSocketMap[userId];
@@ -82,58 +94,69 @@ io.on("connection", async (socket) => {
     } catch (err) {
         console.error("Error fetching user settings on connection:", err);
     }
-    
+
     if (oldSocketId) {
         console.log(`User ${userId} reconnected. Old socket: ${oldSocketId}, New socket: ${socket.id}`);
     } else {
-        console.log(`User ${userId} connected for first time. Current online users:`, Object.keys(userSocketMap));
+        console.log(`User ${userId} connected. Current online users:`, Object.keys(userSocketMap));
     }
 
-    // Notify all clients about online users
     broadcastOnlineUsers();
 
+    // ── Event: markAsRead ───────────────────────────────────────────────────
     socket.on("markAsRead", ({ senderId, receiverId }) => {
-        console.log(`[Socket Server] User ${receiverId} read messages from User ${senderId}`);
+        // Validate: only the authenticated user can claim to be the receiver
+        if (receiverId !== userId) {
+            console.warn(`[Security] User ${userId} tried to spoof markAsRead as ${receiverId}`);
+            return;
+        }
+        console.log(`[Socket] User ${receiverId} read messages from User ${senderId}`);
         const senderSocketId = getReceiverSocketId(senderId);
         if (senderSocketId) {
             io.to(senderSocketId).emit("messagesRead", { userId: receiverId });
-            console.log(`[Socket Server] Forwarded read receipt to sender: ${senderId}`);
-        } else {
-            console.log(`[Socket Server] Sender ${senderId} is currently offline.`);
         }
     });
 
+    // ── Event: typing ───────────────────────────────────────────────────────
     socket.on("typing", ({ receiverId, isTyping }) => {
+        // Use verified socket.userId as senderId — never trust client
         const receiverSocketId = getReceiverSocketId(receiverId);
         if (receiverSocketId) {
-            io.to(receiverSocketId).emit("typing", { senderId: userId.toString(), isTyping });
+            io.to(receiverSocketId).emit("typing", { senderId: userId, isTyping });
         }
     });
 
+    // ── Event: callUser ─────────────────────────────────────────────────────
     socket.on("callUser", ({ userToCall, signalData, from, type }) => {
-        console.log(`[Socket Server] User ${from} is calling User ${userToCall} (${type})`);
+        // Verify: 'from' must match authenticated user
+        if (from !== userId) {
+            console.warn(`[Security] User ${userId} tried to spoof call as ${from}`);
+            return;
+        }
+        console.log(`[Socket] User ${from} is calling User ${userToCall} (${type})`);
         const receiverSocketId = getReceiverSocketId(userToCall);
         if (receiverSocketId) {
             io.to(receiverSocketId).emit("callUser", { signal: signalData, from, type });
         }
     });
 
+    // ── Event: answerCall ───────────────────────────────────────────────────
     socket.on("answerCall", ({ signal, to }) => {
-        console.log(`[Socket Server] User ${userId} accepted call from User ${to}`);
         const receiverSocketId = getReceiverSocketId(to);
         if (receiverSocketId) {
             io.to(receiverSocketId).emit("callAccepted", { signal });
         }
     });
 
+    // ── Event: endCall ──────────────────────────────────────────────────────
     socket.on("endCall", ({ to }) => {
-        console.log(`[Socket Server] User ${userId} ended call with User ${to}`);
         const receiverSocketId = getReceiverSocketId(to);
         if (receiverSocketId) {
             io.to(receiverSocketId).emit("callEnded");
         }
     });
 
+    // ── Event: iceCandidate ─────────────────────────────────────────────────
     socket.on("iceCandidate", ({ candidate, to }) => {
         const receiverSocketId = getReceiverSocketId(to);
         if (receiverSocketId) {
@@ -141,22 +164,21 @@ io.on("connection", async (socket) => {
         }
     });
 
+    // ── Disconnect ──────────────────────────────────────────────────────────
     socket.on("disconnect", async () => {
         console.log("A user Disconnected:", socket.id, "UserID:", userId);
 
-        // Only remove if THIS socket is currently mapped for this user
         if (userId && userSocketMap[userId] === socket.id) {
             delete userSocketMap[userId];
             privateUsersSet.delete(userId.toString());
             console.log("User removed from online map. Current online users:", Object.keys(userSocketMap));
-            
+
             try {
                 await User.findByIdAndUpdate(userId, { lastSeen: new Date() });
             } catch (err) {
                 console.error("Error updating lastSeen on disconnect:", err);
             }
 
-            // Notify all clients about updated online users
             broadcastOnlineUsers();
         } else if (userId) {
             console.log(`Ignoring disconnect for old socket of user ${userId}`);
