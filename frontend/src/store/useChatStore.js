@@ -236,6 +236,7 @@ export const useChatStore = create((set, get) => ({
       receiverId: selectedUser._id,
       text: messageData.text || "",
       image: messageData.image || "",
+      images: messageData.images || [],
       voice: messageData.voice || "",
       isOneView: messageData.isOneView || false,
       replyTo: replyingToMessage,
@@ -285,6 +286,7 @@ export const useChatStore = create((set, get) => ({
       if (!message.isDeletedForEveryone) {
         if (message.text) payload.text = message.text;
         if (message.image) payload.image = message.image;
+        if (message.images) payload.images = message.images;
         if (message.voice) payload.voice = message.voice;
       }
 

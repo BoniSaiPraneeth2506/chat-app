@@ -19,6 +19,9 @@ const messageSchema = new Schema(
     image: {
       type: String,
     },
+    images: [{
+      type: String,
+    }],
     voice: {
       type: String,
     },

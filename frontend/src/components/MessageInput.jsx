@@ -6,7 +6,7 @@ import toast from "react-hot-toast";
 
 const MessageInput = () => {
   const [text, setText] = useState("");
-  const [imagePreview, setImagePreview] = useState(null);
+  const [imagePreviews, setImagePreviews] = useState([]);
   const [isOneView, setIsOneView] = useState(false);
   const [isSendingAnimation, setIsSendingAnimation] = useState(false);
   const fileInputRef = useRef(null);
@@ -60,17 +60,27 @@ const MessageInput = () => {
   }, []);
 
   const handleImageChange = (e) => {
-    const file = e.target.files[0];
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please select an image file");
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
+
+    if (imagePreviews.length + files.length > 5) {
+      toast.error("You can select up to 5 images per message");
       return;
     }
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      compressImage(reader.result, 0.6); // 60% quality
-    };
-    reader.readAsDataURL(file);
+    const nonImage = files.find(f => !f.type.startsWith("image/"));
+    if (nonImage) {
+      toast.error("Please select only image files");
+      return;
+    }
+
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        compressImage(reader.result, 0.6);
+      };
+      reader.readAsDataURL(file);
+    });
   };
 
   const compressImage = (base64, quality = 0.6) => {
@@ -79,7 +89,7 @@ const MessageInput = () => {
 
     img.onload = () => {
       const canvas = document.createElement("canvas");
-      const maxSize = 500;
+      const maxSize = 600;
 
       const scale = Math.min(maxSize / img.width, maxSize / img.height, 1);
       canvas.width = img.width * scale;
@@ -89,13 +99,15 @@ const MessageInput = () => {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
       const compressedBase64 = canvas.toDataURL("image/jpeg", quality);
-      setImagePreview(compressedBase64);
+      setImagePreviews(prev => [...prev, compressedBase64].slice(0, 5));
     };
   };
 
-  const removeImage = () => {
-    setImagePreview(null);
-    setIsOneView(false);
+  const removeImage = (indexToRemove) => {
+    setImagePreviews(prev => prev.filter((_, idx) => idx !== indexToRemove));
+    if (imagePreviews.length <= 1) {
+      setIsOneView(false);
+    }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -118,10 +130,10 @@ const MessageInput = () => {
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!text.trim() && !imagePreview) return;
+    if (!text.trim() && imagePreviews.length === 0) return;
 
     const messageText = text.trim();
-    const messageImage = imagePreview;
+    const currentImages = [...imagePreviews];
     const messageOneView = isOneView;
     const currentEditing = editingMessage;
 
@@ -130,7 +142,7 @@ const MessageInput = () => {
     if (selectedUser) {
       setDraft(selectedUser._id, "");
     }
-    setImagePreview(null);
+    setImagePreviews([]);
     setIsOneView(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
 
@@ -145,11 +157,19 @@ const MessageInput = () => {
         await editMessage(currentEditing._id, messageText);
         setEditingMessage(null);
       } else {
-        await sendMessage({
-          text: messageText,
-          image: messageImage,
-          isOneView: messageOneView
-        });
+        if (currentImages.length > 1) {
+          await sendMessage({
+            text: messageText,
+            images: currentImages,
+            isOneView: false // Multi-image doesn't use View Once
+          });
+        } else {
+          await sendMessage({
+            text: messageText,
+            image: currentImages[0] || "",
+            isOneView: messageOneView
+          });
+        }
       }
     } catch (error) {
       console.error("Failed to send message:", error);
@@ -278,36 +298,40 @@ const MessageInput = () => {
           </div>
         )}
 
-        {imagePreview && (
-          <div className="flex items-center gap-2 mb-1 animate-in slide-in-from-bottom duration-200">
-            <div className="relative">
-              <img
-                src={imagePreview}
-                alt="Preview"
-                className="object-cover w-20 h-20 border rounded-lg border-zinc-700"
-              />
-              <button
-                onClick={removeImage}
-                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-base-300
-                flex items-center justify-center shadow-sm"
-                type="button"
-              >
-                <X className="size-3" />
-              </button>
-              <button
-                onClick={() => setIsOneView(!isOneView)}
-                className={`absolute -bottom-1.5 -right-1.5 w-6 h-6 rounded-full flex items-center justify-center shadow-md font-bold text-xs transition-all border select-none
-                  ${isOneView 
-                    ? "bg-emerald-500 text-white border-emerald-600 ring-2 ring-emerald-500/20 scale-110" 
-                    : "bg-base-300 text-base-content border-base-300 hover:bg-base-200"
-                  }
-                `}
-                title={isOneView ? "View Once Photo enabled" : "Set as View Once Photo"}
-                type="button"
-              >
-                1
-              </button>
-            </div>
+        {imagePreviews.length > 0 && (
+          <div className="flex items-center gap-2 mb-1 overflow-x-auto pb-1 max-w-full animate-in slide-in-from-bottom duration-200">
+            {imagePreviews.map((imgSrc, idx) => (
+              <div key={idx} className="relative shrink-0">
+                <img
+                  src={imgSrc}
+                  alt={`Preview ${idx + 1}`}
+                  className="object-cover w-20 h-20 border rounded-lg border-zinc-700 shadow-sm"
+                />
+                <button
+                  onClick={() => removeImage(idx)}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-base-300
+                  flex items-center justify-center shadow-md hover:bg-base-200"
+                  type="button"
+                >
+                  <X className="size-3 text-base-content" />
+                </button>
+                {imagePreviews.length === 1 && (
+                  <button
+                    onClick={() => setIsOneView(!isOneView)}
+                    className={`absolute -bottom-1.5 -right-1.5 w-6 h-6 rounded-full flex items-center justify-center shadow-md font-bold text-xs transition-all border select-none
+                      ${isOneView 
+                        ? "bg-emerald-500 text-white border-emerald-600 ring-2 ring-emerald-500/20 scale-110" 
+                        : "bg-base-300 text-base-content border-base-300 hover:bg-base-200"
+                      }
+                    `}
+                    title={isOneView ? "View Once Photo enabled" : "Set as View Once Photo"}
+                    type="button"
+                  >
+                    1
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
         )}
 
@@ -333,9 +357,10 @@ const MessageInput = () => {
               <button
                 type="button"
                 className={`p-1 hover:bg-base-200 rounded-full transition-colors flex items-center justify-center ${
-                  imagePreview ? "text-emerald-500" : "text-base-content/40 hover:text-base-content"
+                  imagePreviews.length > 0 ? "text-emerald-500" : "text-base-content/40 hover:text-base-content"
                 }`}
                 onClick={() => fileInputRef.current?.click()}
+                title="Attach images (up to 5)"
               >
                 <Image size={18} />
               </button>
@@ -343,6 +368,7 @@ const MessageInput = () => {
               <input
                 type="file"
                 accept="image/*"
+                multiple
                 className="hidden"
                 ref={fileInputRef}
                 onChange={handleImageChange}
@@ -370,22 +396,22 @@ const MessageInput = () => {
           </button>
         ) : (
           <button
-            type={text.trim() || imagePreview || isSendingAnimation ? "submit" : "button"}
+            type={text.trim() || imagePreviews.length > 0 || isSendingAnimation ? "submit" : "button"}
             className={`relative w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-md flex-shrink-0 overflow-hidden
               ${
-                text.trim() || imagePreview || isSendingAnimation
+                text.trim() || imagePreviews.length > 0 || isSendingAnimation
                   ? "bg-primary text-primary-content hover:scale-105 active:scale-95"
                   : "bg-base-100 text-base-content/40 border border-base-300/30 hover:bg-base-200"
               }
             `}
             onClick={(e) => {
-              if (!text.trim() && !imagePreview && !isSendingAnimation) {
+              if (!text.trim() && imagePreviews.length === 0 && !isSendingAnimation) {
                 e.preventDefault();
                 startRecording();
               }
             }}
           >
-            {text.trim() || imagePreview || isSendingAnimation ? (
+            {text.trim() || imagePreviews.length > 0 || isSendingAnimation ? (
               <Send 
                 size={16} 
                 className={`ml-0.5 transition-all duration-300 ease-in-out ${isSendingAnimation ? "translate-x-5 -translate-y-5 opacity-0 scale-50" : "translate-x-0 translate-y-0 opacity-100 scale-100"}`} 

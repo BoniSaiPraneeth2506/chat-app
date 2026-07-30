@@ -224,7 +224,7 @@ const getMessages = async (req, res) => {
 const sendMessage = async (req, res) => {
   try {
     const { id: receiverId } = req.params;
-    const { text, image, voice, replyTo, isForwarded, isOneView } = req.body;
+    const { text, image, images, voice, replyTo, isForwarded, isOneView } = req.body;
     const senderId = req.user._id;
 
     // Check block list
@@ -247,6 +247,20 @@ const sendMessage = async (req, res) => {
       }
       const uploadResponse = await cloudinary.uploader.upload(image);
       imageUrl = uploadResponse.secure_url;
+    }
+
+    let imagesUrlArray = [];
+    if (Array.isArray(images) && images.length > 0) {
+      const imagesToUpload = images.slice(0, 5); // Limit max 5 images
+      for (const imgData of imagesToUpload) {
+        const imgValidation = validateImage(imgData);
+        if (!imgValidation.valid) {
+          return res.status(400).json({ message: imgValidation.reason });
+        }
+      }
+      const uploadPromises = imagesToUpload.map((imgData) => cloudinary.uploader.upload(imgData));
+      const uploadResponses = await Promise.all(uploadPromises);
+      imagesUrlArray = uploadResponses.map((res) => res.secure_url);
     }
 
     let voiceUrl = "";
@@ -281,6 +295,7 @@ const sendMessage = async (req, res) => {
       receiverId,
       text: text ? sanitizeText(text) : text, // strip HTML/JS from message text
       image: imageUrl,
+      images: imagesUrlArray.length > 0 ? imagesUrlArray : undefined,
       voice: voiceUrl || undefined,
       deleteAt,
       replyTo: replyTo || null,

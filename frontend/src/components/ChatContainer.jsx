@@ -407,14 +407,32 @@ const ChatContainer = () => {
 
     return (
       <>
-        {message.image && (
+        {message.images && message.images.length > 0 ? (
+          <div className={`grid gap-1 mb-1.5 max-w-[260px] sm:max-w-[320px] rounded-lg overflow-hidden ${
+            message.images.length === 1 ? "grid-cols-1" :
+            message.images.length === 2 ? "grid-cols-2" :
+            message.images.length === 3 ? "grid-cols-2" : "grid-cols-2"
+          }`}>
+            {message.images.map((imgUrl, i) => (
+              <img
+                key={i}
+                src={imgUrl}
+                alt={`Attachment ${i + 1}`}
+                onClick={() => setLightboxImage(imgUrl)}
+                className={`w-full object-cover cursor-zoom-in hover:opacity-95 transition-opacity rounded ${
+                  message.images.length === 3 && i === 0 ? "col-span-2 h-36 sm:h-44" : "h-28 sm:h-36"
+                }`}
+              />
+            ))}
+          </div>
+        ) : message.image ? (
           <img
             src={message.image}
             alt="Attachment"
             onClick={() => setLightboxImage(message.image)}
             className="sm:max-w-[180px] rounded-md mb-1.5 cursor-zoom-in hover:opacity-95 transition-opacity"
           />
-        )}
+        ) : null}
         {message.voice && (
           <div className="py-1 pr-14 select-none">
             <audio
@@ -606,7 +624,7 @@ const ChatContainer = () => {
                   Pinned Message
                 </span>
                 <p className="text-base-content/80 truncate font-medium max-w-[200px] sm:max-w-[400px]">
-                  {pinnedMessage.text || (pinnedMessage.image ? "📷 Photo" : pinnedMessage.voice ? "🎙️ Voice Message" : "Message")}
+                  {pinnedMessage.text || (pinnedMessage.image || pinnedMessage.images?.length ? "📷 Photo" : pinnedMessage.voice ? "🎙️ Voice Message" : "Message")}
                 </p>
               </div>
             </div>
@@ -739,7 +757,7 @@ const ChatContainer = () => {
                         {message.replyTo.senderId === authUser._id ? "You" : selectedUser?.fullName}
                       </span>
                       <p className="truncate opacity-80 text-base-content/90 max-w-[200px] sm:max-w-[300px]">
-                        {message.replyTo.text || (message.replyTo.image ? "📷 Photo" : message.replyTo.voice ? "🎙️ Voice Message" : "Message")}
+                        {message.replyTo.text || (message.replyTo.image || message.replyTo.images?.length ? "📷 Photo" : message.replyTo.voice ? "🎙️ Voice Message" : "Message")}
                       </p>
                     </div>
                   )}
