@@ -267,6 +267,40 @@ const DateSeparator = ({ date }) => (
   </div>
 );
 
+const SmoothImage = ({ src, alt, className, onClick }) => {
+  const [displayedSrc, setDisplayedSrc] = useState(src);
+  const prevSrcRef = useRef(src);
+
+  useEffect(() => {
+    if (src === prevSrcRef.current) return;
+
+    if (prevSrcRef.current?.startsWith("data:") && src?.startsWith("http")) {
+      const img = new window.Image();
+      img.src = src;
+      img.onload = () => {
+        setDisplayedSrc(src);
+        prevSrcRef.current = src;
+      };
+      img.onerror = () => {
+        setDisplayedSrc(src);
+        prevSrcRef.current = src;
+      };
+    } else {
+      setDisplayedSrc(src);
+      prevSrcRef.current = src;
+    }
+  }, [src]);
+
+  return (
+    <img
+      src={displayedSrc}
+      alt={alt}
+      onClick={onClick}
+      className={className}
+    />
+  );
+};
+
 const ChatContainer = () => {
   const {
     messages,
@@ -414,7 +448,7 @@ const ChatContainer = () => {
             message.images.length === 3 ? "grid-cols-2" : "grid-cols-2"
           }`}>
             {message.images.map((imgUrl, i) => (
-              <img
+              <SmoothImage
                 key={i}
                 src={imgUrl}
                 alt={`Attachment ${i + 1}`}
@@ -426,7 +460,7 @@ const ChatContainer = () => {
             ))}
           </div>
         ) : message.image ? (
-          <img
+          <SmoothImage
             src={message.image}
             alt="Attachment"
             onClick={() => setLightboxImage(message.image)}
@@ -686,8 +720,8 @@ const ChatContainer = () => {
               }
 
               return [
-                isNewDay && <DateSeparator key={`sep-${message._id}-d`} date={message.createdAt} />,
-                <div key={message._id} className="flex items-center gap-2 w-full group relative px-2">
+                isNewDay && <DateSeparator key={`sep-${message.tempId || message._id}-d`} date={message.createdAt} />,
+                <div key={message.tempId || message._id} className="flex items-center gap-2 w-full group relative px-2">
                   {isSelectionMode && !message.isCallLog && (
                     <input 
                       type="checkbox" 

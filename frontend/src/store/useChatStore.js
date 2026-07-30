@@ -232,6 +232,7 @@ export const useChatStore = create((set, get) => ({
     const tempId = "temp-" + Date.now();
     const optimisticMsg = {
       _id: tempId,
+      tempId,
       senderId: authUser._id,
       receiverId: selectedUser._id,
       text: messageData.text || "",
@@ -260,11 +261,11 @@ export const useChatStore = create((set, get) => ({
         : messageData;
 
       const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, payload);
-      const sentMessage = res.data;
+      const sentMessage = { ...res.data, tempId };
 
       // Replace temporary optimistic message with confirmed server message
       set((state) => ({ 
-        messages: state.messages.map((m) => (m._id === tempId ? sentMessage : m)),
+        messages: state.messages.map((m) => (m._id === tempId || m.tempId === tempId ? sentMessage : m)),
         latestMessages: {
           ...state.latestMessages,
           [selectedUser._id]: sentMessage
