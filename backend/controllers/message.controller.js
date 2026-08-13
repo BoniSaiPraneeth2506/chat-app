@@ -133,13 +133,13 @@ const getUsersForSidebar = async (req, res) => {
       return res.status(200).json(filteredUsers);
     }
 
-    // 1. Get IDs of users the logged-in user has chatted with
-    const chattedUserIds = await Message.distinct("receiverId", { senderId: loggedInUserId });
-    const chattedUserIds2 = await Message.distinct("senderId", { receiverId: loggedInUserId });
+    // 1. Get IDs of users the logged-in user has chatted with (1-on-1 only, exclude group messages where groupId is set)
+    const chattedUserIds = await Message.distinct("receiverId", { senderId: loggedInUserId, groupId: null });
+    const chattedUserIds2 = await Message.distinct("senderId", { receiverId: loggedInUserId, groupId: null });
 
     const chattedSet = new Set([
-      ...chattedUserIds.map(id => id.toString()),
-      ...chattedUserIds2.map(id => id.toString())
+      ...chattedUserIds.filter(Boolean).map(id => id.toString()),
+      ...chattedUserIds2.filter(Boolean).map(id => id.toString())
     ]);
     chattedSet.delete(loggedInUserId.toString());
     const chattedIds = Array.from(chattedSet);
@@ -178,8 +178,8 @@ const getMessages = async (req, res) => {
 
     const pinnedMessage = await Message.findOne({
       $or: [
-        { senderId: myId, receiverId: userToChatId },
-        { senderId: userToChatId, receiverId: myId }
+        { senderId: myId, receiverId: userToChatId, groupId: null },
+        { senderId: userToChatId, receiverId: myId, groupId: null }
       ],
       isPinned: true,
       deletedFor: { $ne: myId }
@@ -192,8 +192,8 @@ const getMessages = async (req, res) => {
     if (limit > 0) {
       const messages = await Message.find({
         $or: [
-          { senderId: myId, receiverId: userToChatId },
-          { senderId: userToChatId, receiverId: myId }
+          { senderId: myId, receiverId: userToChatId, groupId: null },
+          { senderId: userToChatId, receiverId: myId, groupId: null }
         ],
         deletedFor: { $ne: myId }
       })
@@ -206,8 +206,8 @@ const getMessages = async (req, res) => {
     } else {
       const messages = await Message.find({
         $or: [
-          { senderId: myId, receiverId: userToChatId },
-          { senderId: userToChatId, receiverId: myId }
+          { senderId: myId, receiverId: userToChatId, groupId: null },
+          { senderId: userToChatId, receiverId: myId, groupId: null }
         ],
         deletedFor: { $ne: myId }
       })
@@ -224,7 +224,7 @@ const getMessages = async (req, res) => {
 const sendMessage = async (req, res) => {
   try {
     const { id: receiverId } = req.params;
-    const { text, image, images, voice, replyTo, isForwarded, isOneView } = req.body;
+    const { text, image, images, voice, replyTo, isForwarded, isOneView, scheduledAt } = req.body;
     const senderId = req.user._id;
 
     // Check block list
@@ -288,6 +288,35 @@ const sendMessage = async (req, res) => {
       if (ms) {
         deleteAt = new Date(Date.now() + ms);
       }
+    }
+
+    // If a scheduledAt is provided and is a future date, create a scheduled message
+    if (scheduledAt) {
+      const scheduledDate = new Date(scheduledAt);
+      if (isNaN(scheduledDate.getTime())) {
+        return res.status(400).json({ message: "Invalid scheduledAt value" });
+      }
+      if (scheduledDate.getTime() <= Date.now()) {
+        return res.status(400).json({ message: "scheduledAt must be in the future" });
+      }
+
+      const scheduledMessage = new Message({
+        senderId,
+        receiverId,
+        text: text ? sanitizeText(text) : text,
+        image: imageUrl,
+        images: imagesUrlArray.length > 0 ? imagesUrlArray : undefined,
+        voice: voiceUrl || undefined,
+        replyTo: replyTo || null,
+        isForwarded: isForwarded || false,
+        isOneView: isOneView || false,
+        scheduledAt: scheduledDate,
+        scheduledStatus: "scheduled",
+        scheduledBy: senderId,
+      });
+
+      await scheduledMessage.save();
+      return res.status(201).json(scheduledMessage);
     }
 
     const newMessage = new Message({
@@ -505,8 +534,8 @@ const clearChatHistory = async (req, res) => {
     await Message.updateMany(
       {
         $or: [
-          { senderId: myId, receiverId: contactId },
-          { senderId: contactId, receiverId: myId }
+          { senderId: myId, receiverId: contactId, groupId: null },
+          { senderId: contactId, receiverId: myId, groupId: null }
         ],
         deletedFor: { $ne: myId }
       },
@@ -588,7 +617,8 @@ const toggleBlockUser = async (req, res) => {
 
 const createCallLog = async (req, res) => {
   try {
-    const { receiverId, callType, callDuration, callStatus } = req.body;
+    // Supports both 1-on-1 and group call logs. For group calls, pass `groupId` in the body.
+    const { receiverId, groupId, callType, callDuration, callStatus } = req.body;
     const senderId = req.user._id;
 
     let text = "";
@@ -603,21 +633,33 @@ const createCallLog = async (req, res) => {
       text = `Declined ${callType} call`;
     }
 
-    const newMessage = new Message({
+    const newMessageData = {
       senderId,
-      receiverId,
       text,
       isCallLog: true,
       callType,
       callDuration,
-      callStatus
-    });
+      callStatus,
+    };
 
+    if (groupId) {
+      newMessageData.groupId = groupId;
+    } else if (receiverId) {
+      newMessageData.receiverId = receiverId;
+    }
+
+    const newMessage = new Message(newMessageData);
     await newMessage.save();
+    await newMessage.populate("replyTo");
 
-    const receiverSocketId = getReceiverSocketId(receiverId);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("newMessage", newMessage);
+    if (groupId) {
+      // Broadcast to group room
+      io.to(`group_${groupId}`).emit("newGroupMessage", newMessage);
+    } else if (receiverId) {
+      const receiverSocketId = getReceiverSocketId(receiverId);
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit("newMessage", newMessage);
+      }
     }
 
     res.status(201).json(newMessage);
@@ -818,6 +860,24 @@ const deleteMessagesBulk = async (req, res) => {
   }
 };
 
+const cancelScheduledMessage = async (req, res) => {
+  try {
+    const { id: messageId } = req.params;
+    const userId = req.user._id;
+    const msg = await Message.findById(messageId);
+    if (!msg) return res.status(404).json({ message: 'Message not found' });
+    if (msg.scheduledStatus !== 'scheduled') return res.status(400).json({ message: 'Only scheduled messages can be cancelled' });
+    if (msg.senderId.toString() !== userId.toString()) return res.status(403).json({ message: 'Not authorized' });
+
+    msg.scheduledStatus = 'failed';
+    await msg.save();
+    res.status(200).json({ message: 'Scheduled message cancelled' });
+  } catch (err) {
+    console.error('Error cancelling scheduled message', err);
+    res.status(500).json({ message: 'Failed to cancel scheduled message' });
+  }
+};
+
 export { 
   getUsersForSidebar, 
   getMessages, 
@@ -834,4 +894,5 @@ export {
   updateChatWallpaper,
   viewOneViewMessage,
   deleteMessagesBulk
+  ,cancelScheduledMessage
 };

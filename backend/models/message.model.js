@@ -11,7 +11,12 @@ const messageSchema = new Schema(
     receiverId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: User,
-      required: true,
+      required: false,
+    },
+    groupId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Group",
+      default: null,
     },
     text: {
       type: String,
@@ -83,6 +88,22 @@ const messageSchema = new Schema(
       ref: "User",
       default: []
     }]
+    ,
+    // Scheduling fields (optional)
+    scheduledAt: {
+      type: Date,
+      default: null,
+    },
+    scheduledStatus: {
+      type: String,
+      enum: ["scheduled", "queued", "sent", "failed"],
+      default: null,
+    },
+    scheduledBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    }
   },
   { timestamps: true }
 );

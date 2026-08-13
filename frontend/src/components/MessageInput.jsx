@@ -1,7 +1,8 @@
 import { useRef, useState, useEffect } from "react";
 import { useChatStore } from "../store/useChatStore";
+import { useGroupStore } from "../store/useGroupStore";
 import useAuthStore from "../store/useAuthStore";
-import { Image, Send, X, CornerDownLeft, Mic, Trash2 } from "lucide-react";
+import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock } from "lucide-react";
 import toast from "react-hot-toast";
 
 const MessageInput = () => {
@@ -9,7 +10,11 @@ const MessageInput = () => {
   const [imagePreviews, setImagePreviews] = useState([]);
   const [isOneView, setIsOneView] = useState(false);
   const [isSendingAnimation, setIsSendingAnimation] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const uploadAbortRef = useRef(null);
   const fileInputRef = useRef(null);
+  const inputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
 
   // Voice recording states
@@ -18,6 +23,9 @@ const MessageInput = () => {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const timerIntervalRef = useRef(null);
+  // Scheduling states
+  const [showScheduler, setShowScheduler] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState(""); // format: yyyy-MM-ddTHH:mm (datetime-local)
   
   const { 
     sendMessage, 
@@ -31,9 +39,25 @@ const MessageInput = () => {
     drafts,
     setDraft
   } = useChatStore();
+
+  const {
+    selectedGroup,
+    sendGroupMessage,
+    sendGroupTypingStatus,
+  } = useGroupStore();
+
   const { authUser } = useAuthStore();
 
   const isBlocked = authUser?.blockedUsers?.includes(selectedUser?._id);
+
+  // Evaluate Read-Only Group Restrictions
+  let isReadOnlyRestricted = false;
+  if (selectedGroup && selectedGroup.isReadOnly) {
+    const member = selectedGroup.members?.find((m) => (m.user?._id || m.user)?.toString() === authUser?._id?.toString());
+    if (member && member.role === "member") {
+      isReadOnlyRestricted = true;
+    }
+  }
 
   // Load draft when switching users
   useEffect(() => {
@@ -58,6 +82,26 @@ const MessageInput = () => {
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     };
   }, []);
+
+  const isMobile = typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad|iPod/.test(navigator.userAgent);
+
+  const handleKeyDown = (e) => {
+    if (isMobile) return;
+    // Ctrl/Cmd + Enter to send
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      // simulate submit
+      const fakeEvent = { preventDefault: () => {} };
+      handleSendMessage(fakeEvent);
+    }
+    // ArrowUp to edit last message when input empty
+    if (e.key === 'ArrowUp' && !text.trim()) {
+      try {
+        const last = useChatStore.getState().messages?.slice().reverse().find(m => (m.senderId?._id || m.senderId) === useAuthStore.getState().authUser?._id && m.text);
+        if (last) setEditingMessage(last);
+      } catch (err) {}
+    }
+  };
 
   const handleImageChange = (e) => {
     const files = Array.from(e.target.files);
@@ -137,14 +181,18 @@ const MessageInput = () => {
     const messageOneView = isOneView;
     const currentEditing = editingMessage;
 
-    // Clear form & draft INSTANTLY before network request (0ms latency)
+    const willUploadImages = imagePreviews.length > 0;
+
+    // Clear text & draft instantly, but keep previews visible during upload
     setText("");
     if (selectedUser) {
       setDraft(selectedUser._id, "");
     }
-    setImagePreviews([]);
-    setIsOneView(false);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (!willUploadImages) {
+      setImagePreviews([]);
+      setIsOneView(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     sendTypingStatus(false);
@@ -153,26 +201,88 @@ const MessageInput = () => {
     setTimeout(() => setIsSendingAnimation(false), 250);
 
     try {
-      if (currentEditing) {
+      if (selectedGroup) {
+        await sendGroupMessage({
+          text: messageText,
+          image: currentImages[0] || "",
+          images: currentImages.length > 1 ? currentImages : [],
+          replyTo: replyingToMessage?._id || null,
+          scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
+        });
+        setShowScheduler(false);
+        setScheduledAt("");
+        if (replyingToMessage) setReplyingToMessage(null);
+      } else if (currentEditing) {
         await editMessage(currentEditing._id, messageText);
         setEditingMessage(null);
       } else {
-        if (currentImages.length > 1) {
-          await sendMessage({
-            text: messageText,
-            images: currentImages,
-            isOneView: false // Multi-image doesn't use View Once
-          });
+        if (currentImages.length > 0) {
+          // Use progress-enabled send for images so we can show upload progress and allow cancel
+          setIsUploading(true);
+          setUploadProgress(0);
+          const controller = new AbortController();
+          uploadAbortRef.current = controller;
+          try {
+            await useChatStore.getState().sendMessageWithProgress({
+              text: messageText,
+              image: currentImages[0] || "",
+              images: currentImages.length > 1 ? currentImages : [],
+              isOneView: messageOneView,
+              scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
+            }, {
+              onProgress: (p) => setUploadProgress(p),
+              signal: controller.signal
+            });
+            setShowScheduler(false);
+            setScheduledAt("");
+          } catch (err) {
+            if (err.message === 'aborted') {
+              toast.error('Upload cancelled');
+            } else {
+              console.error('Failed to send message with progress', err);
+              toast.error('Failed to send');
+            }
+          } finally {
+            setIsUploading(false);
+            setUploadProgress(0);
+            uploadAbortRef.current = null;
+            setImagePreviews([]);
+            setIsOneView(false);
+            if (fileInputRef.current) fileInputRef.current.value = "";
+          }
         } else {
-          await sendMessage({
-            text: messageText,
-            image: currentImages[0] || "",
-            isOneView: messageOneView
-          });
+          if (currentImages.length > 1) {
+            await sendMessage({
+              text: messageText,
+              images: currentImages,
+              isOneView: false, // Multi-image doesn't use View Once
+              scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
+            });
+            setShowScheduler(false);
+            setScheduledAt("");
+          } else {
+            await sendMessage({
+              text: messageText,
+              image: currentImages[0] || "",
+              isOneView: messageOneView,
+              scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
+            });
+            setShowScheduler(false);
+            setScheduledAt("");
+          }
         }
       }
     } catch (error) {
       console.error("Failed to send message:", error);
+    }
+  };
+
+  const cancelUpload = () => {
+    if (uploadAbortRef.current) {
+      uploadAbortRef.current.abort();
+      uploadAbortRef.current = null;
+      setIsUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -252,6 +362,15 @@ const MessageInput = () => {
     );
   }
 
+  if (isReadOnlyRestricted) {
+    return (
+      <div className="w-full px-4 py-4 bg-base-200/50 flex items-center justify-center text-sm text-amber-500 font-medium border-t border-base-300 gap-2 select-none">
+        <Lock size={16} />
+        <span>Only Admins and Moderators can send messages in this group.</span>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full px-4 py-3 bg-base-200/50 flex flex-col gap-2 relative border-t border-base-300 lg:border-t-0">
       {/* Quoted Reply Banner */}
@@ -307,6 +426,19 @@ const MessageInput = () => {
                   alt={`Preview ${idx + 1}`}
                   className="object-cover w-20 h-20 border rounded-lg border-zinc-700 shadow-sm"
                 />
+                {isUploading && (
+                  <div className="absolute inset-0 bg-black/30 rounded-lg flex items-end">
+                    <div className="w-full px-2 pb-2">
+                      <div className="h-1 bg-white/20 rounded-full overflow-hidden">
+                        <div className="h-1 bg-primary" style={{ width: `${uploadProgress}%` }} />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-white/90 mt-1">
+                        <span>{uploadProgress}%</span>
+                        <button onClick={cancelUpload} type="button" className="text-xs text-red-200 hover:text-red-300">Cancel</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <button
                   onClick={() => removeImage(idx)}
                   className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-base-300
@@ -375,12 +507,37 @@ const MessageInput = () => {
               />
 
               <input
+                id="message-input"
+                ref={inputRef}
                 type="text"
+                aria-label="Write a message"
+                aria-describedby="msg-help"
                 className="flex-1 bg-transparent text-sm text-base-content placeholder-base-content/40 focus:outline-none py-1"
                 placeholder="Type a message..."
                 value={text}
                 onChange={handleTextChange}
+                onKeyDown={handleKeyDown}
               />
+              <div id="msg-help" className="sr-only">Press Ctrl+Enter to send on desktop. Use Arrow Up to edit your last message.</div>
+              {/* Scheduler toggle + picker */}
+              <div className="flex items-center gap-2 ml-2">
+                <button
+                  type="button"
+                  title={showScheduler ? "Hide scheduler" : "Schedule message"}
+                  onClick={() => setShowScheduler((s) => !s)}
+                  className={`p-1 rounded-full hover:bg-base-200 text-base-content/50`}
+                >
+                  <Clock size={16} />
+                </button>
+                {showScheduler && (
+                  <input
+                    type="datetime-local"
+                    value={scheduledAt}
+                    onChange={(e) => setScheduledAt(e.target.value)}
+                    className="text-xs bg-base-100 border rounded px-2 py-1"
+                  />
+                )}
+              </div>
             </>
           )}
         </div>

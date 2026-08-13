@@ -75,9 +75,10 @@
 // };
 // export default ChatHeader;
 
-import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image, CheckSquare } from "lucide-react";
+import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image, CheckSquare, Users, Info, Mic, MicOff, Maximize2 } from "lucide-react";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
+import { useGroupStore } from "../store/useGroupStore";
 import { useState } from "react";
 import toast from "react-hot-toast";
 
@@ -101,12 +102,8 @@ const formatLastSeen = (lastSeenTime) => {
     return `Today at ${timeStr}`;
   } else if (diffDays === 1) {
     return `Yesterday at ${timeStr}`;
-  } else {
-    const year = date.getFullYear();
-    const month = pad(date.getMonth() + 1);
-    const day = pad(date.getDate());
-    return `${year}-${month}-${day} at ${timeStr}`;
   }
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)} at ${timeStr}`;
 };
 
 const ChatHeader = () => {
@@ -125,8 +122,17 @@ const ChatHeader = () => {
     isSelectionMode,
     setSelectionMode
   } = useChatStore();
+
+  const {
+    selectedGroup,
+    setSelectedGroup,
+    setIsGroupDetailsModalOpen,
+    startOrJoinGroupCall,
+  } = useGroupStore();
+
   const { onlineUsers, authUser } = useAuthStore();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const { callState, localStream, isScreenSharing, toggleLocalMute, toggleScreenShare } = useChatStore();
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
   const [pendingWallpaper, setPendingWallpaper] = useState(null);
   const [dimLevel, setDimLevel] = useState(35);
@@ -170,13 +176,40 @@ const ChatHeader = () => {
             
             {/* Back button for mobile view */}
             <button 
-              onClick={() => setSelectedUser(null)} 
+              onClick={() => {
+                if (selectedGroup) setSelectedGroup(null);
+                else setSelectedUser(null);
+              }} 
               className="p-1 -ml-1 rounded-full lg:hidden hover:bg-base-200 transition-colors"
             >
               <ArrowLeft className="size-6" />
             </button>
 
-            {isSelf ? (
+            {selectedGroup ? (
+              /* Group Chat Header details */
+              <div 
+                onClick={() => setIsGroupDetailsModalOpen(true)}
+                className="flex items-center gap-3 cursor-pointer select-none group"
+              >
+                <div className="avatar hover:opacity-80 transition-opacity">
+                  <div className="relative rounded-full size-10 bg-secondary/10 border border-secondary/20 flex items-center justify-center text-secondary overflow-hidden">
+                    {selectedGroup.groupPic ? (
+                      <img src={selectedGroup.groupPic} alt={selectedGroup.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <Users className="size-5" />
+                    )}
+                  </div>
+                </div>
+                <div className="text-left select-none">
+                  <h3 className="font-medium group-hover:text-primary transition-colors flex items-center gap-1.5 text-sm sm:text-base">
+                    {selectedGroup.name}
+                  </h3>
+                  <p className="text-xs text-base-content/60">
+                    {selectedGroup.members?.length || 0} members {selectedGroup.isReadOnly ? "• Read Only" : ""}
+                  </p>
+                </div>
+              </div>
+            ) : isSelf ? (
               /* Personal Notes self-chat header details */
               <div className="flex items-center gap-3 select-none">
                 <div className="size-10 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
@@ -197,20 +230,20 @@ const ChatHeader = () => {
                 <div 
                   onClick={(e) => {
                     e.stopPropagation();
-                    setLightboxImage(selectedUser.profilePic || "/avatar.png");
+                    setLightboxImage(selectedUser?.profilePic || "/avatar.png");
                   }}
                   className="avatar hover:opacity-80 transition-opacity cursor-zoom-in"
                 >
                   <div className="relative rounded-full size-10">
-                    <img src={selectedUser.profilePic || "/avatar.png"} alt={selectedUser.fullName} />
+                    <img src={selectedUser?.profilePic || "/avatar.png"} alt={selectedUser?.fullName} />
                   </div>
                 </div>
 
                 {/* User Info */}
                 <div className="text-left select-none">
                   <h3 className="font-medium group-hover:text-primary transition-colors flex items-center gap-1.5">
-                    {selectedUser.fullName}
-                    {authUser?.disappearingTimers?.[selectedUser._id] && authUser?.disappearingTimers?.[selectedUser._id] !== "off" && (
+                    {selectedUser?.fullName}
+                    {authUser?.disappearingTimers?.[selectedUser?._id] && authUser?.disappearingTimers?.[selectedUser?._id] !== "off" && (
                       <Clock className="size-3 text-zinc-400" title={`Disappearing messages: ${authUser.disappearingTimers[selectedUser._id]}`} />
                     )}
                   </h3>
@@ -221,20 +254,10 @@ const ChatHeader = () => {
                           <span className="text-red-500 font-semibold flex items-center gap-1 animate-pulse">
                             🎙️ recording audio
                           </span>
-                          <span className="flex items-end gap-[2px] h-3">
-                            <span className="w-0.5 h-full bg-red-500 animate-bounce [animation-delay:0ms]"></span>
-                            <span className="w-0.5 h-2/3 bg-red-500 animate-bounce [animation-delay:150ms]"></span>
-                            <span className="w-0.5 h-full bg-red-500 animate-bounce [animation-delay:300ms]"></span>
-                          </span>
                         </>
                       ) : (
                         <>
-                          <span>typing</span>
-                          <span className="flex gap-0.5 mt-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]"></span>
-                            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:150ms]"></span>
-                            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]"></span>
-                          </span>
+                          <span>typing...</span>
                         </>
                       )}
                     </div>
@@ -251,9 +274,33 @@ const ChatHeader = () => {
             )}
           </div>
 
-          {/* Right Section: Calls, Search, Three Dots Menu & Close */}
+          {/* Right Section: Calls, Search, Info & Menu */}
           <div className="flex items-center gap-1 sm:gap-1.5">
-            {!isSelf && (
+            {selectedGroup ? (
+              <>
+                <button 
+                  onClick={() => startOrJoinGroupCall(selectedGroup._id, "video")} 
+                  className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+                  title="Group Video Call"
+                >
+                  <Video size={18} />
+                </button>
+                <button 
+                  onClick={() => startOrJoinGroupCall(selectedGroup._id, "voice")} 
+                  className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+                  title="Group Voice Call"
+                >
+                  <Phone size={18} />
+                </button>
+                <button 
+                  onClick={() => setIsGroupDetailsModalOpen(true)} 
+                  className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+                  title="Group Info & Members"
+                >
+                  <Info size={18} />
+                </button>
+              </>
+            ) : !isSelf && (
               <>
                 <button 
                   onClick={() => startCall("video")} 
@@ -269,6 +316,25 @@ const ChatHeader = () => {
                 >
                   <Phone size={18} />
                 </button>
+                {/* Quick call controls when in a call */}
+                {callState && (
+                  <>
+                    <button
+                      onClick={() => toggleLocalMute()}
+                      className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+                      title="Toggle mute"
+                    >
+                      {(localStream && localStream.getAudioTracks().every(t => !t.enabled)) ? <MicOff size={16} /> : <Mic size={16} />}
+                    </button>
+                    <button
+                      onClick={() => toggleScreenShare()}
+                      className={`p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 ${isScreenSharing ? 'bg-primary/10 text-primary' : ''}`}
+                      title={isScreenSharing ? "Stop screen share" : "Share screen"}
+                    >
+                      <Maximize2 size={16} />
+                    </button>
+                  </>
+                )}
               </>
             )}
 

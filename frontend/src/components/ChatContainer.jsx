@@ -1,4 +1,5 @@
 import { useChatStore } from "../store/useChatStore";
+import { useGroupStore } from "../store/useGroupStore";
 import { useEffect, useRef, useLayoutEffect, useState } from "react";
 import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image } from "lucide-react";
 import ForwardModal from "./ForwardModal";
@@ -27,17 +28,28 @@ const isDirectVideo = (url) => {
 const LinkPreviewCard = ({ url }) => {
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
+    setHasError(false);
+
     fetch(`https://api.microlink.io?url=${encodeURIComponent(url)}`)
       .then((res) => res.json())
       .then((data) => {
-        if (active && data.status === "success" && data.data) {
-          setPreview(data.data);
+        if (active) {
+          if (data.status === "success" && data.data) {
+            setPreview(data.data);
+          } else {
+            setHasError(true);
+          }
         }
       })
-      .catch((err) => console.log("Link preview error:", err))
+      .catch((err) => {
+        console.log("Link preview error:", err);
+        if (active) setHasError(true);
+      })
       .finally(() => {
         if (active) setLoading(false);
       });
@@ -48,54 +60,81 @@ const LinkPreviewCard = ({ url }) => {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 mt-2 p-2 bg-base-200 rounded-lg animate-pulse w-full max-w-[260px] select-none">
-        <div className="w-10 h-10 bg-base-300 rounded" />
-        <div className="flex-1 space-y-1">
+      <div className="flex items-center gap-2.5 mt-2 p-2.5 bg-base-200/70 border border-base-300/50 rounded-xl animate-pulse w-full max-w-[280px] select-none">
+        <div className="w-10 h-10 bg-base-300 rounded-lg shrink-0" />
+        <div className="flex-1 space-y-1.5 min-w-0">
           <div className="h-3 bg-base-300 rounded w-3/4" />
-          <div className="h-2 bg-base-300 rounded w-1/2" />
+          <div className="h-2.5 bg-base-300 rounded w-1/2" />
         </div>
       </div>
     );
   }
 
-  if (!preview) return null;
+  if (hasError || !preview) {
+    try {
+      const parsedUrl = new URL(url);
+      return (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 mt-2 p-2 bg-base-200/60 hover:bg-base-200 border border-base-300 rounded-lg transition-colors text-left w-full max-w-[280px] text-xs"
+        >
+          <Globe size={16} className="text-primary shrink-0" />
+          <span className="truncate font-medium text-primary underline">{parsedUrl.hostname}</span>
+        </a>
+      );
+    } catch {
+      return null;
+    }
+  }
 
-  const { title, description, image, logo } = preview;
+  const { title, description, image, logo, publisher } = preview;
+  let hostname = "";
+  try {
+    hostname = new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    hostname = publisher || "Link";
+  }
 
   return (
     <a 
       href={url} 
       target="_blank" 
       rel="noopener noreferrer" 
-      className="flex flex-col gap-1.5 mt-2 bg-base-200 hover:bg-base-300 border border-base-300 rounded-lg overflow-hidden shadow-sm transition-colors text-left w-full max-w-[260px] block"
+      className="flex flex-col mt-2 bg-base-200/80 hover:bg-base-200 border border-base-300 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all text-left w-full max-w-[280px] group block"
     >
       {image?.url && (
-        <img 
-          src={image.url} 
-          alt="Preview Card" 
-          className="w-full h-24 object-cover border-b border-base-300"
-        />
+        <div className="relative w-full h-32 overflow-hidden bg-base-300">
+          <img 
+            src={image.url} 
+            alt={title || "Preview Card"} 
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+          />
+        </div>
       )}
-      <div className="p-2 select-none">
-        <div className="flex items-center gap-1.5 mb-1">
-          {logo?.url && (
+      <div className="p-2.5 select-none space-y-1">
+        <div className="flex items-center gap-1.5">
+          {logo?.url ? (
             <img 
               src={logo.url} 
               alt="Logo" 
               className="w-3.5 h-3.5 object-contain rounded"
             />
+          ) : (
+            <Globe size={12} className="text-primary" />
           )}
-          <span className="text-[10px] text-base-content/50 truncate font-semibold">
-            {new URL(url).hostname}
+          <span className="text-[10px] text-base-content/60 font-semibold truncate uppercase tracking-wider">
+            {hostname}
           </span>
         </div>
         {title && (
-          <h4 className="text-[11px] font-bold text-base-content leading-tight truncate">
+          <h4 className="text-xs font-bold text-base-content leading-tight line-clamp-2 group-hover:text-primary transition-colors">
             {title}
           </h4>
         )}
         {description && (
-          <p className="text-[10px] text-base-content/60 leading-snug line-clamp-2 mt-0.5">
+          <p className="text-[11px] text-base-content/70 leading-snug line-clamp-2">
             {description}
           </p>
         )}
@@ -231,6 +270,20 @@ const formatCallDuration = (secs) => {
   const s = secs % 60;
   return `${m}:${s < 10 ? "0" : ""}${s}`;
 };
+
+const formatScheduledShort = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (sameDay) return time;
+  const sameYear = d.getFullYear() === now.getFullYear();
+  const datePart = sameYear
+    ? d.toLocaleDateString([], { month: "short", day: "numeric" })
+    : d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  return `${datePart} • ${time}`;
+};
 const SingleCheck = ({ className }) => (
   <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
     <path d="M3 8.5L6.5 12L13.5 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -329,8 +382,18 @@ const ChatContainer = () => {
     viewOneViewMessage,
     deleteMessagesBulk,
   } = useChatStore();
+
+  const {
+    selectedGroup,
+    groupMessages,
+    isGroupMessagesLoading,
+  } = useGroupStore();
+
   const { authUser, onlineUsers } = useAuthStore();
   const { theme, wallpaper, privacyReadReceipts } = useThemeStore();
+
+  const activeMessages = selectedGroup ? groupMessages : messages;
+  const activeLoading = selectedGroup ? isGroupMessagesLoading : isMessagesLoading;
   const activeWallpaper = authUser?.chatWallpapers?.[selectedUser?._id] || selectedUser?.chatWallpapers?.[authUser?._id] || wallpaper;
   const messageEndRef = useRef(null);
   const scrollableRef = useRef(null);
@@ -468,7 +531,7 @@ const ChatContainer = () => {
           />
         ) : null}
         {message.voice && (
-          <div className="py-1 pr-14 select-none">
+          <div className="py-1 pr-10 select-none">
             <audio
               src={message.voice}
               controls
@@ -477,7 +540,7 @@ const ChatContainer = () => {
           </div>
         )}
         {message.text && (
-          <div className="text-sm leading-relaxed break-words pr-14 select-text">
+          <div className="text-sm leading-loose break-words pr-10 select-text">
             <p>{highlightText(message.text, messageSearchQuery)}</p>
             {(() => {
               const urls = message.text.match(URL_REGEX);
@@ -540,7 +603,7 @@ const ChatContainer = () => {
             toggleReaction(message._id, myReaction.emoji);
           }
         }}
-        className={`absolute bottom-[-10px] right-[-6px] flex items-center gap-1 bg-base-200 border border-base-300 rounded-full px-1.5 py-0.5 shadow-sm text-[10px] select-none z-10 text-base-content font-medium cursor-pointer hover:bg-base-300 transition-colors ${myReaction ? "border-primary/50" : ""}`}
+        className={`absolute bottom-[-8px] right-[-4px] flex items-center gap-1 bg-base-200 border border-base-300 rounded-full px-1.5 py-0.5 shadow-sm text-[10px] select-none z-10 text-base-content font-medium cursor-pointer hover:bg-base-300 transition-colors ${myReaction ? "border-primary/50" : ""}`}
         title={myReaction ? "Click to remove reaction" : ""}
       >
         <span className="flex gap-0.5">
@@ -556,8 +619,10 @@ const ChatContainer = () => {
   };
 
   useEffect(() => {
-    getMessages(selectedUser._id);
-  }, [selectedUser._id, getMessages]);
+    if (selectedUser?._id) {
+      getMessages(selectedUser._id);
+    }
+  }, [selectedUser?._id, getMessages]);
 
   useEffect(() => {
     prevMessagesLengthRef.current = 0;
@@ -565,13 +630,13 @@ const ChatContainer = () => {
     prevScrollHeightRef.current = 0;
     prevScrollTopRef.current = 0;
     isPrependingRef.current = false;
-  }, [selectedUser._id]);
+  }, [selectedUser?._id, selectedGroup?._id]);
 
   const handleScroll = async () => {
     const container = scrollableRef.current;
-    if (!container) return;
+    if (!container || selectedGroup) return; // groups don't support pagination yet
 
-    if (container.scrollTop === 0 && !isPrependingRef.current) {
+    if (container.scrollTop === 0 && !isPrependingRef.current && selectedUser?._id) {
       prevScrollHeightRef.current = container.scrollHeight;
       prevScrollTopRef.current = container.scrollTop;
       isPrependingRef.current = true;
@@ -589,7 +654,7 @@ const ChatContainer = () => {
     const lastReadTime = lastReadTimestamps[receiverId] || 0;
     const messageTime = new Date(message.createdAt).getTime();
 
-    if (messageTime <= lastReadTime) {
+      if (messageTime <= lastReadTime) {
       return <DoubleCheck className={`w-[15px] h-[13px] ${privacyReadReceipts ? 'text-blue-500' : 'text-zinc-400'} flex-shrink-0`} />;
     }
 
@@ -634,7 +699,7 @@ const ChatContainer = () => {
 
     prevMessagesLengthRef.current = messages.length;
     lastMessageIdRef.current = latestMessageId;
-  }, [messages]);
+  }, [activeMessages]);
 
   return (
     <div className="flex-1 flex h-full max-h-full overflow-hidden relative">
@@ -685,17 +750,19 @@ const ChatContainer = () => {
               setMobileEmojiId(null);
             }
           }}
-          className="flex-1 p-4 space-y-4 overflow-y-auto transition-all"
+          className="flex-1 p-4 space-y-3 overflow-y-auto transition-all"
+          role="list"
+          aria-label="Conversation messages"
           style={getWallpaperStyle(activeWallpaper, theme)}
         >
-          {isMessagesLoading && (!Array.isArray(messages) || messages.length === 0) ? (
+          {activeLoading && (!Array.isArray(activeMessages) || activeMessages.length === 0) ? (
             <div className="h-full w-full flex items-center justify-center">
               <span className="loading loading-spinner loading-md text-primary/60"></span>
             </div>
           ) : (
-            Array.isArray(messages) && messages.flatMap((message, index) => {
+            Array.isArray(activeMessages) && activeMessages.flatMap((message, index) => {
               const isNewDay = index === 0 ||
-                new Date(messages[index - 1].createdAt).toDateString() !==
+                new Date(activeMessages[index - 1].createdAt).toDateString() !==
                 new Date(message.createdAt).toDateString();
 
               if (message.isCallLog) {
@@ -709,7 +776,7 @@ const ChatContainer = () => {
                         <Phone size={13} className={message.callStatus === "missed" ? "text-red-500" : "text-emerald-500"} />
                       )}
                       <span className="capitalize">
-                        {message.senderId === authUser._id ? "Outgoing" : "Incoming"} {message.callType} call • {message.callStatus === "completed" ? `duration ${formatCallDuration(message.callDuration)}` : message.callStatus}
+                        {(message.senderId?._id || message.senderId) === authUser._id ? "Outgoing" : "Incoming"} {message.callType} call • {message.callStatus === "completed" ? `duration ${formatCallDuration(message.callDuration)}` : message.callStatus}
                       </span>
                       <span className="text-[10px] opacity-60">
                         {formatMessageTime(message.createdAt)}
@@ -732,7 +799,10 @@ const ChatContainer = () => {
                   )}
                   <div
                     id={`msg-${message._id}`}
-                    className={`chat ${message.senderId === authUser._id ? "chat-end" : "chat-start"} flex-1 relative`}
+                    role="listitem"
+                    tabIndex={0}
+                    aria-label={`Message from ${message.senderId?.fullName || (message.senderId === authUser._id ? 'You' : 'Participant')}. ${message.text ? message.text : message.image ? 'Image attachment' : ''}`}
+                    className={`chat ${(message.senderId?._id || message.senderId) === authUser._id ? "chat-end" : "chat-start"} flex-1 relative`}
                     onClick={(e) => {
                       if (isSelectionMode) {
                         e.stopPropagation();
@@ -779,8 +849,15 @@ const ChatContainer = () => {
                         longPressTimerRef.current = null;
                       }
                     }}
-                    className={`flex flex-col py-1.5 px-3 chat-bubble relative min-w-[85px] transition-colors duration-300 select-none cursor-default ${message.reactions?.length > 0 ? "pb-5" : "pb-4"} ${isSelectionMode ? "cursor-pointer hover:bg-base-200/20" : ""}`}
+                    className={`flex flex-col py-2 px-2.5 chat-bubble relative min-w-[72px] pr-12 transition-colors duration-300 select-none cursor-default ${message.reactions?.length > 0 ? "pb-4" : "pb-3"} ${isSelectionMode ? "cursor-pointer hover:bg-base-200/20" : ""}`}
                   >
+                  {/* Group Message Sender Name Label */}
+                  {selectedGroup && (message.senderId?._id || message.senderId) !== authUser._id && (
+                    <span className="text-[11px] font-bold text-primary block mb-0.5 select-none">
+                      {message.senderId?.fullName || "Member"}
+                    </span>
+                  )}
+
                   {/* Reply Quote Display */}
                   {message.replyTo && (
                     <div 
@@ -940,15 +1017,32 @@ const ChatContainer = () => {
                     </>
                   )}
                   
-                  <div className="absolute bottom-1 right-2 flex items-center gap-0.5 text-[9px] opacity-60 select-none">
-                    {message.isEdited && <span className="mr-1 italic font-medium opacity-70">(edited)</span>}
-                    <span>{formatMessageTime(message.createdAt)}</span>
-                    {message.senderId === authUser._id && (
-                      <span className="scale-75 origin-bottom-right">
-                        {renderTicks(message)}
+                    <span className="absolute right-1 bottom-1 inline-flex items-center gap-0.5 text-[9px] opacity-95 select-none">
+                    {message.scheduledAt ? (
+                      <span className="inline-flex items-center gap-0.5 bg-amber-500/8 border border-amber-500/15 text-amber-600 px-1 py-[2px] rounded-md text-[9px] font-medium truncate">
+                        <Clock size={10} />
+                        <span className="whitespace-nowrap">{formatScheduledShort(message.scheduledAt)}</span>
+                      </span>
+                    ) : (
+                      <span className={`${((message.senderId?._id || message.senderId) === authUser._id) ? 'bg-[#1f2937]/20 text-white/85' : 'bg-transparent text-base-content/60'} inline-flex items-center gap-0.5 px-1 py-[2px] rounded-md text-[9px]`}>{formatMessageTime(message.createdAt)}</span>
+                    )}
+
+                    {(message.senderId?._id || message.senderId) === authUser._id && (
+                      <span className="flex items-center">
+                        {message.scheduledStatus === 'scheduled' ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); if (selectedGroup) useGroupStore.getState().cancelScheduledMessage(message._id); else useChatStore.getState().cancelScheduledMessage(message._id); }}
+                            className="ml-0.5 p-1 hover:bg-red-600/10 rounded-full text-red-500/80"
+                            title="Cancel scheduled message"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        ) : (
+                          <span className="ml-0.5 scale-75 origin-bottom-right -mt-0.5">{renderTicks(message)}</span>
+                        )}
                       </span>
                     )}
-                  </div>
+                  </span>
 
                   {/* Reaction Pill Overlay */}
                   {!message.isDeletedForEveryone && renderReactions(message)}

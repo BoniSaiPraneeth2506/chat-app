@@ -6,11 +6,13 @@ import rateLimit from 'express-rate-limit'
 
 import authRoutes from './routes/auth.route.js'
 import messageRoutes from './routes/message.route.js'
+import groupRoutes from './routes/group.route.js'
 import connectDB from './lib/db.js';
 import path from "path";
 import cookieParser from 'cookie-parser';
 import cors from 'cors'
 import { app, server } from './lib/socket.js';
+import { startScheduler } from './jobs/scheduler.js';
 
 // ── Allowed origins ──────────────────────────────────────────────────────────
 const buildAllowedOrigins = () => {
@@ -107,6 +109,7 @@ app.use("/api", generalLimiter);
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/groups', groupRoutes);
 
 // ── Static (production) ───────────────────────────────────────────────────────
 const __dirname = path.resolve();
@@ -126,4 +129,6 @@ const PORT = process.env.PORT;
 server.listen(PORT, () => {
   console.log("server running on port", PORT || 5001);
   connectDB();
+  // Start the scheduled message dispatcher
+  startScheduler();
 });

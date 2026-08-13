@@ -54,6 +54,7 @@ import { create } from "zustand";
 import toast from "react-hot-toast";
 import axiosInstance from "../lib/axios";
 import useAuthStore from "./useAuthStore";
+import { useGroupStore } from "./useGroupStore";
 import { useThemeStore } from "./useThemeStore";
 
 
@@ -280,6 +281,93 @@ export const useChatStore = create((set, get) => ({
     }
   },
 
+  // Send message with simulated progress and cancellation support.
+  // Provides a client-side progress indicator and allows abort + retry by re-calling this function.
+  sendMessageWithProgress: async (messageData, { onProgress, signal } = {}) => {
+    const { selectedUser, replyingToMessage } = get();
+    const authUser = useAuthStore.getState().authUser;
+    if (!selectedUser || !authUser) return;
+
+    const tempId = "temp-" + Date.now();
+    const optimisticMsg = {
+      _id: tempId,
+      tempId,
+      senderId: authUser._id,
+      receiverId: selectedUser._id,
+      text: messageData.text || "",
+      image: messageData.image || "",
+      images: messageData.images || [],
+      voice: messageData.voice || "",
+      isOneView: messageData.isOneView || false,
+      replyTo: replyingToMessage,
+      createdAt: new Date().toISOString(),
+      isSending: true,
+      isUploading: Boolean(messageData.image || (messageData.images && messageData.images.length)),
+      uploadProgress: 0,
+      _abortController: null,
+    };
+
+    // Append optimistic message
+    set((state) => ({
+      messages: [...state.messages, optimisticMsg],
+      replyingToMessage: null,
+      latestMessages: {
+        ...state.latestMessages,
+        [selectedUser._id]: optimisticMsg
+      }
+    }));
+
+    // Simulated progress timer nudges progress forward while network request runs
+    let progress = 0;
+    const progressTimer = setInterval(() => {
+      progress = Math.min(90, progress + Math.floor(Math.random() * 8) + 4);
+      set((s) => ({
+        messages: s.messages.map((m) => m._id === tempId ? { ...m, uploadProgress: progress } : m)
+      }));
+      if (onProgress) onProgress(progress);
+    }, 300);
+
+    // Use AbortController to allow cancellation
+    const controller = new AbortController();
+    if (signal) {
+      // When caller provides a signal, wire cancellation
+      signal.addEventListener("abort", () => controller.abort());
+    }
+
+    try {
+      const payload = replyingToMessage 
+        ? { ...messageData, replyTo: replyingToMessage._id } 
+        : messageData;
+
+      const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, payload, {
+        signal: controller.signal
+      });
+
+      clearInterval(progressTimer);
+      // Finalize progress
+      set((s) => ({
+        messages: s.messages.map((m) => m._id === tempId ? { ...res.data, tempId } : m),
+        latestMessages: {
+          ...s.latestMessages,
+          [selectedUser._id]: res.data
+        }
+      }));
+      if (onProgress) onProgress(100);
+      return res.data;
+    } catch (error) {
+      clearInterval(progressTimer);
+      // If aborted, remove optimistic message
+      if (controller.signal.aborted || error.name === 'CanceledError' || error.message === 'canceled') {
+        set((s) => ({ messages: s.messages.filter((m) => m._id !== tempId) }));
+        throw new Error('aborted');
+      }
+
+      // Network failure: remove optimistic and throw
+      set((s) => ({ messages: s.messages.filter((m) => m._id !== tempId) }));
+      throw error;
+    }
+  },
+
   forwardMessage: async (message, recipientIds) => {
     try {
       // Build forward payload from original message content
@@ -346,19 +434,36 @@ export const useChatStore = create((set, get) => ({
       if (newMessage.senderId === currentUser?._id && newMessage.receiverId === currentUser?._id) {
         return;
       }
-      // Update latest message for the sender
+
+      // Normalize IDs to string for consistent keying
+      const senderKey = typeof newMessage.senderId === 'object' ? (newMessage.senderId._id || newMessage.senderId.toString()) : newMessage.senderId;
+
+      // Update latest message for the sender (prefer scheduledAt when present)
       set((state) => ({
         latestMessages: {
           ...state.latestMessages,
-          [newMessage.senderId]: newMessage
+          [senderKey]: {
+            ...(state.latestMessages[senderKey] || {}),
+            ...newMessage
+          }
         }
       }));
 
-      // If the message is from the currently active chat, append it
-      if (selectedUser && newMessage.senderId === selectedUser._id) {
-        set({
-          messages: [...messages, newMessage],
+      // If the message is from the currently active chat, append or merge it
+      if (selectedUser && (senderKey === selectedUser._id || newMessage.receiverId === selectedUser._id)) {
+        set((state) => {
+          // If we have an optimistic temp message (tempId) matching server _id, replace it
+          const existingIndex = state.messages.findIndex(m => m._id === newMessage._id || m.tempId === newMessage._id || (m.tempId && newMessage.tempId && m.tempId === newMessage.tempId));
+          if (existingIndex > -1) {
+            const updated = [...state.messages];
+            updated[existingIndex] = { ...updated[existingIndex], ...newMessage };
+            return { messages: updated };
+          }
+
+          // Otherwise append, ensuring we keep any existing fields like scheduledAt if server omitted them
+          return { messages: [...state.messages, { ...newMessage }] };
         });
+
         // Emit read receipt back immediately if privacy setting allows it
         if (currentUser && useThemeStore.getState().privacyReadReceipts) {
           console.log(`[Socket Client] Active chat message received. Emitting markAsRead for: ${selectedUser._id}`);
@@ -369,7 +474,7 @@ export const useChatStore = create((set, get) => ({
         set((state) => ({
           unreadCounts: {
             ...state.unreadCounts,
-            [newMessage.senderId]: (state.unreadCounts[newMessage.senderId] || 0) + 1
+            [senderKey]: (state.unreadCounts[senderKey] || 0) + 1
           }
         }));
       }
@@ -453,7 +558,7 @@ export const useChatStore = create((set, get) => ({
     socket.on("messageEdited", (editedMessage) => {
       set((state) => ({
         messages: state.messages.map((msg) =>
-          msg._id === editedMessage._id ? editedMessage : msg
+          msg._id === editedMessage._id ? { ...msg, ...editedMessage } : msg
         )
       }));
     });
@@ -611,6 +716,15 @@ export const useChatStore = create((set, get) => ({
 
   setSelectedUser: (selectedUser) => {
     // Clear messages immediately on user switch to prevent stale flash
+    
+    // If we're switching to a direct user chat, clear any selected group to ensure chat view updates
+    if (selectedUser) {
+      try {
+        useGroupStore.getState().setSelectedGroup(null);
+      } catch (e) {
+        // ignore cross-store errors
+      }
+    }
     set({ selectedUser, isRecipientProfileOpen: false, pinnedMessage: null, messages: [] });
     if (selectedUser) {
       set((state) => ({
@@ -780,6 +894,18 @@ export const useChatStore = create((set, get) => ({
     }
   },
 
+  cancelScheduledMessage: async (messageId) => {
+    try {
+      await axiosInstance.post(`/messages/schedule/cancel/${messageId}`);
+      set((state) => ({
+        messages: state.messages.map((m) => m._id === messageId ? { ...m, scheduledStatus: 'failed' } : m)
+      }));
+      toast.success('Scheduled message cancelled');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to cancel scheduled message');
+    }
+  },
+
   toggleBlockUser: async (targetId) => {
     try {
       const res = await axiosInstance.post(`/messages/block/${targetId}`);
@@ -800,10 +926,26 @@ export const useChatStore = create((set, get) => ({
     set({ callState: "ringing", callType: type, callPartner: selectedUser, isCaller: true });
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: type === "video",
-        audio: true
-      });
+      // If we already have a local stream, stop its tracks before requesting new one
+      const existing = get().localStream;
+      if (existing) {
+        try { existing.getTracks().forEach(t => t.stop()); } catch (e) {}
+        set({ localStream: null });
+      }
+
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: type === "video", audio: true });
+      } catch (err) {
+        // If camera/device is busy, gracefully fallback to audio-only for video calls
+        if (type === "video" && (err?.name === "NotReadableError" || err?.message?.toLowerCase().includes("device"))) {
+          toast.error("Camera is busy — starting audio-only call");
+          stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+          type = "voice"; // downgrade to voice
+        } else {
+          throw err;
+        }
+      }
       set({ localStream: stream });
 
       const pc = new RTCPeerConnection({
@@ -858,14 +1000,25 @@ export const useChatStore = create((set, get) => ({
     const { callPartner, incomingSignal, callType } = get();
     const socket = useAuthStore.getState().socket;
     if (!callPartner || !incomingSignal || !socket) return;
-
-    set({ callState: "connected" });
-
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: callType === "video",
-        audio: true
-      });
+      // Stop any existing local stream tracks before requesting permissions
+      const existing = get().localStream;
+      if (existing) {
+        try { existing.getTracks().forEach(t => t.stop()); } catch (e) {}
+        set({ localStream: null });
+      }
+
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: callType === "video", audio: true });
+      } catch (err) {
+        if (callType === "video" && (err?.name === "NotReadableError" || err?.message?.toLowerCase().includes("device"))) {
+          toast.error("Camera is busy — joining audio-only");
+          stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+        } else {
+          throw err;
+        }
+      }
       set({ localStream: stream });
 
       const pc = new RTCPeerConnection({
@@ -906,10 +1059,16 @@ export const useChatStore = create((set, get) => ({
       socket.emit("answerCall", { signal: answer, to: callPartner._id });
 
       get().setPeerConnection(pc);
+      set({ callState: "connected" });
       callStartTime = Date.now();
     } catch (err) {
       console.error("Failed to accept call", err);
-      toast.error("Could not accept call");
+      // Provide clearer feedback for common device errors
+      if (err?.name === "NotReadableError" || err?.message?.toLowerCase().includes("device")) {
+        toast.error("Could not access camera — it may be in use by another application");
+      } else {
+        toast.error("Could not accept call");
+      }
       get().endCall();
     }
   },
@@ -973,6 +1132,50 @@ export const useChatStore = create((set, get) => ({
       incomingSignal: null,
       isCaller: false
     });
+  },
+
+  toggleLocalMute: () => {
+    const localStream = get().localStream;
+    if (localStream) {
+      localStream.getAudioTracks().forEach((track) => {
+        track.enabled = !track.enabled;
+      });
+    }
+  },
+
+  toggleScreenShare: async () => {
+    const pc = get().peerConnection;
+    const localStream = get().localStream;
+    const isScreenSharing = get().isScreenSharing;
+
+    if (!pc) return;
+
+    try {
+      if (isScreenSharing) {
+        // Stop screen share and restore camera track
+        const screenStream = get().screenStream;
+        if (screenStream) {
+          screenStream.getTracks().forEach((t) => t.stop());
+        }
+
+        // Replace sender track with camera video track
+        const cameraTrack = localStream && localStream.getVideoTracks()[0];
+        const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
+        if (sender && cameraTrack) await sender.replaceTrack(cameraTrack);
+
+        set({ isScreenSharing: false, screenStream: null });
+      } else {
+        // Start screen share
+        // eslint-disable-next-line no-undef
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const screenTrack = screenStream.getVideoTracks()[0];
+        const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
+        if (sender && screenTrack) await sender.replaceTrack(screenTrack);
+        set({ isScreenSharing: true, screenStream });
+      }
+    } catch (err) {
+      console.error("Screen share toggle failed", err);
+    }
   },
 
   togglePinMessage: async (messageId) => {

@@ -3,10 +3,12 @@ import { Link } from "react-router-dom";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
 import { LogOut, MessageSquare, Settings, User } from "lucide-react";
+import { useGroupStore } from "../store/useGroupStore";
 
 const Navbar = () => {
   const { logOut, authUser } = useAuthStore();
   const { selectedUser } = useChatStore();
+  const { selectedGroup } = useGroupStore();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   const handleLogoutClick = () => {
@@ -22,7 +24,7 @@ const Navbar = () => {
     <>
       <header
         className={`fixed top-0 z-40 w-full bg-base-100 backdrop-blur-lg bg-base-100/80
-          ${selectedUser ? "hidden lg:block" : "block"}
+          ${selectedUser || selectedGroup ? "hidden lg:block" : "block"}
         `}
       >
         <div className="container h-16 px-4 mx-auto">

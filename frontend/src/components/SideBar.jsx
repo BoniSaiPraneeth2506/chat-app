@@ -358,8 +358,9 @@
 import { useEffect, useState, useRef } from "react";
 import { useChatStore } from "../store/useChatStore";
 import useAuthStore from "../store/useAuthStore";
+import { useGroupStore } from "../store/useGroupStore";
 import SidebarSkeleton from "./skeletons/SidebarSkeleton";
-import { X, Search, Pin, Star, Archive, Bookmark } from "lucide-react";
+import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus } from "lucide-react";
 import { formatMessageTime } from "../lib/utils";
 import toast from "react-hot-toast";
 
@@ -389,6 +390,19 @@ const SideBar = () => {
     clearChatHistory,
     setProfilePreviewUser
   } = useChatStore();
+
+  const {
+    groups,
+    selectedGroup,
+    setSelectedGroup,
+    getGroups,
+    latestGroupMessages,
+    unreadGroupCounts,
+    setIsCreateGroupModalOpen,
+    subscribeToGroupEvents,
+    unsubscribeFromGroupEvents
+  } = useGroupStore();
+
   const { onlineUsers, authUser } = useAuthStore();
   const [searchTerm, setSearchTerm] = useState("");
   const [filterMode, setFilterMode] = useState("all");
@@ -427,6 +441,12 @@ const SideBar = () => {
 
     return () => clearTimeout(delayDebounceFn);
   }, [getUsers, searchTerm]);
+
+  useEffect(() => {
+    getGroups();
+    subscribeToGroupEvents();
+    return () => unsubscribeFromGroupEvents();
+  }, [getGroups, subscribeToGroupEvents, unsubscribeFromGroupEvents]);
 
   const toggleFavorite = (e, userId) => {
     if (e && e.stopPropagation) e.stopPropagation();
@@ -529,8 +549,8 @@ const SideBar = () => {
 
     const msgA = latestMessages[a._id];
     const msgB = latestMessages[b._id];
-    const timeA = msgA ? new Date(msgA.createdAt).getTime() : 0;
-    const timeB = msgB ? new Date(msgB.createdAt).getTime() : 0;
+    const timeA = msgA ? new Date(msgA.scheduledAt || msgA.createdAt).getTime() : 0;
+    const timeB = msgB ? new Date(msgB.scheduledAt || msgB.createdAt).getTime() : 0;
     return timeB - timeA;
   });
 
@@ -561,34 +581,44 @@ const SideBar = () => {
   return (
     <aside
       className={`flex flex-col h-full transition-all duration-300 border-r border-base-300 bg-base-100 w-full
-        ${selectedUser ? "hidden lg:flex" : "flex"}
+        ${selectedUser || selectedGroup ? "hidden lg:flex" : "flex"}
       `}
     >
       <div className="w-full pt-3 px-4 pb-3.5">
-        {/* Search Bar */}
-        <div className="relative w-full">
-          <Search className="absolute -translate-y-1/2 left-4 top-1/2 size-4 text-base-content/40 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Search or start a new chat..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full h-10 pl-11 pr-10 transition-all rounded-full border-0 border-transparent focus:border-transparent hover:border-transparent bg-base-200 text-sm text-base-content placeholder-base-content/40 focus:outline-none focus-visible:outline-none focus:ring-0 focus:ring-transparent focus:bg-base-200/60"
-          />
-          {searchTerm && (
-            <button
-              onClick={() => setSearchTerm("")}
-              className="absolute -translate-y-1/2 right-3 top-1/2 p-1 hover:bg-base-300 rounded-full text-base-content/40 hover:text-base-content transition-colors flex items-center justify-center"
-            >
-              <X className="size-3.5" />
-            </button>
-          )}
+        {/* Search Bar & New Group Action */}
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute -translate-y-1/2 left-4 top-1/2 size-4 text-base-content/40 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search chats or groups..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full h-10 pl-11 pr-10 transition-all rounded-full border-0 border-transparent focus:border-transparent hover:border-transparent bg-base-200 text-sm text-base-content placeholder-base-content/40 focus:outline-none focus-visible:outline-none focus:ring-0 focus:ring-transparent focus:bg-base-200/60"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm("")}
+                className="absolute -translate-y-1/2 right-3 top-1/2 p-1 hover:bg-base-300 rounded-full text-base-content/40 hover:text-base-content transition-colors flex items-center justify-center"
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
+          <button
+            onClick={() => setIsCreateGroupModalOpen(true)}
+            className="p-2.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-full transition-colors flex-shrink-0"
+            title="Create New Group"
+          >
+            <Plus size={18} />
+          </button>
         </div>
 
         {/* Filter Capsules */}
         <div className="flex items-center gap-2 mt-3.5 overflow-x-auto no-scrollbar pb-0.5">
           {[
             { id: "all", label: "All" },
+            { id: "groups", label: "Groups" },
             { id: "unread", label: "Unread" },
             { id: "favorites", label: "Favorites" },
             { id: "online", label: "Online" }
@@ -686,7 +716,81 @@ const SideBar = () => {
               </button>
             )}
 
-            {sortedUsers.map((user) => (
+            {/* Groups List Section */}
+            {(filterMode === "all" || filterMode === "groups") && !showArchivedOnly && (
+              <>
+                {groups
+                  .filter((g) => g.name.toLowerCase().includes(searchTerm.toLowerCase()))
+                  .map((group) => {
+                    const isSelected = selectedGroup?._id === group._id;
+                    const latestMsg = latestGroupMessages[group._id];
+                    const unread = unreadGroupCounts[group._id] || 0;
+
+                    return (
+                      <button
+                        key={group._id}
+                        onClick={() => setSelectedGroup(group)}
+                        className={`w-full py-3.5 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors group select-none ${
+                          isSelected ? "bg-base-200/80" : ""
+                        }`}
+                      >
+                        <div className="relative flex-shrink-0">
+                          {group.groupPic ? (
+                            <img
+                              src={group.groupPic}
+                              alt={group.name}
+                              className="object-cover rounded-full size-12"
+                            />
+                          ) : (
+                            <div className="size-12 rounded-full bg-secondary/10 border border-secondary/20 flex items-center justify-center text-secondary">
+                              <Users className="size-6" />
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="min-w-0 flex-1 text-left">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-base-content truncate flex items-center gap-1.5">
+                              {group.name}
+                              <span className="text-[10px] bg-base-300 px-1.5 py-0.5 rounded text-base-content/60 font-normal">
+                                {group.members?.length || 0}
+                              </span>
+                            </span>
+                            {latestMsg && (
+                              <span className="text-xs text-base-content/50">
+                                {formatMessageTime(latestMsg.createdAt)}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center justify-between mt-0.5">
+                            <div className="text-sm text-base-content/60 truncate pr-2 flex-1 text-left">
+                              {latestMsg ? (
+                                <span>
+                                  <strong className="font-medium text-base-content/80">
+                                    {latestMsg.senderId?.fullName?.split(" ")[0]}:{" "}
+                                  </strong>
+                                  {latestMsg.image ? "📷 Image" : latestMsg.text}
+                                </span>
+                              ) : (
+                                <span className="text-base-content/40 italic">Group created</span>
+                              )}
+                            </div>
+                            {unread > 0 && (
+                              <span className="flex items-center justify-center min-w-5 h-5 px-1.5 text-[10px] font-bold text-white bg-primary rounded-full flex-shrink-0">
+                                {unread}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+              </>
+            )}
+
+            {/* Direct 1-on-1 User List */}
+            {filterMode !== "groups" && sortedUsers.map((user) => (
               <button
                 key={user._id}
                 onClick={() => {
@@ -745,7 +849,7 @@ const SideBar = () => {
                       )}
                       {latestMessages[user._id] && (
                         <span className="text-xs text-base-content/50">
-                          {formatMessageTime(latestMessages[user._id].createdAt)}
+                          {formatMessageTime(latestMessages[user._id].scheduledAt || latestMessages[user._id].createdAt)}
                         </span>
                       )}
                     </div>

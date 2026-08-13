@@ -58,7 +58,11 @@ import { Loader, X, MessageSquare, Phone, Info } from 'lucide-react'
 import { Toaster } from 'react-hot-toast'
 import { useThemeStore } from './store/useThemeStore'
 import { THEME_COLORS } from './constants'
+import CreateGroupModal from './components/CreateGroupModal'
+import GroupDetailsModal from './components/GroupDetailsModal'
+import GroupCallModal from './components/GroupCallModal'
 import CallModal from './components/CallModal'
+import { useGroupStore } from './store/useGroupStore'
 
 const ChatRedirectHandler = () => {
   const { userId } = useParams();
@@ -95,6 +99,7 @@ const ChatRedirectHandler = () => {
 const App = () => {
   const { authUser, checkAuth, isCheckingAuth, onlineUsers, socket } = useAuthStore();
   const { theme } = useThemeStore()
+  const { getGroups, subscribeToGroupEvents, unsubscribeFromGroupEvents } = useGroupStore();
   const { 
     subscribeToMessages, 
     unsubscribeFromMessages,
@@ -131,9 +136,48 @@ const App = () => {
   useEffect(() => {
     if (authUser && socket) {
       subscribeToMessages();
-      return () => unsubscribeFromMessages();
+      // Ensure group state and socket listeners are initialized globally
+      getGroups();
+      subscribeToGroupEvents();
+      return () => {
+        unsubscribeFromMessages();
+        unsubscribeFromGroupEvents();
+      };
     }
   }, [authUser, socket, subscribeToMessages, unsubscribeFromMessages]);
+
+  // Global keyboard shortcuts (desktop only)
+  useEffect(() => {
+    const isMobile = typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad|iPod/.test(navigator.userAgent);
+    if (isMobile) return;
+    const onKey = (e) => {
+      // Ctrl/Cmd+K -> focus global search
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        const el = document.querySelector('#global-search') || document.getElementById('message-input');
+        el?.focus();
+      }
+      // Ctrl/Cmd+Enter -> send message if input focused
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        const input = document.getElementById('message-input');
+        if (document.activeElement === input) {
+          e.preventDefault();
+          input.form?.requestSubmit?.();
+        }
+      }
+      if (e.key === '/') {
+        const search = document.querySelector('#global-search');
+        if (search) { e.preventDefault(); search.focus(); }
+      }
+      if (e.key === 'Escape') {
+        // close any open modal by dispatching a click on overlay close buttons
+        const modalClose = document.querySelector('[data-modal-close]');
+        modalClose?.click();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   console.log(authUser);
 
@@ -274,6 +318,9 @@ const App = () => {
         </div>
       )}
       <CallModal />
+      <CreateGroupModal />
+      <GroupDetailsModal />
+      <GroupCallModal />
     </div>
   );
 };

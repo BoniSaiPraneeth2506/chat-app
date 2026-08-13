@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useChatStore } from "../store/useChatStore";
+import { useGroupStore } from "../store/useGroupStore";
 import NoChatSelected from "../components/NoChatSelected";
 import ChatContainer from "../components/ChatContainer";
 import SideBar from "../components/SideBar";
@@ -10,7 +11,10 @@ const DEFAULT_SIDEBAR_WIDTH = 340;
 
 const HomePage = () => {
   const { selectedUser, setSelectedUser } = useChatStore();
+  const { selectedGroup, setSelectedGroup } = useGroupStore();
   const popstateClosedRef = useRef(false);
+
+  const hasActiveChat = selectedUser || selectedGroup;
 
   // Track whether we're on a large screen (lg = 1024px+)
   const [isDesktop, setIsDesktop] = useState(() => window.innerWidth >= 1024);
@@ -65,11 +69,12 @@ const HomePage = () => {
 
   // Back button / history management
   useEffect(() => {
-    if (selectedUser) {
+    if (hasActiveChat) {
       window.history.pushState({ chatOpen: true }, "");
       const handlePopState = () => {
         popstateClosedRef.current = true;
         setSelectedUser(null);
+        setSelectedGroup(null);
       };
       window.addEventListener("popstate", handlePopState);
       return () => {
@@ -81,18 +86,18 @@ const HomePage = () => {
       }
       popstateClosedRef.current = false;
     }
-  }, [selectedUser, setSelectedUser]);
+  }, [hasActiveChat, setSelectedUser, setSelectedGroup]);
 
   return (
     <div className="h-screen bg-base-200">
       <div
         className={`flex items-center justify-center w-full h-full px-0 lg:px-4 lg:pt-[68px]
-          ${selectedUser ? "pt-0" : "pt-16"}
+          ${hasActiveChat ? "pt-0" : "pt-16"}
         `}
       >
         <div
           className={`bg-base-100 shadow-cl w-full rounded-none lg:rounded-lg transition-all
-            ${selectedUser ? "h-screen" : "h-[calc(100vh-4rem)]"}
+            ${hasActiveChat ? "h-screen" : "h-[calc(100vh-4rem)]"}
             lg:h-[calc(100vh-4.5rem)]
           `}
         >
@@ -100,7 +105,7 @@ const HomePage = () => {
 
             {/* ── Sidebar ── renders ONCE; hides on mobile when chat is open */}
             <div
-              className={`h-full flex-shrink-0 ${selectedUser ? "hidden lg:block" : ""}`}
+              className={`h-full flex-shrink-0 ${hasActiveChat ? "hidden lg:block" : ""}`}
               style={isDesktop ? { width: sidebarWidth } : { width: "100%" }}
             >
               <SideBar />
@@ -118,9 +123,9 @@ const HomePage = () => {
             )}
 
             {/* ── Chat area: desktop always, mobile only when chat is selected ── */}
-            {(isDesktop || selectedUser) && (
+            {(isDesktop || hasActiveChat) && (
               <div className="flex flex-1 h-full min-w-0">
-                {!selectedUser ? <NoChatSelected /> : <ChatContainer />}
+                {!hasActiveChat ? <NoChatSelected /> : <ChatContainer />}
               </div>
             )}
 
