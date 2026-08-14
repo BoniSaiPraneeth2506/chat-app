@@ -62,14 +62,18 @@ const useAuthStore=create((set,get)=>({
     forgotPassword: async (email) => {
         set({ isSendingReset: true });
         try {
-            const res = await axiosInstance.post("/auth/forgot-password", { email });
+            const res = await axiosInstance.post("/auth/forgot-password", { email }, { timeout: 45000 });
             toast.success(res.data?.message || "Reset code sent");
             if (res.data?.devOtp) {
                 toast.success(`Dev code: ${res.data.devOtp}`);
             }
             return res.data;
         } catch (err) {
-            toast.error(err.response?.data?.message || err.message || "Failed to send reset code");
+            toast.error(
+              err.code === "ECONNABORTED"
+                ? "Request timed out. Open the backend URL once to wake it, then try again."
+                : (err.response?.data?.message || err.message || "Failed to send reset code")
+            );
             return null;
         } finally {
             set({ isSendingReset: false });

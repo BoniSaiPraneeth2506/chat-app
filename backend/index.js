@@ -8,6 +8,7 @@ import messageRoutes from './routes/message.route.js'
 import groupRoutes from './routes/group.route.js'
 import connectDB from './lib/db.js';
 import path from "path";
+import fs from "fs";
 import cookieParser from 'cookie-parser';
 import cors from 'cors'
 import { app, server } from './lib/socket.js';
@@ -76,19 +77,20 @@ app.use('/api/auth', authRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/groups', groupRoutes);
 
-// ── Static (production) ───────────────────────────────────────────────────────
-const __dirname = path.resolve();
-if (process.env.NODE_ENV === "production") {
-  app.use(express.static(path.join(__dirname, "../frontend/dist")));
-  // Express 5 requires a named wildcard (/* is invalid and crashes on startup)
-  app.get("/{*splat}", (req, res) => {
-    res.sendFile(path.join(__dirname, "../frontend", "dist", "index.html"));
-  });
-}
-
 app.get('/', (req, res) => {
   res.send("api is working");
 });
+
+// ── Static frontend (only if this service also hosts the built SPA) ───────────
+const __dirname = path.resolve();
+const frontendIndex = path.join(__dirname, "../frontend/dist/index.html");
+if (process.env.NODE_ENV === "production" && fs.existsSync(frontendIndex)) {
+  app.use(express.static(path.join(__dirname, "../frontend/dist")));
+  // Express 5 requires a named wildcard (/* is invalid and crashes on startup)
+  app.get("/{*splat}", (req, res) => {
+    res.sendFile(frontendIndex);
+  });
+}
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT;
