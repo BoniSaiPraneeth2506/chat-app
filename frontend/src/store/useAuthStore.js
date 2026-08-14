@@ -13,6 +13,8 @@ const useAuthStore=create((set,get)=>({
     isLoggingIn:false,
     isUpdatingProfile:false,
     isCheckingAuth:true,
+    isSendingReset:false,
+    isResettingPassword:false,
     onlineUsers:[],
     socket:null,
     checkAuth:async()=>{
@@ -55,6 +57,35 @@ const useAuthStore=create((set,get)=>({
              localStorage.removeItem("token");
              set({authUser:null});
              toast.error(err.response?.data?.message || err.message || "Logout failed");
+        }
+    },
+    forgotPassword: async (email) => {
+        set({ isSendingReset: true });
+        try {
+            const res = await axiosInstance.post("/auth/forgot-password", { email });
+            toast.success(res.data?.message || "Reset code sent");
+            if (res.data?.devOtp) {
+                toast.success(`Dev code: ${res.data.devOtp}`);
+            }
+            return res.data;
+        } catch (err) {
+            toast.error(err.response?.data?.message || err.message || "Failed to send reset code");
+            return null;
+        } finally {
+            set({ isSendingReset: false });
+        }
+    },
+    resetPassword: async (data) => {
+        set({ isResettingPassword: true });
+        try {
+            const res = await axiosInstance.post("/auth/reset-password", data);
+            toast.success(res.data?.message || "Password reset successfully");
+            return true;
+        } catch (err) {
+            toast.error(err.response?.data?.message || err.message || "Failed to reset password");
+            return false;
+        } finally {
+            set({ isResettingPassword: false });
         }
     },
     login:async(data)=>{

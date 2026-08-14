@@ -1,8 +1,10 @@
+import crypto from "crypto";
 import { generateToken } from "../lib/utils.js";
 import User from "../models/user.model.js";
 import bcrypt from 'bcryptjs'
 import cloudinary from "../lib/cloudinary.js";
 import { updateUserPrivacyState } from "../lib/socket.js";
+import { sendPasswordResetOtp } from "../lib/mailer.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -187,4 +189,99 @@ const checkAuth = (req, res) => {
     }
 };
 
-export { signup, login, logout, updateProfile, checkAuth };
+const hashOtp = (otp) => crypto.createHash("sha256").update(String(otp)).digest("hex");
+
+const GENERIC_RESET_MESSAGE =
+    "If an account exists with that email, a reset code has been sent.";
+
+const forgotPassword = async (req, res) => {
+    const { email } = req.body;
+
+    try {
+        if (!email) {
+            return res.status(400).json({ message: "Email is required" });
+        }
+
+        const user = await User.findOne({ email });
+        if (!user) {
+            return res.status(200).json({ message: GENERIC_RESET_MESSAGE });
+        }
+
+        const otp = String(crypto.randomInt(100000, 1000000));
+        user.resetPasswordOtp = hashOtp(otp);
+        user.resetPasswordExpires = new Date(Date.now() + 10 * 60 * 1000);
+        await user.save();
+
+        let emailSent = false;
+        try {
+            const result = await sendPasswordResetOtp(user.email, otp);
+            emailSent = Boolean(result?.sent);
+        } catch (mailErr) {
+            console.error("Error sending reset email:", mailErr.message);
+            user.resetPasswordOtp = undefined;
+            user.resetPasswordExpires = undefined;
+            await user.save();
+            return res.status(500).json({ message: "Could not send reset code. Please try again." });
+        }
+
+        const payload = { message: GENERIC_RESET_MESSAGE };
+        if (!emailSent && process.env.NODE_ENV !== "production") {
+            payload.devOtp = otp;
+        }
+
+        res.status(200).json(payload);
+    } catch (err) {
+        console.error("Error in forgotPassword:", err.message);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+const resetPassword = async (req, res) => {
+    const { email, otp, newPassword } = req.body;
+
+    try {
+        if (!email || !otp || !newPassword) {
+            return res.status(400).json({ message: "Email, code, and new password are required" });
+        }
+
+        if (newPassword.length < 6) {
+            return res.status(400).json({ message: "Password must be at least 6 characters long" });
+        }
+
+        const user = await User.findOne({
+            email,
+            resetPasswordOtp: { $exists: true, $ne: null },
+            resetPasswordExpires: { $gt: new Date() },
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: "Invalid or expired reset code" });
+        }
+
+        const incomingHash = hashOtp(otp);
+        const storedHash = user.resetPasswordOtp;
+        if (
+            storedHash.length !== incomingHash.length ||
+            !crypto.timingSafeEqual(Buffer.from(storedHash), Buffer.from(incomingHash))
+        ) {
+            return res.status(400).json({ message: "Invalid or expired reset code" });
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+        await User.updateOne(
+            { _id: user._id },
+            {
+                $set: { password: hashedPassword },
+                $unset: { resetPasswordOtp: 1, resetPasswordExpires: 1 },
+            }
+        );
+
+        res.status(200).json({ message: "Password reset successfully. You can now sign in." });
+    } catch (err) {
+        console.error("Error in resetPassword:", err.message);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+export { signup, login, logout, updateProfile, checkAuth, forgotPassword, resetPassword };

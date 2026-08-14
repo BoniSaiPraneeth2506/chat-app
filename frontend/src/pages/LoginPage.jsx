@@ -241,20 +241,69 @@ import { useState } from "react";
 import useAuthStore from "../store/useAuthStore";
 
 import { Link } from "react-router-dom";
+import toast from "react-hot-toast";
 import { Eye, EyeOff, Loader2, Lock, Mail, MessageSquare } from "lucide-react";
 
 const LoginPage = () => {
   const [showPassword, setShowPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [view, setView] = useState("login");
   const [formData, setFormData] = useState({
     email: "",
     password: "",
   });
-  const { login, isLoggingIn } = useAuthStore();
+  const [resetForm, setResetForm] = useState({
+    otp: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const {
+    login,
+    isLoggingIn,
+    forgotPassword,
+    resetPassword,
+    isSendingReset,
+    isResettingPassword,
+  } = useAuthStore();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     login(formData);
   };
+
+  const handleForgotSubmit = async (e) => {
+    e.preventDefault();
+    const result = await forgotPassword(formData.email);
+    if (result) {
+      setResetForm({ otp: result.devOtp || "", newPassword: "", confirmPassword: "" });
+      setView("reset");
+    }
+  };
+
+  const handleResetSubmit = async (e) => {
+    e.preventDefault();
+    if (resetForm.newPassword !== resetForm.confirmPassword) {
+      toast.error("Passwords do not match");
+      return;
+    }
+    const ok = await resetPassword({
+      email: formData.email,
+      otp: resetForm.otp,
+      newPassword: resetForm.newPassword,
+    });
+    if (ok) {
+      setFormData({ ...formData, password: "" });
+      setResetForm({ otp: "", newPassword: "", confirmPassword: "" });
+      setView("login");
+    }
+  };
+
+  const inputClass =
+    "w-full py-3 pl-10 pr-3 text-white placeholder-gray-400 transition-all bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent";
+  const passwordInputClass =
+    "w-full py-3 pl-10 pr-10 text-white placeholder-gray-400 transition-all bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent";
+  const primaryBtnClass =
+    "flex items-center justify-center w-full gap-2 px-4 py-3 font-medium text-white transition-colors bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-blue-600/50";
 
   return (
     <div className="grid items-center h-screen lg:grid-cols-1">
@@ -269,11 +318,21 @@ const LoginPage = () => {
               >
                 <MessageSquare className="w-6 h-6 text-primary" />
               </div>
-              <h1 className="mt-2 text-2xl font-bold">Welcome Back</h1>
-              <p className="text-base-content/60">Sign in to your account</p>
+              <h1 className="mt-2 text-2xl font-bold">
+                {view === "login" ? "Welcome Back" : view === "forgot" ? "Forgot Password" : "Reset Password"}
+              </h1>
+              <p className="text-base-content/60">
+                {view === "login"
+                  ? "Sign in to your account"
+                  : view === "forgot"
+                    ? "Enter your email to receive a reset code"
+                    : "Enter the code and choose a new password"}
+              </p>
             </div>
           </div>
 
+          {view === "login" && (
+            <>
           {/* Form */}
           <div className="space-y-6">
             <div>
@@ -298,9 +357,18 @@ const LoginPage = () => {
             </div>
 
             <div>
-              <label className="block mb-2 text-sm font-medium text-gray-300">
-                Password
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-gray-300">
+                  Password
+                </label>
+                <button
+                  type="button"
+                  className="text-sm text-blue-400 hover:text-blue-300"
+                  onClick={() => setView("forgot")}
+                >
+                  Forgot password?
+                </button>
+              </div>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
                   <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
@@ -352,6 +420,158 @@ const LoginPage = () => {
               </Link>
             </p>
           </div>
+            </>
+          )}
+
+          {view === "forgot" && (
+            <>
+              <form className="space-y-6" onSubmit={handleForgotSubmit}>
+                <div>
+                  <label className="block mb-2 text-sm font-medium text-gray-300">
+                    Email
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                      <Mail className="w-5 h-5 text-gray-400" />
+                    </div>
+                    <input
+                      type="email"
+                      required
+                      className={inputClass}
+                      placeholder="you@example.com"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <button type="submit" disabled={isSendingReset} className={primaryBtnClass}>
+                  {isSendingReset ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    "Send reset code"
+                  )}
+                </button>
+              </form>
+              <div className="text-center">
+                <button
+                  type="button"
+                  className="text-sm text-blue-400 hover:text-blue-300"
+                  onClick={() => setView("login")}
+                >
+                  Back to sign in
+                </button>
+              </div>
+            </>
+          )}
+
+          {view === "reset" && (
+            <>
+              <form className="space-y-6" onSubmit={handleResetSubmit}>
+                <div>
+                  <label className="block mb-2 text-sm font-medium text-gray-300">
+                    Reset code
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    required
+                    maxLength={6}
+                    className="w-full py-3 px-3 text-white placeholder-gray-400 tracking-[0.3em] text-center transition-all bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="000000"
+                    value={resetForm.otp}
+                    onChange={(e) => setResetForm({ ...resetForm, otp: e.target.value.replace(/\D/g, "").slice(0, 6) })}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-2 text-sm font-medium text-gray-300">
+                    New password
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                      <Lock className="w-5 h-5 text-gray-400" />
+                    </div>
+                    <input
+                      type={showNewPassword ? "text" : "password"}
+                      required
+                      minLength={6}
+                      className={passwordInputClass}
+                      placeholder="••••••••"
+                      value={resetForm.newPassword}
+                      onChange={(e) => setResetForm({ ...resetForm, newPassword: e.target.value })}
+                    />
+                    <button
+                      type="button"
+                      className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 transition-colors hover:text-gray-300"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                    >
+                      {showNewPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block mb-2 text-sm font-medium text-gray-300">
+                    Confirm password
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                      <Lock className="w-5 h-5 text-gray-400" />
+                    </div>
+                    <input
+                      type={showNewPassword ? "text" : "password"}
+                      required
+                      minLength={6}
+                      className={inputClass}
+                      placeholder="••••••••"
+                      value={resetForm.confirmPassword}
+                      onChange={(e) => setResetForm({ ...resetForm, confirmPassword: e.target.value })}
+                    />
+                  </div>
+                  {resetForm.confirmPassword && resetForm.newPassword !== resetForm.confirmPassword && (
+                    <p className="mt-2 text-sm text-red-400">Passwords do not match</p>
+                  )}
+                </div>
+                <button
+                  type="submit"
+                  disabled={
+                    isResettingPassword ||
+                    resetForm.newPassword !== resetForm.confirmPassword ||
+                    resetForm.otp.length !== 6
+                  }
+                  className={primaryBtnClass}
+                >
+                  {isResettingPassword ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Resetting...
+                    </>
+                  ) : (
+                    "Reset password"
+                  )}
+                </button>
+              </form>
+              <div className="text-center space-y-2">
+                <button
+                  type="button"
+                  className="text-sm text-blue-400 hover:text-blue-300"
+                  onClick={() => setView("forgot")}
+                >
+                  Resend code
+                </button>
+                <div>
+                  <button
+                    type="button"
+                    className="text-sm text-base-content/60 hover:text-base-content"
+                    onClick={() => setView("login")}
+                  >
+                    Back to sign in
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
