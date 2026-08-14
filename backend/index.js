@@ -2,7 +2,6 @@ import dotenv from 'dotenv'
 dotenv.config();
 import express from 'express'
 import helmet from 'helmet'
-import rateLimit from 'express-rate-limit'
 
 import authRoutes from './routes/auth.route.js'
 import messageRoutes from './routes/message.route.js'
@@ -82,29 +81,7 @@ app.use(cors({
   credentials: true,
 }));
 
-// ── Rate Limiters ─────────────────────────────────────────────────────────────
-// Auth routes: max 10 attempts per 15 minutes (brute-force protection)
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: "Too many attempts. Please try again in 15 minutes." },
-  skipSuccessfulRequests: true, // only count failed attempts
-});
-
-// General API: max 100 requests per 15 minutes per IP
-const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: "Too many requests. Please slow down." },
-});
-
-app.use("/api/auth/login", authLimiter);
-app.use("/api/auth/signup", authLimiter);
-app.use("/api", generalLimiter);
+// Rate limiting removed: no express-rate-limit middleware applied.
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);

@@ -60,15 +60,8 @@ const privateUsersSet = new Set(); // users who hide online status
 const socketRateMap = new Map(); // userId -> { lastReset, counters: { key: count }}
 
 function socketAllow(userId, key, limit, windowMs) {
-    const id = userId.toString();
-    let rec = socketRateMap.get(id);
-    const now = Date.now();
-    if (!rec || now - rec.lastReset > windowMs) {
-        rec = { lastReset: now, counters: {} };
-        socketRateMap.set(id, rec);
-    }
-    rec.counters[key] = (rec.counters[key] || 0) + 1;
-    return rec.counters[key] <= limit;
+    // Rate limiting removed: always allow socket actions
+    return true;
 }
 
 // Runtime tracking for active group calls: Map<groupId, { startedBy, type, startTime, participants: Set<socketId>, participantUserIds: Set<userId> }>

@@ -88,19 +88,18 @@ const signup = async (req, res) => {
 
 const login = async (req, res) => {
     const { email, password } = req.body;
-    // Generic message for both "user not found" and "wrong password"
-    // prevents user-enumeration attacks
-    const INVALID_MSG = "Invalid email or password";
+    // Provide specific feedback: email not found vs incorrect password
+    // NOTE: this reveals which emails are registered — acceptable for this request.
 
     try {
         const user = await User.findOne({ email });
         if (!user) {
-            return res.status(401).json({ message: INVALID_MSG });
+            return res.status(401).json({ message: "Email not found" });
         }
 
         const isPasswordValid = await bcrypt.compare(password, user.password);
         if (!isPasswordValid) {
-            return res.status(401).json({ message: INVALID_MSG });
+            return res.status(401).json({ message: "Incorrect password" });
         }
 
         const token = generateToken(user._id, res);
