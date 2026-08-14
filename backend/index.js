@@ -92,7 +92,8 @@ app.use('/api/groups', groupRoutes);
 const __dirname = path.resolve();
 if (process.env.NODE_ENV === "production") {
   app.use(express.static(path.join(__dirname, "../frontend/dist")));
-  app.get("/*", (req, res) => {
+  // Express 5 requires a named wildcard (/* is invalid and crashes on startup)
+  app.get("/{*splat}", (req, res) => {
     res.sendFile(path.join(__dirname, "../frontend", "dist", "index.html"));
   });
 }
