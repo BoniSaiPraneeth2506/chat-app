@@ -12,21 +12,9 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors'
 import { app, server } from './lib/socket.js';
 import { startScheduler } from './jobs/scheduler.js';
+import { getAllowedOrigins, isOriginAllowed } from './lib/origins.js';
 
-// ── Allowed origins ──────────────────────────────────────────────────────────
-const buildAllowedOrigins = () => {
-  const prod = process.env.ALLOWED_ORIGIN; // e.g. https://your-app.onrender.com
-  const base = ["http://localhost:5173", "http://localhost:5001"];
-  if (prod) base.push(prod);
-  return base;
-};
-const ALLOWED_ORIGINS = buildAllowedOrigins();
-
-const isOriginAllowed = (origin) => {
-  if (process.env.NODE_ENV !== "production") return true;
-  if (!origin) return true; // allow same-origin / server-to-server
-  return ALLOWED_ORIGINS.includes(origin);
-};
+const ALLOWED_ORIGINS = getAllowedOrigins();
 
 // ── Helmet (HTTP security headers) ───────────────────────────────────────────
 app.use(

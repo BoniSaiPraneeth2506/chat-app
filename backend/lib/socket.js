@@ -5,18 +5,10 @@ import jwt from 'jsonwebtoken';
 import User from '../models/user.model.js';
 import Message from '../models/message.model.js';
 import Group from '../models/group.model.js';
+import { isOriginAllowed } from './origins.js';
 
 const app = express();
 const server = http.createServer(app);
-
-const isOriginAllowed = (origin) => {
-    if (process.env.NODE_ENV !== "production") return true;
-    if (!origin) return true;
-    const allowed = process.env.ALLOWED_ORIGIN
-        ? [process.env.ALLOWED_ORIGIN, "http://localhost:5173"]
-        : ["http://localhost:5173", "http://localhost:5001"];
-    return allowed.includes(origin);
-};
 
 const io = new Server(server, {
     cors: {
