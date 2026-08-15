@@ -56,8 +56,23 @@ import axiosInstance from "../lib/axios";
 import useAuthStore from "./useAuthStore";
 import { useGroupStore } from "./useGroupStore";
 import { useThemeStore } from "./useThemeStore";
+import {
+  cacheMessages,
+  getCachedMessages,
+  updateCachedMessage,
+  deleteCachedMessage,
+  clearCachedConversation,
+  cacheConversationsMeta,
+  getCachedConversationsMeta,
+  addToOutbox,
+  getOutbox,
+  removeFromOutbox,
+} from "../lib/db";
+import { isNetworkError } from "../lib/network";
 
-
+// Local cache keys are shared with db.js's per-conversation message store —
+// "dm:<userId>" keeps a DM's cache distinct from a group's ("group:<id>").
+const dmKey = (userId) => `dm:${userId}`;
 
 let callStartTime = null;
 let pendingIceCandidates = [];
@@ -139,6 +154,16 @@ export const useChatStore = create((set, get) => ({
 
   getUsers: async (search = "") => {
     set({ isUsersLoading: true });
+    const authUser = useAuthStore.getState().authUser;
+
+    // Cache-first: paint the sidebar instantly from the last sync, exactly
+    // like getMessages does for a conversation, instead of showing a
+    // skeleton while waiting on the network for something we already have.
+    if (authUser && !search) {
+      const cached = await getCachedConversationsMeta(authUser._id, "dm-sidebar");
+      if (cached) set({ users: cached.users || [], latestMessages: cached.latestMessages || {} });
+    }
+
     try {
       const res = await axiosInstance.get(`/messages/users?search=${search}`);
       const users = Array.isArray(res.data) ? res.data : [];
@@ -160,16 +185,34 @@ export const useChatStore = create((set, get) => ({
         })
       );
       set({ latestMessages: latestMsgs });
+
+      // Cache only the canonical unfiltered sidebar, not per-search results,
+      // so the offline fallback above always restores the full chat list.
+      if (authUser && !search) {
+        cacheConversationsMeta(authUser._id, "dm-sidebar", { users, latestMessages: latestMsgs });
+      }
     } catch (error) {
-      toast.error(error.response?.data?.message || error.message || "Failed to load users");
+      if (isNetworkError(error)) {
+        // Offline — whether or not a cache existed to fall back to (handled
+        // above), never surface axios's raw "Network Error" string.
+        if (search) toast.error("You're offline — search needs a connection");
+      } else {
+        toast.error(error.response?.data?.message || error.message || "Failed to load users");
+      }
     } finally {
       set({ isUsersLoading: false });
     }
   },
 
   getMessages: async (userId) => {
-    // Clear messages immediately so old chat doesn't flash while new one loads
-    set({ isMessagesLoading: true, hasMoreMessages: true, messages: [] });
+    const authUser = useAuthStore.getState().authUser;
+    const conversationKey = dmKey(userId);
+
+    // Cache-first: paint instantly from whatever's already on the device
+    // (like WhatsApp reopening a chat) while the network call confirms.
+    const cached = authUser ? await getCachedMessages(authUser._id, conversationKey) : [];
+    set({ isMessagesLoading: true, hasMoreMessages: true, messages: cached });
+
     try {
       const limit = 20;
       const res = await axiosInstance.get(`/messages/${userId}?limit=${limit}&skip=0`);
@@ -185,11 +228,12 @@ export const useChatStore = create((set, get) => ({
         }
       }
 
-      set({ 
+      set({
         messages,
         hasMoreMessages: messages.length === limit,
         pinnedMessage
       });
+      if (authUser) cacheMessages(authUser._id, conversationKey, messages);
 
       // Emit markAsRead to receiver
       const socket = useAuthStore.getState().socket;
@@ -198,7 +242,14 @@ export const useChatStore = create((set, get) => ({
         socket.emit("markAsRead", { senderId: userId, receiverId: currentUser._id });
       }
     } catch (error) {
-      toast.error(error.response?.data?.message || error.message || "Failed to load messages");
+      if (isNetworkError(error)) {
+        // Offline: stay on whatever's cached (possibly empty, if this chat
+        // was never opened before) instead of surfacing axios's raw
+        // "Network Error" — the offline banner already says what's going on.
+        set({ hasMoreMessages: false });
+      } else {
+        toast.error(error.response?.data?.message || error.message || "Failed to load messages");
+      }
     } finally {
       set({ isMessagesLoading: false });
     }
@@ -256,28 +307,79 @@ export const useChatStore = create((set, get) => ({
       }
     }));
 
-    try {
-      const payload = replyingToMessage 
-        ? { ...messageData, replyTo: replyingToMessage._id } 
-        : messageData;
+    const payload = replyingToMessage
+      ? { ...messageData, replyTo: replyingToMessage._id }
+      : messageData;
 
+    try {
       const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, payload);
       const sentMessage = { ...res.data, tempId };
 
       // Replace temporary optimistic message with confirmed server message
-      set((state) => ({ 
+      set((state) => ({
         messages: state.messages.map((m) => (m._id === tempId || m.tempId === tempId ? sentMessage : m)),
         latestMessages: {
           ...state.latestMessages,
           [selectedUser._id]: sentMessage
         }
       }));
+      cacheMessages(authUser._id, dmKey(selectedUser._id), [sentMessage]);
     } catch (error) {
-      // Revert temporary message if network request fails
-      set((state) => ({
-        messages: state.messages.filter((m) => m._id !== tempId)
-      }));
-      toast.error(error.response?.data?.message || error.message || "Failed to send message");
+      if (isNetworkError(error)) {
+        // Offline: keep the bubble on screen (renderTicks shows it pending)
+        // and queue it to auto-send once the connection comes back.
+        addToOutbox(authUser._id, {
+          tempId,
+          conversationKey: dmKey(selectedUser._id),
+          kind: "dm",
+          targetId: selectedUser._id,
+          payload,
+          createdAt: Date.now(),
+        });
+      } else {
+        // A real rejection (validation, blocked, etc.) — revert as before.
+        set((state) => ({
+          messages: state.messages.filter((m) => m._id !== tempId)
+        }));
+        toast.error(error.response?.data?.message || error.message || "Failed to send message");
+      }
+    }
+  },
+
+  // Retries every message that got queued while offline, in the order it
+  // was composed. Runs on socket (re)connect — see useAuthStore.connectSocket.
+  flushOutbox: async () => {
+    const authUser = useAuthStore.getState().authUser;
+    if (!authUser) return;
+
+    const queued = (await getOutbox(authUser._id)).filter((entry) => entry.kind === "dm");
+    for (const entry of queued) {
+      try {
+        const res = await axiosInstance.post(`/messages/send/${entry.targetId}`, entry.payload);
+        const sentMessage = { ...res.data, tempId: entry.tempId };
+        set((state) => ({
+          messages: state.messages.map((m) =>
+            m._id === entry.tempId || m.tempId === entry.tempId ? sentMessage : m
+          ),
+          latestMessages: {
+            ...state.latestMessages,
+            [entry.targetId]: sentMessage
+          }
+        }));
+        cacheMessages(authUser._id, entry.conversationKey, [sentMessage]);
+        await removeFromOutbox(authUser._id, entry.tempId);
+      } catch (error) {
+        if (!isNetworkError(error)) {
+          // Genuinely rejected (not just still offline) — stop retrying it.
+          set((state) => ({
+            messages: state.messages.filter((m) => m._id !== entry.tempId && m.tempId !== entry.tempId)
+          }));
+          await removeFromOutbox(authUser._id, entry.tempId);
+          toast.error(error.response?.data?.message || "A queued message failed to send");
+        }
+        // Still offline: leave it queued and stop — preserves send order for next attempt.
+        else break;
+      }
     }
   },
 
@@ -384,6 +486,7 @@ export const useChatStore = create((set, get) => ({
       );
 
       // Update latestMessages and current chat messages for each forwarded recipient
+      const authUser = useAuthStore.getState().authUser;
       results.forEach((res, idx) => {
         const sentMsg = res.data;
         const { selectedUser } = get();
@@ -393,6 +496,7 @@ export const useChatStore = create((set, get) => ({
         if (selectedUser && recipientIds[idx] === selectedUser._id) {
           set((state) => ({ messages: [...state.messages, sentMsg] }));
         }
+        if (authUser) cacheMessages(authUser._id, dmKey(recipientIds[idx]), [sentMsg]);
       });
 
       toast.success(
@@ -448,6 +552,16 @@ export const useChatStore = create((set, get) => ({
           }
         }
       }));
+
+      // Write-through to the local cache regardless of which chat is open,
+      // so reopening this conversation later (even offline) shows it.
+      if (currentUser) {
+        const receiverKey = typeof newMessage.receiverId === 'object'
+          ? (newMessage.receiverId._id || newMessage.receiverId.toString())
+          : newMessage.receiverId;
+        const otherPartyId = senderKey === currentUser._id ? receiverKey : senderKey;
+        if (otherPartyId) cacheMessages(currentUser._id, dmKey(otherPartyId), [newMessage]);
+      }
 
       // If the message is from the currently active chat, append or merge it
       if (selectedUser && (senderKey === selectedUser._id || newMessage.receiverId === selectedUser._id)) {
@@ -543,15 +657,20 @@ export const useChatStore = create((set, get) => ({
           msg._id === messageId ? { ...msg, reactions } : msg
         )
       }));
+      const authUser = useAuthStore.getState().authUser;
+      if (authUser) updateCachedMessage(authUser._id, messageId, { reactions });
     });
 
     // Handle real-time message deletions
     socket.on("messageDeleted", ({ messageId, isDeletedForEveryone }) => {
+      const patch = { isDeletedForEveryone, text: "", image: "", reactions: [] };
       set((state) => ({
         messages: state.messages.map((msg) =>
-          msg._id === messageId ? { ...msg, isDeletedForEveryone, text: "", image: "", reactions: [] } : msg
+          msg._id === messageId ? { ...msg, ...patch } : msg
         )
       }));
+      const authUser = useAuthStore.getState().authUser;
+      if (authUser) updateCachedMessage(authUser._id, messageId, patch);
     });
 
     // Handle message editing
@@ -561,6 +680,8 @@ export const useChatStore = create((set, get) => ({
           msg._id === editedMessage._id ? { ...msg, ...editedMessage } : msg
         )
       }));
+      const authUser = useAuthStore.getState().authUser;
+      if (authUser) updateCachedMessage(authUser._id, editedMessage._id, editedMessage);
     });
 
     // Handle call User
@@ -669,6 +790,8 @@ export const useChatStore = create((set, get) => ({
           pinnedMessage: pinnedMsg.isPinned ? pinnedMsg : null
         }));
       }
+      const authUser = useAuthStore.getState().authUser;
+      if (authUser) updateCachedMessage(authUser._id, pinnedMsg._id, pinnedMsg);
     });
 
     // Handle chat wallpaper update
@@ -690,6 +813,8 @@ export const useChatStore = create((set, get) => ({
           msg._id === messageId ? { ...msg, viewedBy } : msg
         )
       }));
+      const authUser = useAuthStore.getState().authUser;
+      if (authUser) updateCachedMessage(authUser._id, messageId, { viewedBy });
     });
   },
 
@@ -796,6 +921,7 @@ export const useChatStore = create((set, get) => ({
           msg._id === messageId ? res.data : msg
         )
       }));
+      updateCachedMessage(currentUser._id, messageId, res.data);
     } catch (error) {
       console.error("Failed to toggle reaction:", error);
     }
@@ -812,19 +938,23 @@ export const useChatStore = create((set, get) => ({
   },
 
   deleteMessage: async (messageId, type) => {
+    const authUser = useAuthStore.getState().authUser;
     try {
       await axiosInstance.delete(`/messages/${messageId}`, { data: { type } });
       if (type === "me") {
         set((state) => ({
           messages: state.messages.filter((msg) => msg._id !== messageId)
         }));
+        if (authUser) deleteCachedMessage(authUser._id, messageId);
         toast.success("Message deleted for you");
       } else {
+        const patch = { isDeletedForEveryone: true, text: "", image: "", reactions: [] };
         set((state) => ({
           messages: state.messages.map((msg) =>
-            msg._id === messageId ? { ...msg, isDeletedForEveryone: true, text: "", image: "", reactions: [] } : msg
+            msg._id === messageId ? { ...msg, ...patch } : msg
           )
         }));
+        if (authUser) updateCachedMessage(authUser._id, messageId, patch);
         toast.success("Message deleted for everyone");
       }
     } catch (error) {
@@ -833,9 +963,11 @@ export const useChatStore = create((set, get) => ({
   },
 
   clearChatHistory: async (contactId) => {
+    const authUser = useAuthStore.getState().authUser;
     try {
       await axiosInstance.delete(`/messages/clear/${contactId}`);
       set({ messages: [] });
+      if (authUser) clearCachedConversation(authUser._id, dmKey(contactId));
       toast.success("Conversation cleared successfully");
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to clear history");
@@ -850,27 +982,33 @@ export const useChatStore = create((set, get) => ({
           msg._id === messageId ? res.data : msg
         )
       }));
+      const authUser = useAuthStore.getState().authUser;
+      if (authUser) updateCachedMessage(authUser._id, messageId, res.data);
     } catch (error) {
       console.error("Failed to view one-view message:", error);
     }
   },
 
   deleteMessagesBulk: async (messageIds, type) => {
+    const authUser = useAuthStore.getState().authUser;
     try {
       await axiosInstance.post("/messages/delete-bulk", { messageIds, type });
       if (type === "me") {
         set((state) => ({
           messages: state.messages.filter((msg) => !messageIds.includes(msg._id))
         }));
+        if (authUser) messageIds.forEach((id) => deleteCachedMessage(authUser._id, id));
         toast.success("Selected messages deleted for you");
       } else {
+        const patch = { isDeletedForEveryone: true, text: "", image: "", reactions: [] };
         set((state) => ({
           messages: state.messages.map((msg) =>
-            messageIds.includes(msg._id) 
-              ? { ...msg, isDeletedForEveryone: true, text: "", image: "", reactions: [] } 
+            messageIds.includes(msg._id)
+              ? { ...msg, ...patch }
               : msg
           )
         }));
+        if (authUser) messageIds.forEach((id) => updateCachedMessage(authUser._id, id, patch));
         toast.success("Selected messages deleted for everyone");
       }
       set({ isSelectionMode: false, selectedMessageIds: [] });
@@ -888,6 +1026,8 @@ export const useChatStore = create((set, get) => ({
           msg._id === messageId ? updatedMessage : msg
         )
       }));
+      const authUser = useAuthStore.getState().authUser;
+      if (authUser) updateCachedMessage(authUser._id, messageId, updatedMessage);
       toast.success("Message edited");
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to edit message");
@@ -1189,6 +1329,8 @@ export const useChatStore = create((set, get) => ({
         ),
         pinnedMessage: updatedMessage.isPinned ? updatedMessage : null
       }));
+      const authUser = useAuthStore.getState().authUser;
+      if (authUser) updateCachedMessage(authUser._id, messageId, updatedMessage);
 
       toast.success(updatedMessage.isPinned ? "Message pinned" : "Message unpinned");
     } catch (error) {

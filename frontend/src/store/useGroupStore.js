@@ -3,6 +3,20 @@ import toast from "react-hot-toast";
 import axiosInstance from "../lib/axios";
 import useAuthStore from "./useAuthStore";
 import { useChatStore } from "./useChatStore";
+import {
+  cacheMessages,
+  getCachedMessages,
+  updateCachedMessage,
+  cacheConversationsMeta,
+  getCachedConversationsMeta,
+  addToOutbox,
+  getOutbox,
+  removeFromOutbox,
+} from "../lib/db";
+import { isNetworkError } from "../lib/network";
+
+// Mirrors dmKey in useChatStore.js — same per-conversation cache, distinct prefix.
+const groupKey = (groupId) => `group:${groupId}`;
 
 export const useGroupStore = create((set, get) => ({
   groups: [],
@@ -36,6 +50,15 @@ export const useGroupStore = create((set, get) => ({
   // 1. Fetch User Groups
   getGroups: async () => {
     set({ isGroupsLoading: true });
+    const authUser = useAuthStore.getState().authUser;
+
+    // Cache-first: paint instantly from the last sync instead of a skeleton
+    // while the network confirms/refreshes — mirrors getUsers in useChatStore.
+    if (authUser) {
+      const cached = await getCachedConversationsMeta(authUser._id, "group-sidebar");
+      if (cached) set({ groups: cached.groups || [], latestGroupMessages: cached.latestGroupMessages || {} });
+    }
+
     try {
       const res = await axiosInstance.get("/groups");
       const groups = Array.isArray(res.data) ? res.data : [];
@@ -63,8 +86,18 @@ export const useGroupStore = create((set, get) => ({
         })
       );
       set({ latestGroupMessages: latestMsgs });
+      if (authUser) cacheConversationsMeta(authUser._id, "group-sidebar", { groups, latestGroupMessages: latestMsgs });
     } catch (error) {
-      toast.error(error.response?.data?.message || "Failed to load groups");
+      if (isNetworkError(error) && authUser) {
+        const cached = await getCachedConversationsMeta(authUser._id, "group-sidebar");
+        if (cached) {
+          set({ groups: cached.groups || [], latestGroupMessages: cached.latestGroupMessages || {} });
+        }
+        // No toast here: the DM sidebar's own offline fallback (useChatStore.getUsers)
+        // already surfaces one "you're offline" message for the whole home screen.
+      } else {
+        toast.error(error.response?.data?.message || "Failed to load groups");
+      }
     } finally {
       set({ isGroupsLoading: false });
     }
@@ -111,12 +144,25 @@ export const useGroupStore = create((set, get) => ({
 
   // 4. Get Group Messages
   getGroupMessages: async (groupId) => {
-    set({ isGroupMessagesLoading: true });
+    const authUser = useAuthStore.getState().authUser;
+    const conversationKey = groupKey(groupId);
+
+    // Cache-first: paint instantly, then confirm/refresh over the network.
+    const cached = authUser ? await getCachedMessages(authUser._id, conversationKey) : [];
+    set({ isGroupMessagesLoading: true, groupMessages: cached });
+
     try {
       const res = await axiosInstance.get(`/groups/${groupId}/messages`);
-      set({ groupMessages: Array.isArray(res.data) ? res.data : [] });
+      const messages = Array.isArray(res.data) ? res.data : [];
+      set({ groupMessages: messages });
+      if (authUser) cacheMessages(authUser._id, conversationKey, messages);
     } catch (error) {
-      toast.error(error.response?.data?.message || "Failed to load group messages");
+      if (isNetworkError(error)) {
+        // Offline: keep whatever's cached (possibly empty) instead of a raw
+        // "Network Error" toast — the offline banner already covers this.
+      } else {
+        toast.error(error.response?.data?.message || "Failed to load group messages");
+      }
     } finally {
       set({ isGroupMessagesLoading: false });
     }
@@ -167,11 +213,58 @@ export const useGroupStore = create((set, get) => ({
           [selectedGroup._id]: sentMsg,
         },
       }));
+      cacheMessages(authUser._id, groupKey(selectedGroup._id), [sentMsg]);
     } catch (error) {
-      set((state) => ({
-        groupMessages: state.groupMessages.filter((m) => m._id !== tempId),
-      }));
-      toast.error(error.response?.data?.message || "Failed to send group message");
+      if (isNetworkError(error)) {
+        // Offline: keep the bubble on screen and queue it for retry.
+        addToOutbox(authUser._id, {
+          tempId,
+          conversationKey: groupKey(selectedGroup._id),
+          kind: "group",
+          targetId: selectedGroup._id,
+          payload: messageData,
+          createdAt: Date.now(),
+        });
+      } else {
+        set((state) => ({
+          groupMessages: state.groupMessages.filter((m) => m._id !== tempId),
+        }));
+        toast.error(error.response?.data?.message || "Failed to send group message");
+      }
+    }
+  },
+
+  // Retries every group message queued while offline, in composed order.
+  // Runs on socket (re)connect — see useAuthStore.connectSocket.
+  flushOutbox: async () => {
+    const authUser = useAuthStore.getState().authUser;
+    if (!authUser) return;
+
+    const queued = (await getOutbox(authUser._id)).filter((entry) => entry.kind === "group");
+    for (const entry of queued) {
+      try {
+        const res = await axiosInstance.post(`/groups/${entry.targetId}/send`, entry.payload);
+        const sentMsg = res.data;
+        set((state) => ({
+          groupMessages: state.groupMessages.map((m) =>
+            m._id === entry.tempId || m.tempId === entry.tempId ? sentMsg : m
+          ),
+          latestGroupMessages: {
+            ...state.latestGroupMessages,
+            [entry.targetId]: sentMsg,
+          },
+        }));
+        cacheMessages(authUser._id, entry.conversationKey, [sentMsg]);
+        await removeFromOutbox(authUser._id, entry.tempId);
+      } catch (error) {
+        if (!isNetworkError(error)) {
+          set((state) => ({
+            groupMessages: state.groupMessages.filter((m) => m._id !== entry.tempId && m.tempId !== entry.tempId),
+          }));
+          await removeFromOutbox(authUser._id, entry.tempId);
+          toast.error(error.response?.data?.message || "A queued group message failed to send");
+        } else break; // still offline — keep order, retry next reconnect
+      }
     }
   },
 
@@ -195,6 +288,8 @@ export const useGroupStore = create((set, get) => ({
           [selectedGroup._id]: res.data,
         },
       }));
+      const authUser = useAuthStore.getState().authUser;
+      if (authUser) cacheMessages(authUser._id, groupKey(selectedGroup._id), [res.data]);
       return res.data;
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to create poll");
@@ -214,6 +309,8 @@ export const useGroupStore = create((set, get) => ({
       set((state) => ({
         groupMessages: state.groupMessages.map((m) => (m._id === messageId ? res.data : m)),
       }));
+      const authUser = useAuthStore.getState().authUser;
+      if (authUser) updateCachedMessage(authUser._id, messageId, res.data);
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to submit vote");
     }
@@ -228,6 +325,8 @@ export const useGroupStore = create((set, get) => ({
       set((state) => ({
         groupMessages: state.groupMessages.map((m) => (m._id === messageId ? res.data : m)),
       }));
+      const authUser = useAuthStore.getState().authUser;
+      if (authUser) updateCachedMessage(authUser._id, messageId, res.data);
       toast.success("Poll closed");
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to close poll");
@@ -353,6 +452,10 @@ export const useGroupStore = create((set, get) => ({
         },
       }));
 
+      // Write-through regardless of which group is open, so reopening this
+      // group later (even offline) shows it.
+      if (currentUser) cacheMessages(currentUser._id, groupKey(message.groupId), [message]);
+
       if (selectedGroup && selectedGroup._id === message.groupId) {
         set((state) => ({
           groupMessages: [...state.groupMessages, message],
@@ -375,6 +478,8 @@ export const useGroupStore = create((set, get) => ({
           ? { ...state.latestGroupMessages, [message.groupId]: message }
           : state.latestGroupMessages,
       }));
+      const authUser = useAuthStore.getState().authUser;
+      if (authUser) updateCachedMessage(authUser._id, message._id, message);
     });
 
     // Group Created Notification

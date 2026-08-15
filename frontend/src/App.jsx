@@ -64,6 +64,7 @@ import GroupCallModal from './components/GroupCallModal'
 import CallModal from './components/CallModal'
 import { useGroupStore } from './store/useGroupStore'
 import { App as CapacitorApp } from '@capacitor/app'
+import OfflineBanner from './components/OfflineBanner'
 
 const PENDING_CHAT_KEY = "pendingChatUserId";
 
@@ -380,6 +381,7 @@ const App = () => {
       <CreateGroupModal />
       <GroupDetailsModal />
       <GroupCallModal />
+      <OfflineBanner />
     </div>
   );
 };

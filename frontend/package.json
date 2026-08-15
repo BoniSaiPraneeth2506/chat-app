@@ -15,6 +15,7 @@
     "@capacitor/core": "^8.5.0",
     "axios": "^1.10.0",
     "chat-app": "file:..",
+    "dexie": "^4.4.5",
     "lucide-react": "^0.523.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

@@ -759,6 +759,12 @@ const ChatContainer = () => {
   const renderTicks = (message) => {
     if (message.senderId !== authUser._id) return null;
 
+    // Optimistic message not yet confirmed by the server — either still
+    // sending, or queued in the offline outbox waiting to be retried.
+    if (message.tempId && message._id === message.tempId) {
+      return <Clock className="w-[13px] h-[13px] text-zinc-400 flex-shrink-0" />;
+    }
+
     const receiverId = message.receiverId;
     const isOnline = onlineUsers.includes(receiverId);
 
