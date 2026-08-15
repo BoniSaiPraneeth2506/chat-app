@@ -174,16 +174,21 @@ const googleAuth = async (req, res) => {
         if (!user) {
             // Google has already verified this email, so an existing password
             // account with the same address is safe to link automatically.
+            // A targeted update (not a full-document .save()) avoids
+            // re-validating unrelated fields on accounts that predate a
+            // schema change, e.g. old seed data missing fullName.
             user = await User.findOne({ email: payload.email });
             if (user) {
+                await User.updateOne({ _id: user._id }, { $set: { googleId: payload.sub } });
                 user.googleId = payload.sub;
-                await user.save();
             }
         }
 
         if (!user) {
+            const fallbackName =
+                payload.name || [payload.given_name, payload.family_name].filter(Boolean).join(" ") || payload.email?.split("@")[0] || "Google User";
             user = new User({
-                fullName: payload.name || payload.email.split("@")[0],
+                fullName: fallbackName,
                 email: payload.email,
                 googleId: payload.sub,
                 profilePic: payload.picture || "",
