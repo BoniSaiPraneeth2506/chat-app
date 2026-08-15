@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
+import { OAuth2Client } from "google-auth-library";
 import { generateToken } from "../lib/utils.js";
 import User from "../models/user.model.js";
 import bcrypt from 'bcryptjs'
@@ -7,6 +8,8 @@ import cloudinary from "../lib/cloudinary.js";
 import { updateUserPrivacyState, disconnectRevokedSessions } from "../lib/socket.js";
 import { sendPasswordResetOtp } from "../lib/mailer.js";
 import { buildSession } from "../lib/deviceInfo.js";
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 /** Reads JWT claims from the cookie or Authorization header without throwing. */
 const readTokenClaims = (req) => {
@@ -120,6 +123,10 @@ const login = async (req, res) => {
             return res.status(401).json({ message: "Email not found" });
         }
 
+        if (!user.password) {
+            return res.status(401).json({ message: "This account uses Google Sign-In. Continue with Google instead." });
+        }
+
         const isPasswordValid = await bcrypt.compare(password, user.password);
         if (!isPasswordValid) {
             return res.status(401).json({ message: "Incorrect password" });
@@ -134,6 +141,64 @@ const login = async (req, res) => {
 
     } catch (err) {
         console.error("Error in login:", err.message);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+const googleAuth = async (req, res) => {
+    const { idToken } = req.body;
+
+    try {
+        if (!idToken) {
+            return res.status(400).json({ message: "Missing Google ID token" });
+        }
+
+        let payload;
+        try {
+            const ticket = await googleClient.verifyIdToken({
+                idToken,
+                audience: process.env.GOOGLE_CLIENT_ID,
+            });
+            payload = ticket.getPayload();
+        } catch (verifyErr) {
+            console.error("Error verifying Google ID token:", verifyErr.message);
+            return res.status(401).json({ message: "Invalid Google sign-in" });
+        }
+
+        if (!payload?.email_verified) {
+            return res.status(401).json({ message: "Google account email is not verified" });
+        }
+
+        let user = await User.findOne({ googleId: payload.sub });
+
+        if (!user) {
+            // Google has already verified this email, so an existing password
+            // account with the same address is safe to link automatically.
+            user = await User.findOne({ email: payload.email });
+            if (user) {
+                user.googleId = payload.sub;
+                await user.save();
+            }
+        }
+
+        if (!user) {
+            user = new User({
+                fullName: payload.name || payload.email.split("@")[0],
+                email: payload.email,
+                googleId: payload.sub,
+                profilePic: payload.picture || "",
+            });
+            await user.save();
+        }
+
+        const token = await startSession(user, req, res);
+
+        res.status(200).json({
+            ...sanitizeUser(user),
+            token,
+        });
+    } catch (err) {
+        console.error("Error in googleAuth:", err.message);
         res.status(500).json({ message: "Internal server error" });
     }
 };
@@ -374,4 +439,4 @@ const revokeOtherSessions = async (req, res) => {
     }
 };
 
-export { signup, login, logout, updateProfile, checkAuth, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions };
+export { signup, login, logout, googleAuth, updateProfile, checkAuth, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions };

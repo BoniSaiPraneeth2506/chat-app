@@ -243,6 +243,8 @@ import useAuthStore from "../store/useAuthStore";
 import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import { Eye, EyeOff, Loader2, Lock, Mail, MessageSquare } from "lucide-react";
+import { GoogleLogin } from "@react-oauth/google";
+import { Capacitor } from "@capacitor/core";
 
 const LoginPage = () => {
   const [showPassword, setShowPassword] = useState(false);
@@ -260,6 +262,7 @@ const LoginPage = () => {
   const {
     login,
     isLoggingIn,
+    loginWithGoogle,
     forgotPassword,
     resetPassword,
     isSendingReset,
@@ -410,6 +413,26 @@ const LoginPage = () => {
                 "Sign in"
               )}
             </button>
+
+            {/* Google's OAuth policy blocks sign-in from embedded WebViews
+                (like the Android app's), so this only renders on the web. */}
+            {!Capacitor.isNativePlatform() && (
+              <>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-px bg-gray-700" />
+                  <span className="text-xs text-gray-500">OR</span>
+                  <div className="flex-1 h-px bg-gray-700" />
+                </div>
+                <div className="flex justify-center">
+                  <GoogleLogin
+                    onSuccess={(credentialResponse) => loginWithGoogle(credentialResponse.credential)}
+                    onError={() => toast.error("Google sign-in failed")}
+                    theme="filled_black"
+                    width="320"
+                  />
+                </div>
+              </>
+            )}
           </div>
 
           <div className="text-center">

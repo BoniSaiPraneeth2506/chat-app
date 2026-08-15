@@ -204,6 +204,23 @@ const useAuthStore=create((set,get)=>({
             set({isLoggingIn:false})
         }
     },
+    loginWithGoogle:async(idToken)=>{
+       set({isLoggingIn:true})
+        try{
+           const res=await axiosInstance.post("/auth/google",{idToken});
+           if (res.data && res.data.token) {
+             localStorage.setItem("token", res.data.token);
+           }
+           set({authUser:res.data});
+           persistAuthSnapshot(res.data);
+           toast.success("Logged in successfully")
+           get().connectSocket()
+        }catch(err){
+          toast.error(friendlyAuthError(err, "Google sign-in failed"));
+        }finally{
+            set({isLoggingIn:false})
+        }
+    },
     updateProfile: async (data) => {
     set({ isUpdatingProfile: true });
     try {
