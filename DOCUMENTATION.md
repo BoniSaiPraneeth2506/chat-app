@@ -416,7 +416,23 @@ NODE_ENV=development|production
 CLOUDINARY_CLOUD_NAME=<cloudinary cloud name>
 CLOUDINARY_API_KEY=<cloudinary api key>
 CLOUDINARY_API_SECRET=<cloudinary api secret>
+
+# Password reset email — Brevo HTTPS API (preferred; a single verified sender
+# address is enough, no domain required)
+BREVO_API_KEY=<brevo api key>
+EMAIL_FROM=<verified sender, e.g. Chatty <you@gmail.com>>
+
+# Password reset email — Resend HTTPS API (tried after Brevo; needs a verified domain
+# to reach arbitrary recipients)
+RESEND_API_KEY=<resend api key>
+
+# Password reset email — SMTP fallback (blocked on Render's free tier)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=<smtp user>
+SMTP_PASS=<smtp app password>
 ```
+Reset codes are sent through the first configured provider — Brevo, then Resend — falling back to SMTP. Hosts such as Render's free tier block outbound SMTP ports 25/465/587, so an HTTP provider is required there. With none configured, the code is logged to the server console instead (dev only).
 
 ### Frontend (`frontend/.env.production` — and optionally `.env.development`)
 ```env
