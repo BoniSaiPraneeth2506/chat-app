@@ -759,6 +759,12 @@ const ChatContainer = () => {
   const renderTicks = (message) => {
     if (message.senderId !== authUser._id) return null;
 
+    // Optimistic message not yet confirmed by the server — either still
+    // sending, or queued in the offline outbox waiting to be retried.
+    if (message.tempId && message._id === message.tempId) {
+      return <Clock className="w-[13px] h-[13px] text-zinc-400 flex-shrink-0" />;
+    }
+
     const receiverId = message.receiverId;
     const isOnline = onlineUsers.includes(receiverId);
 
@@ -803,7 +809,13 @@ const ChatContainer = () => {
       const deltaHeight = container.scrollHeight - prevScrollHeightRef.current;
       container.scrollTop = deltaHeight + prevScrollTopRef.current;
       isPrependingRef.current = false;
-    } else if (prevMessagesLengthRef.current === 0 || latestMessageId !== lastMessageIdRef.current) {
+    } else if (prevMessagesLengthRef.current === 0) {
+      // First render of this conversation's history: jump straight to the
+      // bottom instead of visibly scrolling through the whole thing.
+      if (messageEndRef.current) {
+        messageEndRef.current.scrollIntoView({ behavior: "auto" });
+      }
+    } else if (latestMessageId !== lastMessageIdRef.current) {
       if (messageEndRef.current) {
         messageEndRef.current.scrollIntoView({ behavior: "smooth" });
       }

@@ -644,7 +644,7 @@ const SideBar = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {isUsersLoading ? (
+        {isUsersLoading && users.length === 0 ? (
           Array(8).fill(null).map((_, idx) => (
             <div key={idx} className="flex items-center w-full gap-3 py-3.5 px-4 animate-pulse">
               <div className="relative mx-0 flex-shrink-0">

@@ -2,13 +2,44 @@ import {create } from 'zustand'
 import axiosInstance from '../lib/axios.js'
 import toast from 'react-hot-toast';
 import { io } from 'socket.io-client';
+import { isNetworkError, subscribeOnlineStatus } from '../lib/network.js';
+import { deleteUserDb } from '../lib/db.js';
 
-const BASE_URL = import.meta.env.VITE_API_URL 
-  ? import.meta.env.VITE_API_URL.replace(/\/api$/, "") 
+const BASE_URL = import.meta.env.VITE_API_URL
+  ? import.meta.env.VITE_API_URL.replace(/\/api$/, "")
   : (import.meta.env.MODE === "development" ? "http://localhost:5001" : "/");
 
+// A snapshot of the last known signed-in user, so a cold app launch with no
+// network yet can render the logged-in shell instantly instead of a blank
+// login screen while checkAuth() confirms things in the background.
+const AUTH_SNAPSHOT_KEY = "authUserSnapshot";
+const loadAuthSnapshot = () => {
+  try {
+    const raw = localStorage.getItem(AUTH_SNAPSHOT_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+const persistAuthSnapshot = (user) => {
+  try {
+    if (user) localStorage.setItem(AUTH_SNAPSHOT_KEY, JSON.stringify(user));
+    else localStorage.removeItem(AUTH_SNAPSHOT_KEY);
+  } catch {
+    // Storage unavailable/full — snapshotting is a nice-to-have, never fatal.
+  }
+};
+
+// Axios's own message for a network failure is the literal string "Network
+// Error" — never show that verbatim; every auth action below can plausibly
+// be attempted while offline (e.g. opening the app and trying to log in
+// without noticing there's no connection yet).
+const friendlyAuthError = (err, fallback) =>
+  isNetworkError(err) ? "You're offline — check your connection and try again" : (err.response?.data?.message || err.message || fallback);
+
 const useAuthStore=create((set,get)=>({
-    authUser:null,
+    authUser:loadAuthSnapshot(),
+    isOffline: typeof navigator !== 'undefined' ? !navigator.onLine : false,
     isSigningUp:false,
     isLoggingIn:false,
     isUpdatingProfile:false,
@@ -28,6 +59,8 @@ const useAuthStore=create((set,get)=>({
             socket.disconnect();
         }
         localStorage.removeItem("token");
+        persistAuthSnapshot(null);
+        if(authUser) deleteUserDb(authUser._id);
         set({authUser:null,socket:null,sessions:[],onlineUsers:[],isCheckingAuth:false});
         if(authUser) toast.error("This device was logged out from another session");
     },
@@ -63,12 +96,23 @@ const useAuthStore=create((set,get)=>({
     checkAuth:async()=>{
         try{
            const res=await axiosInstance.get('/auth/check');
-           set({authUser:res.data});
+           set({authUser:res.data,isOffline:false});
+           persistAuthSnapshot(res.data);
            get().connectSocket()
         }catch(err){
            console.log("error in checkauth",err);
-           localStorage.removeItem("token");
-           set({authUser:null});
+           if(isNetworkError(err)){
+               // Server unreachable (offline/cold start) — keep whatever
+               // cached session we already have instead of logging the
+               // user out just because the network hiccuped.
+               set({isOffline:true});
+           }else{
+               // A real response came back and it wasn't OK: the session
+               // is genuinely invalid, so this is the only case that clears it.
+               localStorage.removeItem("token");
+               persistAuthSnapshot(null);
+               set({authUser:null});
+           }
         }finally{
             set({isCheckingAuth:false})
         }
@@ -81,25 +125,33 @@ const useAuthStore=create((set,get)=>({
              localStorage.setItem("token", res.data.token);
            }
            set({authUser:res.data});
+           persistAuthSnapshot(res.data);
            toast.success("Account created successfully")
            get().connectSocket()
         }catch(err){
-          toast.error(err.response?.data?.message || err.message || "Something went wrong");
+          toast.error(friendlyAuthError(err, "Something went wrong"));
         }finally{
             set({isSigningUp:false})
         }
     },
     logOut:async()=>{
+        // Own account's cached messages must not survive a logout on a
+        // shared device, or the next person to log in on it would see them.
+        const currentUser=get().authUser;
         try{
              await axiosInstance.post('/auth/logout');
              localStorage.removeItem("token");
+             persistAuthSnapshot(null);
+             if(currentUser) deleteUserDb(currentUser._id);
              set({authUser:null})
              get().disconnectSocket()
              toast.success("Logout successfull")
         }catch(err){
              localStorage.removeItem("token");
+             persistAuthSnapshot(null);
+             if(currentUser) deleteUserDb(currentUser._id);
              set({authUser:null});
-             toast.error(err.response?.data?.message || err.message || "Logout failed");
+             toast.error(friendlyAuthError(err, "Logout failed"));
         }
     },
     forgotPassword: async (email) => {
@@ -115,7 +167,7 @@ const useAuthStore=create((set,get)=>({
             toast.error(
               err.code === "ECONNABORTED"
                 ? "Request timed out. Open the backend URL once to wake it, then try again."
-                : (err.response?.data?.message || err.message || "Failed to send reset code")
+                : friendlyAuthError(err, "Failed to send reset code")
             );
             return null;
         } finally {
@@ -129,7 +181,7 @@ const useAuthStore=create((set,get)=>({
             toast.success(res.data?.message || "Password reset successfully");
             return true;
         } catch (err) {
-            toast.error(err.response?.data?.message || err.message || "Failed to reset password");
+            toast.error(friendlyAuthError(err, "Failed to reset password"));
             return false;
         } finally {
             set({ isResettingPassword: false });
@@ -143,10 +195,11 @@ const useAuthStore=create((set,get)=>({
              localStorage.setItem("token", res.data.token);
            }
            set({authUser:res.data});
+           persistAuthSnapshot(res.data);
            toast.success("Logged in successfully")
            get().connectSocket()
         }catch(err){
-          toast.error(err.response?.data?.message || err.message || "Something went wrong");
+          toast.error(friendlyAuthError(err, "Something went wrong"));
         }finally{
             set({isLoggingIn:false})
         }
@@ -156,6 +209,7 @@ const useAuthStore=create((set,get)=>({
     try {
       const res = await axiosInstance.put("/auth/update-profile", data);
       set({ authUser: res.data });
+      persistAuthSnapshot(res.data);
       toast.success("Profile updated successfully");
     } catch (error) {
       console.log("error in update profile:", error);
@@ -196,6 +250,12 @@ const useAuthStore=create((set,get)=>({
 
       newSocket.on('connect', () => {
         console.log("Socket connected successfully:", newSocket.id);
+        set({isOffline:false});
+        // Back online (first connect or a reconnect): flush anything that
+        // was queued while offline. Dynamic import avoids a circular
+        // dependency, same pattern as the axios interceptor in lib/axios.js.
+        import("./useChatStore").then(({ useChatStore }) => useChatStore.getState().flushOutbox());
+        import("./useGroupStore").then(({ useGroupStore }) => useGroupStore.getState().flushOutbox());
       });
 
       newSocket.on('disconnect', () => {
@@ -221,8 +281,35 @@ const useAuthStore=create((set,get)=>({
     const { socket } = get();
     if (socket?.connected) {
         socket.disconnect();
-        set({ socket: null });  
+        set({ socket: null });
     }
   }
 }))
+
+// Keep isOffline in sync with the browser/WebView's connectivity status.
+// This is a plain network signal (separate from the socket's own connect/
+// disconnect events above), so the offline banner reacts immediately when
+// it fires. But when checkAuth() failed offline, no socket was ever created
+// (connectSocket only runs from checkAuth's success path), so there's
+// nothing for socket.io's own reconnection logic to reconnect — recovery
+// depends entirely on checkAuth running again.
+subscribeOnlineStatus((isOnline) => {
+  useAuthStore.setState({ isOffline: !isOnline });
+  if (isOnline) {
+    useAuthStore.getState().checkAuth();
+  }
+});
+
+// Belt-and-suspenders: the browser's online/offline events don't reliably
+// fire in every WebView for OS-level connectivity toggles (observed on
+// Android when network is restored via ADB/system settings rather than the
+// user's own airplane-mode switch). While we still think we're offline,
+// actively re-probe with the real network request instead of only trusting
+// navigator.onLine — self-limiting, since it stops once checkAuth succeeds.
+setInterval(() => {
+  if (useAuthStore.getState().isOffline) {
+    useAuthStore.getState().checkAuth();
+  }
+}, 10000);
+
 export default useAuthStore
