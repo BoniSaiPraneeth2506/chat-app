@@ -427,7 +427,7 @@ const LoginPage = () => {
                   <GoogleLogin
                     onSuccess={(credentialResponse) => loginWithGoogle(credentialResponse.credential)}
                     onError={() => toast.error("Google sign-in failed")}
-                    theme="filled_black"
+                    theme="outline"
                     width="320"
                   />
                 </div>
