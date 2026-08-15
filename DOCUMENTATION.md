@@ -21,6 +21,7 @@ A full-featured, WhatsApp-style real-time chat application built with **MongoDB,
 13. [Setup & Installation](#13-setup--installation)
 14. [Build & Deployment](#14-build--deployment)
 15. [Known Issues / Notes](#15-known-issues--notes)
+16. [Mobile App (Capacitor / Android)](#16-mobile-app-capacitor--android)
 
 ---
 
@@ -228,7 +229,8 @@ chat-app/
 |---|---|---|
 | fullName | String | required |
 | email | String | required, unique |
-| password | String | required, hashed (bcrypt), min length 6 |
+| password | String | hashed (bcrypt), min length 6 — **not required**: absent for Google-only accounts |
+| googleId | String | Google's `sub` claim, unique + sparse — present only for accounts that have signed in with Google |
 | profilePic | String | Cloudinary URL, default `""` |
 | bio | String | default `""` |
 | link | String | personal website/social link |
@@ -273,7 +275,8 @@ Base URL: `/api` (e.g., `http://localhost:5001/api`)
 | Method | Path | Auth? | Description |
 |---|---|---|---|
 | POST | `/signup` | No | Create account. Body: `{ fullName, email, password }`. Returns user + sets JWT cookie + returns `token`. |
-| POST | `/login` | No | Log in. Body: `{ email, password }`. Returns user + sets JWT cookie + returns `token`. |
+| POST | `/login` | No | Log in. Body: `{ email, password }`. Returns user + sets JWT cookie + returns `token`. Rejects with a clear message if the account has no password (Google-only). |
+| POST | `/google` | No | Google Sign-In. Body: `{ idToken }` (a Google ID token from either the web GIS button or the native Android plugin). Verifies the token server-side, then finds by `googleId`, auto-links to an existing password account with the same verified email, or creates a new account — same session/JWT issuance as `/login`. |
 | POST | `/logout` | No | Clears JWT cookie. |
 | PUT | `/update-profile` | Yes | Update `fullName`, `email`, `bio`, `link`, `onlinePrivacy`, `messageTimer`, `profilePic` (base64 → Cloudinary upload). |
 | GET | `/check` | Yes | Returns the currently authenticated user (`req.user`). Used on app load to restore session. |
@@ -400,7 +403,8 @@ Persists UI preferences to `localStorage`:
   - An `httpOnly` cookie named `jwt` (primary — `sameSite`/`secure` configured per `NODE_ENV`)
   - Also returned in the response body and stored in `localStorage`, sent as `Authorization: Bearer <token>` header on subsequent requests (fallback for cross-origin/mobile scenarios where cookies may be blocked)
 - `protectRoute` middleware validates the token (cookie first, then header), loads the user, and rejects with 401 on failure.
-- CORS is dynamically restricted in production to `localhost`, `127.0.0.1`, and `*.onrender.com` origins; open in development.
+- CORS (`backend/lib/origins.js`) is wide open in development. In production it allows: `localhost:5173`/`localhost:5001`, any origin listed in the `ALLOWED_ORIGIN`/`FRONTEND_URL` env vars (comma-separated), and any `https://*.onrender.com` origin. **The Capacitor Android app's origin (`https://localhost`) must be added to `ALLOWED_ORIGIN`** or the native app's API calls get rejected — see [§16](#16-mobile-app-capacitor--android).
+- **Google Sign-In** (`googleAuth` in `auth.controller.js`) verifies the client-supplied ID token server-side via `google-auth-library` against `GOOGLE_CLIENT_ID`, then finds-or-links-or-creates the user and issues the same session/JWT as password login. No separate session type — a Google-authenticated user is indistinguishable from a password one once logged in, except `password` may be unset.
 - Blocking logic is enforced server-side in `sendMessage` — checks both parties' `blockedUsers` arrays before allowing message delivery.
 
 ---
@@ -416,6 +420,17 @@ NODE_ENV=development|production
 CLOUDINARY_CLOUD_NAME=<cloudinary cloud name>
 CLOUDINARY_API_KEY=<cloudinary api key>
 CLOUDINARY_API_SECRET=<cloudinary api secret>
+
+# Google Sign-In — same Web OAuth client the frontend uses (see below).
+# GOOGLE_CLIENT_SECRET isn't actually used by the ID-token-verification flow
+# this app uses, but keep it set alongside the Client ID regardless.
+GOOGLE_CLIENT_ID=<google web oauth client id>.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=<google web oauth client secret>
+
+# Extra origins allowed by CORS in production, comma-separated — must include
+# the Capacitor Android app's origin (https://localhost) once you build it,
+# and your deployed frontend URL if it isn't on *.onrender.com.
+ALLOWED_ORIGIN=https://localhost,capacitor://localhost,<your deployed frontend URL>
 
 # Password reset email — Brevo HTTPS API (preferred; a single verified sender
 # address is enough, no domain required)
@@ -437,6 +452,10 @@ Reset codes are sent through the first configured provider — Brevo, then Resen
 ### Frontend (`frontend/.env.production` — and optionally `.env.development`)
 ```env
 VITE_API_URL=https://your-backend-domain.com/api
+
+# Google Sign-In — the Web OAuth client ID (not the secret; this is safe to
+# ship in the client bundle). Same value the backend's GOOGLE_CLIENT_ID uses.
+VITE_GOOGLE_CLIENT_ID=<google web oauth client id>.apps.googleusercontent.com
 ```
 If `VITE_API_URL` is not set, the frontend defaults to `http://localhost:5001/api` in dev mode, or `/api` (same-origin) in production — supporting the combined single-server deployment model.
 
@@ -512,3 +531,91 @@ serves the compiled React app and handles SPA client-side routing fallback, whil
 - Disappearing messages rely on a MongoDB TTL index (`deleteAt`, `expires: 0`) — requires MongoDB's background TTL monitor (runs every ~60s), so deletion isn't instantaneous.
 - WebRTC calling requires camera/microphone permissions and works best when both peers can establish a direct or TURN-relayed connection; the configured public TURN server (`openrelay.metered.ca`) is a free/shared service suitable for testing, not guaranteed for production-scale reliability.
 - The `backend/package.json` lists `"chat-app": "file:.."` as a dependency — a local self-reference likely left over from monorepo scaffolding; it has no functional effect but could be removed for clarity.
+
+---
+
+## 16. Mobile App (Capacitor / Android)
+
+The Android app is **not a separate codebase** — it's the same React frontend (`frontend/`), wrapped by [Capacitor](https://capacitorjs.com) and running inside a native WebView. `frontend/android/` is the native Android project; it's committed to the repo, so it doesn't need to be regenerated from scratch, just kept in sync.
+
+### 16.1 Prerequisites
+
+- **Node.js** (same as the web app).
+- **Android Studio** (for the SDK, platform tools, and an emulator if you want one) — install the SDK platforms/build-tools it prompts for.
+- **A JDK compatible with Gradle 8.11** — a *system-wide* very new JDK (e.g. JDK 25/26) will fail with `Unsupported class file major version`. The simplest fix, since Android Studio ships its own: point `JAVA_HOME` at Android Studio's bundled JBR for any Gradle command:
+  ```powershell
+  $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
+  $env:Path = "$env:JAVA_HOME\bin;$env:Path"
+  ```
+  (macOS/Linux: `Android Studio.app/Contents/jbr/Contents/Home`, or `/opt/android-studio/jbr`.)
+- `adb` on your `PATH` (comes with the SDK's `platform-tools`).
+- A device or emulator with **USB debugging enabled** (Settings → Developer Options), or an AVD created in Android Studio.
+
+### 16.2 First-time setup
+
+```bash
+cd frontend
+npm install                  # installs @capacitor/core, @capacitor/android,
+                              # @capgo/capacitor-social-login, etc.
+npm run build                 # builds dist/ from the current source
+npx cap sync android          # copies dist/ into the native project,
+                              # (re)registers plugins
+```
+
+### 16.3 The edit → rebuild → run loop
+
+Every time you change frontend source and want to see it in the Android app:
+
+```bash
+cd frontend
+npm run build          # 1. rebuild the web bundle into dist/
+npx cap sync android   # 2. copy dist/ + plugin config into android/
+
+cd android
+# Windows (PowerShell), pointing at the JBR JDK as above:
+.\gradlew.bat assembleDebug --console=plain
+# macOS/Linux:
+./gradlew assembleDebug
+
+# APK lands at android/app/build/outputs/apk/debug/app-debug.apk
+
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell am force-stop com.chatapp.mobile
+adb shell monkey -p com.chatapp.mobile -c android.intent.category.LAUNCHER 1
+```
+
+If you only changed `frontend/android/*` (native config, manifest, gradle files) and not the web source, you can skip the `npm run build`/`cap sync` steps and just re-run Gradle.
+
+`frontend/capacitor.config.json` controls the app ID (`com.chatapp.mobile`), display name, and which native plugin providers are bundled (`SocialLogin.providers` — only `google` is enabled; `facebook`/`apple`/`twitter` are disabled to keep the APK smaller and avoid Facebook's `AD_ID` permission).
+
+### 16.4 Google Sign-In on Android
+
+The app uses **Android's native Credential Manager** (via `@capgo/capacitor-social-login`) instead of a browser-redirect OAuth flow, because **Google blocks OAuth sign-in from embedded WebViews** (`Error 403: disallowed_useragent`) — this is why the web GIS "Sign in with Google" button (`LoginPage.jsx`/`SignUpPage.jsx`) is explicitly hidden when `Capacitor.isNativePlatform()` is true, and a separate native button calls `SocialLogin.login(...)` instead.
+
+Getting this working from a fresh clone needs one extra piece of Google Cloud Console config beyond the Web client the backend already uses:
+
+1. In the **same** Google Cloud project as your Web OAuth client, create a second OAuth client of type **Android**.
+2. Package name: `com.chatapp.mobile`.
+3. SHA-1 fingerprint of whichever keystore signs the build you're installing:
+   ```bash
+   # Debug builds (the default from `assembleDebug` above):
+   keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android
+   # look for the "SHA1:" line
+   ```
+   A release build needs its own SHA-1 registered from its own keystore (and again from Play App Signing's certificate, if distributed via Play Store) — the debug SHA-1 above only authorizes debug-signed installs.
+4. That's it on the Google Cloud side — the Android client isn't referenced anywhere in code (no client ID/secret to paste in). Its mere existence (tied to package name + SHA-1) is what authorizes the app to use Sign-In; the actual ID token returned to the app is still requested against the **Web** Client ID (`VITE_GOOGLE_CLIENT_ID`, passed as `webClientId` in `SocialLogin.initialize(...)`), so it's verified by the exact same `/auth/google` backend endpoint the web flow uses. No backend changes needed for the mobile app specifically.
+5. `frontend/src/pages/LoginPage.jsx` / `SignUpPage.jsx` call `SocialLogin.login({ provider: 'google', options: {} })` — **do not** pass a `scopes` option here; the plugin throws `"You CANNOT use scopes without modifying the main activity"` unless `MainActivity` is customized for it, and it isn't needed — `email`/`profile`/`email_verified` are already in the default ID token.
+
+### 16.5 Troubleshooting notes (things that actually came up)
+
+- **`Unsupported class file major version 70`** building with Gradle → your `JAVA_HOME` is pointing at too new a JDK. Use Android Studio's bundled JBR (§16.1).
+- **`Duplicate class kotlin.collections.jdk8.CollectionsJDK8Kt ...`** (or similar `kotlin-stdlib-jdk7`/`jdk8` conflicts) → different native plugins pull in different Kotlin stdlib versions. Already fixed via a `configurations.all { exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7' / 'kotlin-stdlib-jdk8' }` block in `android/app/build.gradle`; if a new plugin reintroduces this, that's the fix.
+- **`Dependency 'androidx.browser:browser:...' requires compileSdk 36 / AGP 8.9.1+`** → bump `compileSdkVersion` in `android/variables.gradle` and the `com.android.tools.build:gradle` classpath version in `android/build.gradle` accordingly (already done once this repo added `@capgo/capacitor-social-login`; a future plugin bump may ask for this again).
+- **Google API calls from the app return CORS errors / "Not allowed by CORS"** → the backend's `ALLOWED_ORIGIN` env var doesn't include `https://localhost` (the Capacitor Android app's origin). Add it and **redeploy** — on Render specifically, changing an env var and just *restarting* the service does **not** pick up the new value; it needs an actual redeploy (a restart reuses the previous env snapshot).
+- **`[28444] Developer console is not set up correctly`** (native Google Sign-In) → the installed APK's signing certificate SHA-1, package name, or `webClientId` doesn't match what's registered in Google Cloud Console. Check Logcat for `GoogleProvider` — it logs the exact `package`, `signingSha1`, and `webClientId` the app is using, to diff against the Android OAuth client's config.
+- **A phone connected via USB shows as `unauthorized` in `adb devices`** → check the phone's screen for the "Allow USB debugging?" prompt and accept it; it can take a couple of seconds to appear.
+- **The app doesn't reflect a code change** → you edited frontend source but skipped `npm run build` and/or `npx cap sync android` before rebuilding with Gradle — the native project only sees whatever is in `frontend/dist/` at the last sync, not live source.
+
+### 16.6 Offline behavior
+
+The frontend also has an offline-first cache (`frontend/src/lib/db.js`, IndexedDB via Dexie) that applies on both the web and the Android app equally — chats/messages paint instantly from the last sync while the network confirms in the background, sends made while offline queue and auto-flush on reconnect, and the whole cache for an account is wiped on logout. This is app code, not Capacitor-specific, so there's nothing extra to configure for it — it's mentioned here only because it's most noticeable on mobile.
