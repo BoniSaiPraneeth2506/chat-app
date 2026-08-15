@@ -75,7 +75,7 @@
 // };
 // export default ChatHeader;
 
-import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image, CheckSquare, Users, Info, Mic, MicOff, Maximize2 } from "lucide-react";
+import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image, CheckSquare, Users, Info, Mic, MicOff, Maximize2, CornerUpLeft, Pin, Trash2, Forward, Pencil } from "lucide-react";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
@@ -107,10 +107,10 @@ const formatLastSeen = (lastSeenTime) => {
 };
 
 const ChatHeader = () => {
-  const { 
-    selectedUser, 
-    setSelectedUser, 
-    isRecipientProfileOpen, 
+  const {
+    selectedUser,
+    setSelectedUser,
+    isRecipientProfileOpen,
     setIsRecipientProfileOpen,
     messageSearchQuery,
     setMessageSearchQuery,
@@ -120,7 +120,14 @@ const ChatHeader = () => {
     setConversationWallpaper,
     setLightboxImage,
     isSelectionMode,
-    setSelectionMode
+    setSelectionMode,
+    messages,
+    selectedMessageIds,
+    deleteMessagesBulk,
+    setReplyingToMessage,
+    setEditingMessage,
+    setForwardingMessage,
+    togglePinMessage,
   } = useChatStore();
 
   const {
@@ -141,6 +148,94 @@ const ChatHeader = () => {
   const isOnline = onlineUsers.includes(selectedUser?._id);
   const showLastSeen = selectedUser?.onlinePrivacy !== false;
   const isTyping = typingUsers?.[selectedUser?._id];
+
+  // DM-only: group message selection isn't wired to a backend action yet
+  // (see ChatContainer.jsx), so this toolbar only replaces the header there.
+  const selectedMsgs = selectedMessageIds.map((id) => messages.find((m) => m._id === id)).filter(Boolean);
+  const soleSelected = selectedMsgs.length === 1 ? selectedMsgs[0] : null;
+  const allOwnMessages = selectedMsgs.length > 0 && selectedMsgs.every((m) => m.senderId === authUser?._id);
+  const canEditSole = soleSelected && soleSelected.senderId === authUser?._id && !soleSelected.isDeletedForEveryone && soleSelected.text
+    && (Date.now() - new Date(soleSelected.createdAt).getTime() <= 15 * 60 * 1000);
+
+  const exitSelection = () => setSelectionMode(false);
+
+  if (isSelectionMode && !selectedGroup) {
+    return (
+      <div className="p-2.5 border-b border-base-300 min-h-[61px] flex items-center justify-between bg-base-100 relative z-30 animate-in fade-in duration-150">
+        <div className="flex items-center gap-3">
+          <button onClick={exitSelection} className="p-1 -ml-1 rounded-full hover:bg-base-200 transition-colors" title="Cancel selection">
+            <X className="size-5" />
+          </button>
+          <span className="text-sm font-semibold text-base-content">{selectedMessageIds.length}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          {soleSelected && (
+            <button
+              onClick={() => { setReplyingToMessage(soleSelected); exitSelection(); }}
+              className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+              title="Reply"
+            >
+              <CornerUpLeft size={18} />
+            </button>
+          )}
+          {soleSelected && !soleSelected.isDeletedForEveryone && (
+            <button
+              onClick={() => { togglePinMessage(soleSelected._id); exitSelection(); }}
+              className={`p-2 hover:bg-base-200 rounded-full transition-colors ${soleSelected.isPinned ? "text-amber-500" : "text-base-content/70 hover:text-primary"}`}
+              title={soleSelected.isPinned ? "Unpin" : "Pin"}
+            >
+              <Pin size={18} />
+            </button>
+          )}
+          {selectedMessageIds.length > 0 && (
+            <div className="dropdown dropdown-bottom dropdown-end">
+              <div tabIndex={0} role="button" className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-red-500 cursor-pointer" title="Delete">
+                <Trash2 size={18} />
+              </div>
+              <ul tabIndex={0} className="dropdown-content z-50 menu p-1.5 shadow-xl bg-base-100 border border-base-300 rounded-box w-48 text-xs text-base-content mt-1">
+                <li>
+                  <button
+                    onClick={() => { deleteMessagesBulk(selectedMessageIds, "me"); exitSelection(); document.activeElement.blur(); }}
+                    className="hover:bg-base-200 py-2 text-left font-medium"
+                  >
+                    Delete for me
+                  </button>
+                </li>
+                {allOwnMessages && (
+                  <li>
+                    <button
+                      onClick={() => { deleteMessagesBulk(selectedMessageIds, "everyone"); exitSelection(); document.activeElement.blur(); }}
+                      className="hover:bg-red-500 hover:text-white py-2 text-left font-medium text-red-500"
+                    >
+                      Delete for everyone
+                    </button>
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
+          {soleSelected && !soleSelected.isDeletedForEveryone && (
+            <button
+              onClick={() => { setForwardingMessage(soleSelected); exitSelection(); }}
+              className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+              title="Forward"
+            >
+              <Forward size={18} />
+            </button>
+          )}
+          {canEditSole && (
+            <button
+              onClick={() => { setEditingMessage(soleSelected); exitSelection(); }}
+              className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+              title="Edit"
+            >
+              <Pencil size={18} />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-2.5 border-b border-base-300 min-h-[61px] flex items-center bg-base-100 relative z-30">
@@ -347,14 +442,16 @@ const ChatHeader = () => {
               <Search size={18} />
             </button>
 
-            {/* Select Messages Toggle Button */}
-            <button 
-              onClick={() => setSelectionMode(!isSelectionMode)} 
-              className={`hidden sm:flex p-2 rounded-full transition-colors ${isSelectionMode ? "bg-primary text-primary-content" : "hover:bg-base-200 text-base-content/70 hover:text-primary"}`}
-              title="Select Messages"
-            >
-              <CheckSquare size={18} />
-            </button>
+            {/* Select Messages Toggle Button (DM only — see ChatContainer.jsx) */}
+            {!selectedGroup && (
+              <button
+                onClick={() => setSelectionMode(!isSelectionMode)}
+                className={`hidden sm:flex p-2 rounded-full transition-colors ${isSelectionMode ? "bg-primary text-primary-content" : "hover:bg-base-200 text-base-content/70 hover:text-primary"}`}
+                title="Select Messages"
+              >
+                <CheckSquare size={18} />
+              </button>
+            )}
 
             {/* Three Dots More Options Menu (Right of Search) */}
             <div className="dropdown dropdown-bottom dropdown-end">
@@ -430,20 +527,22 @@ const ChatHeader = () => {
                 ))}
 
                 <div className="divider my-1"></div>
-                <li>
-                  <button
-                    onClick={() => {
-                      setSelectionMode(!isSelectionMode);
-                      document.activeElement.blur();
-                    }}
-                    className="flex items-center gap-2 py-1.5 px-3 rounded-lg text-xs hover:bg-base-200 transition-colors text-base-content"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="size-3.5 text-base-content/75" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                    </svg>
-                    <span>{isSelectionMode ? "Cancel Selection" : "Select Messages"}</span>
-                  </button>
-                </li>
+                {!selectedGroup && (
+                  <li>
+                    <button
+                      onClick={() => {
+                        setSelectionMode(!isSelectionMode);
+                        document.activeElement.blur();
+                      }}
+                      className="flex items-center gap-2 py-1.5 px-3 rounded-lg text-xs hover:bg-base-200 transition-colors text-base-content"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="size-3.5 text-base-content/75" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                      </svg>
+                      <span>{isSelectionMode ? "Cancel Selection" : "Select Messages"}</span>
+                    </button>
+                  </li>
+                )}
 
                 {!isSelf && (
                   <>

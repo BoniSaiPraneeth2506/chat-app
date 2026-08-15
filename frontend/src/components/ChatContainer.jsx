@@ -400,7 +400,8 @@ const ChatContainer = () => {
     toggleMessageSelection,
     setSelectionMode,
     viewOneViewMessage,
-    deleteMessagesBulk,
+    forwardingMessage,
+    setForwardingMessage,
   } = useChatStore();
 
   const {
@@ -422,9 +423,9 @@ const ChatContainer = () => {
   const prevScrollHeightRef = useRef(0);
   const prevScrollTopRef = useRef(0);
   const isPrependingRef = useRef(false);
-  const [forwardingMessage, setForwardingMessage] = useState(null);
-  // Mobile-only: tap = actions, long press = emoji picker
-  const [mobileActionId, setMobileActionId] = useState(null);
+  // Mobile-only: long press shows the emoji row and selects the message,
+  // handing Reply/Pin/Delete/Forward off to ChatHeader's selection toolbar
+  // instead of a separate floating pill (see ChatHeader.jsx).
   const [mobileEmojiId, setMobileEmojiId] = useState(null);
   const longPressTimerRef = useRef(null);
   // Mobile gestures: horizontal swipe = quote reply, double tap = heart reaction
@@ -452,7 +453,13 @@ const ChatContainer = () => {
 
     longPressTimerRef.current = setTimeout(() => {
       setMobileEmojiId(message._id);
-      setMobileActionId(null);
+      // Group message selection isn't wired to a backend action yet, so
+      // scope the WhatsApp-style header toolbar to DMs for now.
+      if (!selectedGroup) {
+        setSelectionMode(true);
+        toggleMessageSelection(message._id);
+      }
+      buzz(15);
       longPressTimerRef.current = null;
     }, 450);
   };
@@ -512,15 +519,13 @@ const ChatContainer = () => {
         lastTapRef.current = { id: null, time: 0 };
         suppressClickRef.current = now;
         setMobileEmojiId(null);
-        setMobileActionId(null);
         toggleReaction(message._id, "❤️");
         buzz([15, 40, 15]);
         return;
       }
       lastTapRef.current = { id: message._id, time: now };
-
-      setMobileEmojiId(null);
-      setMobileActionId((prev) => (prev === message._id ? null : message._id));
+      // A plain quick tap does nothing special — Reply/Pin/Delete/Forward
+      // now live in ChatHeader's selection toolbar, entered via long-press.
     }
   };
 
@@ -736,6 +741,12 @@ const ChatContainer = () => {
     }
   }, [selectedUser?._id, getMessages]);
 
+  // Selection mode can end from ChatHeader's toolbar (back button, or an
+  // action that exits it) — drop the emoji row too so it doesn't linger.
+  useEffect(() => {
+    if (!isSelectionMode) setMobileEmojiId(null);
+  }, [isSelectionMode]);
+
   useEffect(() => {
     prevMessagesLengthRef.current = 0;
     lastMessageIdRef.current = null;
@@ -867,10 +878,9 @@ const ChatContainer = () => {
         <div 
           ref={scrollableRef}
           onScroll={handleScroll}
-          onClick={() => { setMobileActionId(null); setMobileEmojiId(null); }}
+          onClick={() => setMobileEmojiId(null)}
           onTouchStart={(e) => {
             if (!e.target.closest(".chat-bubble")) {
-              setMobileActionId(null);
               setMobileEmojiId(null);
             }
           }}
@@ -941,11 +951,9 @@ const ChatContainer = () => {
                       if (isSelectionMode) return;
                       if (e.target.closest(".mobile-action-bar") || e.target.closest("button") || e.target.closest("a") || e.target.closest("input") || e.target.closest("audio") || e.target.closest("video") || e.target.closest("iframe")) return;
                       if (Date.now() - suppressClickRef.current < 400) return;
-                      if (window.innerWidth < 1024) {
-                        e.stopPropagation();
-                        setMobileEmojiId(null);
-                        setMobileActionId((prev) => (prev === message._id ? null : message._id));
-                      }
+                      // A plain tap no longer opens anything — long-press
+                      // (handled via touch events below) is the only entry
+                      // point into the emoji row / selection toolbar now.
                     }}
                     onTouchStart={(e) => handleBubbleTouchStart(message, e)}
                     onTouchEnd={(e) => handleBubbleTouchEnd(message, e)}
@@ -995,92 +1003,17 @@ const ChatContainer = () => {
                       {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((emoji) => (
                         <button 
                           key={emoji} 
-                          onClick={(e) => { 
-                            e.stopPropagation(); 
-                            toggleReaction(message._id, emoji); 
-                            setMobileEmojiId(null); 
-                          }} 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleReaction(message._id, emoji);
+                            setMobileEmojiId(null);
+                            if (isSelectionMode) setSelectionMode(false);
+                          }}
                           className="text-xl active:scale-125 transition-transform p-1"
                         >
                           {emoji}
                         </button>
                       ))}
-                    </div>
-                  )}
-
-                  {/* ── Mobile: action bar — single tap (inline near message) ── */}
-                  {mobileActionId === message._id && (
-                    <div 
-                      onClick={(e) => e.stopPropagation()}
-                      className="mobile-action-bar absolute right-0 top-[-44px] lg:hidden animate-in zoom-in-95 duration-150 flex items-center bg-base-100 border border-base-300 rounded-full px-3 py-1.5 shadow-xl z-30 gap-2.5"
-                    >
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); setReplyingToMessage(message); setMobileActionId(null); }} 
-                        className="text-base-content/80 active:text-primary transition-colors flex items-center p-1" 
-                        title="Reply"
-                      >
-                        <CornerUpLeft size={18} />
-                      </button>
-                      {!message.isDeletedForEveryone && (
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); setForwardingMessage(message); setMobileActionId(null); }} 
-                          className="text-base-content/80 active:text-primary transition-colors flex items-center p-1" 
-                          title="Forward"
-                        >
-                          <Forward size={18} />
-                        </button>
-                      )}
-                      {message.senderId === authUser?._id && !message.isDeletedForEveryone && message.text && (Date.now() - new Date(message.createdAt).getTime() <= 15 * 60 * 1000) && (
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); setEditingMessage(message); setMobileActionId(null); }} 
-                          className="text-base-content/80 active:text-primary transition-colors flex items-center p-1" 
-                          title="Edit"
-                        >
-                          <Pencil size={18} />
-                        </button>
-                      )}
-                      {!message.isDeletedForEveryone && (
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); togglePinMessage(message._id); setMobileActionId(null); }} 
-                          className={`transition-colors flex items-center p-1 ${message.isPinned ? "text-amber-500" : "text-base-content/80 active:text-amber-500"}`} 
-                          title={message.isPinned ? "Unpin" : "Pin"}
-                        >
-                          <Pin size={18} />
-                        </button>
-                      )}
-                      {!message.isDeletedForEveryone && (
-                        <div className="dropdown dropdown-bottom dropdown-end flex items-center">
-                          <div 
-                            tabIndex={0} 
-                            role="button" 
-                            onClick={(e) => e.stopPropagation()} 
-                            className="text-base-content/80 active:text-red-500 transition-colors flex items-center p-1 cursor-pointer" 
-                            title="Delete"
-                          >
-                            <Trash2 size={18} />
-                          </div>
-                          <ul tabIndex={0} className="dropdown-content z-50 menu p-1.5 shadow-xl bg-base-100 border border-base-300 rounded-box w-40 text-xs text-base-content mt-1">
-                            <li>
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); deleteMessage(message._id, "me"); setMobileActionId(null); }} 
-                                className="hover:bg-base-200 py-2 text-left font-medium"
-                              >
-                                Delete for me
-                              </button>
-                            </li>
-                            {message.senderId === authUser._id && (
-                              <li>
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); deleteMessage(message._id, "everyone"); setMobileActionId(null); }} 
-                                  className="hover:bg-red-500 hover:text-white py-2 text-left font-medium text-red-500"
-                                >
-                                  Delete for everyone
-                                </button>
-                              </li>
-                            )}
-                          </ul>
-                        </div>
-                      )}
                     </div>
                   )}
 
@@ -1170,39 +1103,8 @@ const ChatContainer = () => {
 
         <MessageInput />
 
-        {/* Floating Bulk Selection Bar */}
-        {isSelectionMode && (
-          <div className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-base-100/90 backdrop-blur border border-base-300 shadow-2xl rounded-full px-6 py-3 flex items-center gap-4 z-50 animate-in slide-in-from-bottom duration-200">
-            <span className="text-xs text-base-content/85 font-semibold select-none">
-              {selectedMessageIds.length} Selected
-            </span>
-            <div className="w-[1px] h-4 bg-base-300" />
-            <button
-              onClick={() => deleteMessagesBulk(selectedMessageIds, "me")}
-              disabled={selectedMessageIds.length === 0}
-              className="btn btn-xs btn-outline hover:bg-base-200 border-base-300 text-xs font-semibold px-3"
-            >
-              Delete for me
-            </button>
-            {selectedMessageIds.length > 0 && selectedMessageIds.every(id => {
-              const msg = messages.find(m => m._id === id);
-              return msg && msg.senderId === authUser._id;
-            }) && (
-              <button
-                onClick={() => deleteMessagesBulk(selectedMessageIds, "everyone")}
-                className="btn btn-xs btn-error text-white font-semibold text-xs px-3"
-              >
-                Delete for everyone
-              </button>
-            )}
-            <button
-              onClick={() => setSelectionMode(false)}
-              className="btn btn-xs btn-ghost text-xs px-3"
-            >
-              Cancel
-            </button>
-          </div>
-        )}
+        {/* Selection-mode actions (DM) now live in ChatHeader's toolbar
+            instead of a floating bottom bar — see ChatHeader.jsx. */}
       </div>
 
       {/* Right Column: Recipient Profile Info Sidebar */}

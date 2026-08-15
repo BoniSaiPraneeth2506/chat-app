@@ -107,6 +107,8 @@ export const useChatStore = create((set, get) => ({
   messageSearchQuery: "",
   replyingToMessage: null,
   editingMessage: null,
+  forwardingMessage: null,
+  setForwardingMessage: (message) => set({ forwardingMessage: message }),
   showArchivedOnly: false,
   isSelectionMode: false,
   selectedMessageIds: [],
