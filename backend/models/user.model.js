@@ -1,4 +1,40 @@
 import mongoose from "mongoose";
+
+const sessionSchema=new mongoose.Schema({
+    sid:{
+        type:String,
+        required:true
+    },
+    ip:{
+        type:String,
+        default:""
+    },
+    userAgent:{
+        type:String,
+        default:""
+    },
+    browser:{
+        type:String,
+        default:"Unknown browser"
+    },
+    os:{
+        type:String,
+        default:"Unknown OS"
+    },
+    device:{
+        type:String,
+        default:"Desktop"
+    },
+    createdAt:{
+        type:Date,
+        default:Date.now
+    },
+    lastActive:{
+        type:Date,
+        default:Date.now
+    }
+},{_id:false})
+
 const userSchema=new mongoose.Schema({
      fullName:{
         type:String,
@@ -66,6 +102,10 @@ const userSchema=new mongoose.Schema({
     resetPasswordExpires:{
         type:Date,
         default:undefined
+    },
+    sessions:{
+        type:[sessionSchema],
+        default:[]
     }
 },{timestamps:true}
 )

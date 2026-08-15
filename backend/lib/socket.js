@@ -26,7 +26,7 @@ const io = new Server(server, {
 });
 
 // ── Socket.IO JWT Auth Middleware ─────────────────────────────────────────────
-io.use((socket, next) => {
+io.use(async (socket, next) => {
     try {
         // Accept token from auth.token (preferred) or query.token (fallback)
         const token = socket.handshake.auth?.token || socket.handshake.query?.token;
@@ -34,6 +34,14 @@ io.use((socket, next) => {
             return next(new Error("Unauthorized: No token provided"));
         }
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        // Tokens issued before device sessions existed carry no sid and stay valid.
+        if (decoded.sid) {
+            const user = await User.findById(decoded.userId).select("sessions.sid");
+            if (!user?.sessions?.some((s) => s.sid === decoded.sid)) {
+                return next(new Error("Unauthorized: Session has been logged out"));
+            }
+            socket.sessionId = decoded.sid;
+        }
         socket.userId = decoded.userId; // attach verified userId to socket
         next();
     } catch (err) {
@@ -364,5 +372,23 @@ io.on("connection", async (socket) => {
         }
     });
 });
+
+/**
+ * Kicks live sockets whose device session was revoked.
+ * @param {string} userId
+ * @param {(sid: string) => boolean} shouldDisconnect
+ */
+export function disconnectRevokedSessions(userId, shouldDisconnect) {
+    for (const socket of io.sockets.sockets.values()) {
+        if (
+            socket.userId?.toString() === userId.toString() &&
+            socket.sessionId &&
+            shouldDisconnect(socket.sessionId)
+        ) {
+            socket.emit("sessionRevoked");
+            socket.disconnect(true);
+        }
+    }
+}
 
 export { app, server, io };

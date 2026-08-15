@@ -276,6 +276,7 @@ export const getGroupMessages = async (req, res) => {
     const messages = await Message.find({ groupId })
       .populate("senderId", "fullName email profilePic")
       .populate("replyTo")
+      .populate("poll.options.votes", "fullName profilePic")
       .sort({ createdAt: 1 })
       .skip(Number(skip))
       .limit(Number(limit));
@@ -283,6 +284,158 @@ export const getGroupMessages = async (req, res) => {
     res.status(200).json(messages);
   } catch (error) {
     console.error("Error fetching group messages:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// ── Polls (group chats only) ─────────────────────────────────────────────────
+
+const MAX_POLL_OPTIONS = 12;
+
+const populatePollMessage = (messageId) =>
+  Message.findById(messageId)
+    .populate("senderId", "fullName email profilePic")
+    .populate("poll.options.votes", "fullName profilePic");
+
+export const createGroupPoll = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { question, options, allowMultiple } = req.body;
+    const senderId = req.user._id;
+
+    const cleanedOptions = (Array.isArray(options) ? options : [])
+      .map((option) => (typeof option === "string" ? option.trim() : ""))
+      .filter(Boolean);
+
+    if (!question || !question.trim()) {
+      return res.status(400).json({ message: "Poll question is required" });
+    }
+    if (cleanedOptions.length < 2) {
+      return res.status(400).json({ message: "A poll needs at least 2 options" });
+    }
+    if (cleanedOptions.length > MAX_POLL_OPTIONS) {
+      return res.status(400).json({ message: `A poll can have at most ${MAX_POLL_OPTIONS} options` });
+    }
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ message: "Group not found" });
+
+    const userRole = getUserRole(group, senderId);
+    if (!userRole) {
+      return res.status(403).json({ message: "You are not a member of this group" });
+    }
+    if (group.isReadOnly && userRole === "member") {
+      return res.status(403).json({ message: "Only Admins and Moderators can create polls in this group" });
+    }
+
+    const newMessage = new Message({
+      senderId,
+      groupId,
+      poll: {
+        question: question.trim(),
+        options: cleanedOptions.map((text) => ({ text, votes: [] })),
+        allowMultiple: Boolean(allowMultiple),
+      },
+    });
+
+    await newMessage.save();
+
+    const populatedMessage = await populatePollMessage(newMessage._id);
+    io.to(`group_${groupId}`).emit("newGroupMessage", populatedMessage);
+
+    res.status(201).json(populatedMessage);
+  } catch (error) {
+    console.error("Error creating group poll:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const voteGroupPoll = async (req, res) => {
+  try {
+    const { groupId, messageId } = req.params;
+    const { optionIds } = req.body;
+    const userId = req.user._id;
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ message: "Group not found" });
+    if (!getUserRole(group, userId)) {
+      return res.status(403).json({ message: "You are not a member of this group" });
+    }
+
+    const message = await Message.findOne({ _id: messageId, groupId });
+    if (!message || !message.poll) {
+      return res.status(404).json({ message: "Poll not found" });
+    }
+    if (message.poll.isClosed) {
+      return res.status(403).json({ message: "This poll is closed" });
+    }
+
+    const selected = (Array.isArray(optionIds) ? optionIds : [optionIds])
+      .filter(Boolean)
+      .map(String);
+
+    const validIds = message.poll.options.map((option) => option._id.toString());
+    if (selected.some((id) => !validIds.includes(id))) {
+      return res.status(400).json({ message: "Invalid poll option" });
+    }
+    if (!message.poll.allowMultiple && selected.length > 1) {
+      return res.status(400).json({ message: "This poll only allows one choice" });
+    }
+
+    message.poll.options.forEach((option) => {
+      const hasVoted = option.votes.some((voter) => voter.toString() === userId.toString());
+      const isSelected = selected.includes(option._id.toString());
+      if (isSelected && !hasVoted) {
+        option.votes.push(userId);
+      } else if (!isSelected && hasVoted) {
+        option.votes = option.votes.filter((voter) => voter.toString() !== userId.toString());
+      }
+    });
+
+    await message.save();
+
+    const populatedMessage = await populatePollMessage(message._id);
+    io.to(`group_${groupId}`).emit("groupPollUpdated", populatedMessage);
+
+    res.status(200).json(populatedMessage);
+  } catch (error) {
+    console.error("Error voting on group poll:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const closeGroupPoll = async (req, res) => {
+  try {
+    const { groupId, messageId } = req.params;
+    const userId = req.user._id;
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ message: "Group not found" });
+
+    const role = getUserRole(group, userId);
+    if (!role) {
+      return res.status(403).json({ message: "You are not a member of this group" });
+    }
+
+    const message = await Message.findOne({ _id: messageId, groupId });
+    if (!message || !message.poll) {
+      return res.status(404).json({ message: "Poll not found" });
+    }
+
+    const isCreator = message.senderId.toString() === userId.toString();
+    if (!isCreator && role !== "admin" && role !== "moderator") {
+      return res.status(403).json({ message: "Only the poll creator, Admins and Moderators can close a poll" });
+    }
+
+    message.poll.isClosed = true;
+    await message.save();
+
+    const populatedMessage = await populatePollMessage(message._id);
+    io.to(`group_${groupId}`).emit("groupPollUpdated", populatedMessage);
+
+    res.status(200).json(populatedMessage);
+  } catch (error) {
+    console.error("Error closing group poll:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

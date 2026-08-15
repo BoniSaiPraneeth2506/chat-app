@@ -28,4 +28,22 @@ axiosInstance.interceptors.request.use(
   }
 );
 
+// A session revoked from another device invalidates this client immediately.
+axiosInstance.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const isRevoked =
+      error.response?.status === 401 &&
+      error.response?.data?.message === "Unauthorized: Session has been logged out";
+
+    if (isRevoked) {
+      localStorage.removeItem("token");
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 export default axiosInstance;

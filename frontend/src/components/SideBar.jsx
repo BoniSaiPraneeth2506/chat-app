@@ -770,7 +770,7 @@ const SideBar = () => {
                                   <strong className="font-medium text-base-content/80">
                                     {latestMsg.senderId?.fullName?.split(" ")[0]}:{" "}
                                   </strong>
-                                  {latestMsg.image ? "📷 Image" : latestMsg.text}
+                                  {latestMsg.poll ? `📊 ${latestMsg.poll.question}` : latestMsg.image ? "📷 Image" : latestMsg.text}
                                 </span>
                               ) : (
                                 <span className="text-base-content/40 italic">Group created</span>

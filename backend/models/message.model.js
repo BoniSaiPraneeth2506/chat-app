@@ -1,6 +1,36 @@
 import mongoose, { Schema } from "mongoose";
 import User from "./user.model.js";
 
+const pollOptionSchema = new Schema({
+  text: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  votes: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    default: [],
+  }],
+});
+
+const pollSchema = new Schema({
+  question: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  options: [pollOptionSchema],
+  allowMultiple: {
+    type: Boolean,
+    default: false,
+  },
+  isClosed: {
+    type: Boolean,
+    default: false,
+  },
+}, { _id: false });
+
 const messageSchema = new Schema(
   {
     senderId: {
@@ -103,6 +133,11 @@ const messageSchema = new Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
+    },
+    // Interactive polls — group chats only
+    poll: {
+      type: pollSchema,
+      default: undefined,
     }
   },
   { timestamps: true }
