@@ -3,6 +3,7 @@ import { useGroupStore } from "../store/useGroupStore";
 import { useEffect, useRef, useLayoutEffect, useState } from "react";
 import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image } from "lucide-react";
 import ForwardModal from "./ForwardModal";
+import PollMessage from "./PollMessage";
 import { useThemeStore } from "../store/useThemeStore";
 import { getWallpaperStyle } from "../pages/SettingsPage";
 
@@ -435,6 +436,10 @@ const ChatContainer = () => {
   };
 
   const renderMessageContent = (message) => {
+    if (message.poll) {
+      return <PollMessage message={message} />;
+    }
+
     if (message.isOneView) {
       const isSender = message.senderId === authUser._id;
       const isViewed = message.viewedBy?.includes(authUser._id) || (isSender && message.viewedBy?.length > 0);

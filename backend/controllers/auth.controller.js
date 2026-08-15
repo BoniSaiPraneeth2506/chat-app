@@ -1,10 +1,31 @@
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import { generateToken } from "../lib/utils.js";
 import User from "../models/user.model.js";
 import bcrypt from 'bcryptjs'
 import cloudinary from "../lib/cloudinary.js";
-import { updateUserPrivacyState } from "../lib/socket.js";
+import { updateUserPrivacyState, disconnectRevokedSessions } from "../lib/socket.js";
 import { sendPasswordResetOtp } from "../lib/mailer.js";
+import { buildSession } from "../lib/deviceInfo.js";
+
+/** Reads JWT claims from the cookie or Authorization header without throwing. */
+const readTokenClaims = (req) => {
+    const header = req.headers.authorization;
+    const token = req.cookies?.jwt || (header?.startsWith("Bearer ") ? header.split(" ")[1] : null);
+    if (!token) return null;
+    try {
+        return jwt.verify(token, process.env.JWT_SECRET);
+    } catch {
+        return null;
+    }
+};
+
+/** Records a new device session on the user and returns a JWT bound to it. */
+const startSession = async (user, req, res) => {
+    const session = buildSession(req, crypto.randomUUID());
+    await User.updateOne({ _id: user._id }, { $push: { sessions: session } });
+    return generateToken(user._id, res, session.sid);
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -75,7 +96,7 @@ const signup = async (req, res) => {
 
         await newUser.save();
 
-        const token = generateToken(newUser._id, res);
+        const token = await startSession(newUser, req, res);
 
         res.status(201).json({
             ...sanitizeUser(newUser),
@@ -104,7 +125,7 @@ const login = async (req, res) => {
             return res.status(401).json({ message: "Incorrect password" });
         }
 
-        const token = generateToken(user._id, res);
+        const token = await startSession(user, req, res);
 
         res.status(200).json({
             ...sanitizeUser(user),
@@ -119,6 +140,11 @@ const login = async (req, res) => {
 
 const logout = async (req, res) => {
     try {
+        // The route is public, so the session is resolved from the token when present.
+        const claims = readTokenClaims(req);
+        if (claims?.userId && claims?.sid) {
+            await User.updateOne({ _id: claims.userId }, { $pull: { sessions: { sid: claims.sid } } });
+        }
         res.cookie("jwt", "", { maxAge: 0 });
         res.status(200).json({ message: "Logged out successfully" });
     } catch (err) {
@@ -284,4 +310,68 @@ const resetPassword = async (req, res) => {
     }
 };
 
-export { signup, login, logout, updateProfile, checkAuth, forgotPassword, resetPassword };
+// ── Active sessions / device manager ──────────────────────────────────────────
+
+const getSessions = async (req, res) => {
+    try {
+        const sessions = (req.user.sessions || [])
+            .map((s) => ({
+                sid: s.sid,
+                ip: s.ip,
+                browser: s.browser,
+                os: s.os,
+                device: s.device,
+                createdAt: s.createdAt,
+                lastActive: s.lastActive,
+                isCurrent: s.sid === req.sessionId,
+            }))
+            .sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive));
+
+        res.status(200).json(sessions);
+    } catch (err) {
+        console.error("Error in getSessions:", err.message);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+const revokeSession = async (req, res) => {
+    try {
+        const { sid } = req.params;
+        if (sid === req.sessionId) {
+            return res.status(400).json({ message: "Use logout to end the current session" });
+        }
+
+        const result = await User.updateOne({ _id: req.user._id }, { $pull: { sessions: { sid } } });
+        if (result.modifiedCount === 0) {
+            return res.status(404).json({ message: "Session not found" });
+        }
+
+        disconnectRevokedSessions(req.user._id, (socketSid) => socketSid === sid);
+
+        res.status(200).json({ message: "Session logged out" });
+    } catch (err) {
+        console.error("Error in revokeSession:", err.message);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+const revokeOtherSessions = async (req, res) => {
+    try {
+        if (!req.sessionId) {
+            return res.status(400).json({ message: "Sign in again to manage your sessions" });
+        }
+
+        const kept = (req.user.sessions || []).filter((s) => s.sid === req.sessionId);
+        const removed = (req.user.sessions || []).length - kept.length;
+        await User.updateOne({ _id: req.user._id }, { $set: { sessions: kept } });
+
+        disconnectRevokedSessions(req.user._id, (socketSid) => socketSid !== req.sessionId);
+
+        res.status(200).json({ message: `Logged out ${removed} other session${removed === 1 ? "" : "s"}`, removed });
+    } catch (err) {
+        console.error("Error in revokeOtherSessions:", err.message);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+export { signup, login, logout, updateProfile, checkAuth, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions };

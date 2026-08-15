@@ -175,6 +175,65 @@ export const useGroupStore = create((set, get) => ({
     }
   },
 
+  // 5b. Polls (group chats only)
+  createPoll: async ({ question, options, allowMultiple }) => {
+    const { selectedGroup } = get();
+    if (!selectedGroup) return null;
+
+    try {
+      const res = await axiosInstance.post(`/groups/${selectedGroup._id}/polls`, {
+        question,
+        options,
+        allowMultiple,
+      });
+      set((state) => ({
+        groupMessages: state.groupMessages.some((m) => m._id === res.data._id)
+          ? state.groupMessages
+          : [...state.groupMessages, res.data],
+        latestGroupMessages: {
+          ...state.latestGroupMessages,
+          [selectedGroup._id]: res.data,
+        },
+      }));
+      return res.data;
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to create poll");
+      return null;
+    }
+  },
+
+  voteOnPoll: async (messageId, optionIds) => {
+    const { selectedGroup } = get();
+    if (!selectedGroup) return;
+
+    try {
+      const res = await axiosInstance.post(
+        `/groups/${selectedGroup._id}/polls/${messageId}/vote`,
+        { optionIds }
+      );
+      set((state) => ({
+        groupMessages: state.groupMessages.map((m) => (m._id === messageId ? res.data : m)),
+      }));
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to submit vote");
+    }
+  },
+
+  closePoll: async (messageId) => {
+    const { selectedGroup } = get();
+    if (!selectedGroup) return;
+
+    try {
+      const res = await axiosInstance.post(`/groups/${selectedGroup._id}/polls/${messageId}/close`);
+      set((state) => ({
+        groupMessages: state.groupMessages.map((m) => (m._id === messageId ? res.data : m)),
+      }));
+      toast.success("Poll closed");
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to close poll");
+    }
+  },
+
   cancelScheduledMessage: async (messageId) => {
     try {
       await axiosInstance.post(`/messages/schedule/cancel/${messageId}`);
@@ -268,6 +327,7 @@ export const useGroupStore = create((set, get) => ({
     if (!socket) return;
 
     socket.off("newGroupMessage");
+    socket.off("groupPollUpdated");
     socket.off("groupCreated");
     socket.off("groupUpdated");
     socket.off("groupTyping");
@@ -305,6 +365,16 @@ export const useGroupStore = create((set, get) => ({
           },
         }));
       }
+    });
+
+    // Live poll vote / close updates
+    socket.on("groupPollUpdated", (message) => {
+      set((state) => ({
+        groupMessages: state.groupMessages.map((m) => (m._id === message._id ? message : m)),
+        latestGroupMessages: state.latestGroupMessages[message.groupId]?._id === message._id
+          ? { ...state.latestGroupMessages, [message.groupId]: message }
+          : state.latestGroupMessages,
+      }));
     });
 
     // Group Created Notification
@@ -407,6 +477,7 @@ export const useGroupStore = create((set, get) => ({
     const socket = useAuthStore.getState().socket;
     if (socket) {
       socket.off("newGroupMessage");
+      socket.off("groupPollUpdated");
       socket.off("groupCreated");
       socket.off("groupUpdated");
       socket.off("groupTyping");

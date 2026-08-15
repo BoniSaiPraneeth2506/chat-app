@@ -2,8 +2,9 @@ import { useRef, useState, useEffect } from "react";
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
 import useAuthStore from "../store/useAuthStore";
-import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock } from "lucide-react";
+import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3 } from "lucide-react";
 import toast from "react-hot-toast";
+import CreatePollModal from "./CreatePollModal";
 
 const MessageInput = () => {
   const [text, setText] = useState("");
@@ -23,6 +24,8 @@ const MessageInput = () => {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const timerIntervalRef = useRef(null);
+  // Poll composer
+  const [showPollModal, setShowPollModal] = useState(false);
   // Scheduling states
   const [showScheduler, setShowScheduler] = useState(false);
   const [scheduledAt, setScheduledAt] = useState(""); // format: yyyy-MM-ddTHH:mm (datetime-local)
@@ -373,6 +376,7 @@ const MessageInput = () => {
 
   return (
     <div className="w-full px-4 py-3 bg-base-200/50 flex flex-col gap-2 relative border-t border-base-300 lg:border-t-0">
+      {showPollModal && <CreatePollModal onClose={() => setShowPollModal(false)} />}
       {/* Quoted Reply Banner */}
         {replyingToMessage && (
           <div className="flex items-center justify-between bg-base-200/90 px-4 py-2 border-l-4 border-primary rounded-r-lg mb-1 relative text-left">
@@ -505,6 +509,17 @@ const MessageInput = () => {
                 ref={fileInputRef}
                 onChange={handleImageChange}
               />
+
+              {selectedGroup && (
+                <button
+                  type="button"
+                  onClick={() => setShowPollModal(true)}
+                  title="Create a poll"
+                  className="p-1 hover:bg-base-200 rounded-full transition-colors flex items-center justify-center text-base-content/40 hover:text-base-content"
+                >
+                  <BarChart3 size={18} />
+                </button>
+              )}
 
               <input
                 id="message-input"

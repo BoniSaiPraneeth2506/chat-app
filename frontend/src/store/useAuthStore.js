@@ -17,6 +17,37 @@ const useAuthStore=create((set,get)=>({
     isResettingPassword:false,
     onlineUsers:[],
     socket:null,
+    sessions:[],
+    isLoadingSessions:false,
+    getSessions:async()=>{
+        set({isLoadingSessions:true})
+        try{
+            const res=await axiosInstance.get('/auth/sessions');
+            set({sessions:Array.isArray(res.data)?res.data:[]});
+        }catch(err){
+            toast.error(err.response?.data?.message || "Failed to load sessions");
+        }finally{
+            set({isLoadingSessions:false})
+        }
+    },
+    revokeSession:async(sid)=>{
+        try{
+            await axiosInstance.delete(`/auth/sessions/${sid}`);
+            set((state)=>({sessions:state.sessions.filter((s)=>s.sid!==sid)}));
+            toast.success("Device logged out");
+        }catch(err){
+            toast.error(err.response?.data?.message || "Failed to log out device");
+        }
+    },
+    revokeOtherSessions:async()=>{
+        try{
+            const res=await axiosInstance.post('/auth/sessions/logout-others');
+            set((state)=>({sessions:state.sessions.filter((s)=>s.isCurrent)}));
+            toast.success(res.data?.message || "Other sessions logged out");
+        }catch(err){
+            toast.error(err.response?.data?.message || "Failed to log out other sessions");
+        }
+    },
     checkAuth:async()=>{
         try{
            const res=await axiosInstance.get('/auth/check');
@@ -161,6 +192,13 @@ const useAuthStore=create((set,get)=>({
 
       newSocket.on('error', (error) => {
         console.error("Socket error:", error);
+      });
+
+      newSocket.on('sessionRevoked', () => {
+        newSocket.disconnect();
+        localStorage.removeItem("token");
+        set({ authUser: null, socket: null, sessions: [] });
+        toast.error("This device was logged out from another session");
       });
 
       newSocket.on('getOnlineUsers',(userIds)=>{
