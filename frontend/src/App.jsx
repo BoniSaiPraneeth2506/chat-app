@@ -55,7 +55,7 @@ import ProfilePage from './pages/ProfilePage'
 import useAuthStore from './store/useAuthStore'
 import { useChatStore } from './store/useChatStore'
 import { Loader, X, MessageSquare, Phone, Info } from 'lucide-react'
-import { Toaster } from 'react-hot-toast'
+import toast, { Toaster } from 'react-hot-toast'
 import { useThemeStore } from './store/useThemeStore'
 import { THEME_COLORS } from './constants'
 import CreateGroupModal from './components/CreateGroupModal'
@@ -64,36 +64,61 @@ import GroupCallModal from './components/GroupCallModal'
 import CallModal from './components/CallModal'
 import { useGroupStore } from './store/useGroupStore'
 
+const PENDING_CHAT_KEY = "pendingChatUserId";
+
 const ChatRedirectHandler = () => {
   const { userId } = useParams();
   const navigate = useNavigate();
-  const { setSelectedUser, users, getUsers } = useChatStore();
+  const hasRunRef = React.useRef(false);
 
+  // Opening a QR deep link must land directly in that user's chat, so the users
+  // list is always refreshed before selecting: a freshly signed-up contact is
+  // otherwise missing from the cached sidebar list.
   useEffect(() => {
+    if (hasRunRef.current) return;
+    hasRunRef.current = true;
+
     const performRedirect = async () => {
-      let currentUsers = users;
-      if (!currentUsers || currentUsers.length === 0) {
-        await getUsers();
-        currentUsers = useChatStore.getState().users;
+      const { setSelectedUser, getUsers } = useChatStore.getState();
+      const authUser = useAuthStore.getState().authUser;
+
+      if (authUser?._id === userId) {
+        toast("That's your own chat link");
+        navigate("/", { replace: true });
+        return;
       }
-      
-      const foundUser = currentUsers.find((u) => u._id === userId);
+
+      await getUsers();
+      const foundUser = useChatStore.getState().users?.find((u) => u._id === userId);
+
       if (foundUser) {
         setSelectedUser(foundUser);
       } else {
-        setSelectedUser({ _id: userId, fullName: "Chat Partner" });
+        toast.error("Could not find that user");
+        navigate("/", { replace: true });
+        return;
       }
-      navigate("/");
+      navigate("/", { replace: true });
     };
 
     performRedirect();
-  }, [userId, users, setSelectedUser, getUsers, navigate]);
+  }, [userId, navigate]);
 
   return (
     <div className="flex items-center justify-center h-screen" style={{ backgroundColor: 'var(--color-base-100)' }}>
       <span className="loading loading-spinner loading-lg" style={{ color: 'var(--color-primary)' }}></span>
     </div>
   );
+};
+
+// A scanned QR link opened while logged out remembers the target so the chat
+// opens right after signing in instead of dropping the user on the home page.
+const PendingChatRedirect = () => {
+  const { userId } = useParams();
+  useEffect(() => {
+    if (userId) sessionStorage.setItem(PENDING_CHAT_KEY, userId);
+  }, [userId]);
+  return <Navigate to='/login' replace />;
 };
 
 const App = () => {
@@ -132,6 +157,15 @@ const App = () => {
   useEffect(() => {
     checkAuth();
   }, [])
+
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!authUser) return;
+    const pendingChatUserId = sessionStorage.getItem(PENDING_CHAT_KEY);
+    if (!pendingChatUserId) return;
+    sessionStorage.removeItem(PENDING_CHAT_KEY);
+    navigate(`/chat-with/${pendingChatUserId}`, { replace: true });
+  }, [authUser, navigate]);
 
   useEffect(() => {
     if (authUser && socket) {
@@ -204,7 +238,7 @@ const App = () => {
         <Route path='/signup' element={!authUser ? <SignUpPage /> : <Navigate to='/' />} />
         <Route path='/settings' element={<SettingsPage />} />
         <Route path='/profile' element={authUser ? <ProfilePage /> : <Navigate to='/login' />} />
-        <Route path='/chat-with/:userId' element={authUser ? <ChatRedirectHandler /> : <Navigate to='/login' />} />
+        <Route path='/chat-with/:userId' element={authUser ? <ChatRedirectHandler /> : <PendingChatRedirect />} />
         <Route path='*' element={<Navigate to='/' />} />
       </Routes>
       <Toaster />

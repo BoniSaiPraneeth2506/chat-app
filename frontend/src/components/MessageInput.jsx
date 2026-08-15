@@ -26,6 +26,7 @@ const MessageInput = () => {
   const timerIntervalRef = useRef(null);
   // Poll composer
   const [showPollModal, setShowPollModal] = useState(false);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   // Scheduling states
   const [showScheduler, setShowScheduler] = useState(false);
   const [scheduledAt, setScheduledAt] = useState(""); // format: yyyy-MM-ddTHH:mm (datetime-local)
@@ -106,8 +107,7 @@ const MessageInput = () => {
     }
   };
 
-  const handleImageChange = (e) => {
-    const files = Array.from(e.target.files);
+  const addImageFiles = (files) => {
     if (files.length === 0) return;
 
     if (imagePreviews.length + files.length > 5) {
@@ -129,6 +129,51 @@ const MessageInput = () => {
       reader.readAsDataURL(file);
     });
   };
+
+  const handleImageChange = (e) => {
+    addImageFiles(Array.from(e.target.files));
+  };
+
+  // Ctrl/Cmd+V of an image anywhere in the chat attaches it as a preview.
+  const handlePaste = (e) => {
+    const files = Array.from(e.clipboardData?.files || []).filter((f) => f.type.startsWith("image/"));
+    if (files.length === 0) return;
+    e.preventDefault();
+    addImageFiles(files);
+  };
+
+  const handleDragOver = (e) => {
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+    setIsDraggingFiles(true);
+  };
+
+  const handleDrop = (e) => {
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+    setIsDraggingFiles(false);
+    addImageFiles(Array.from(e.dataTransfer.files));
+  };
+
+  // Paste and drag-and-drop are window level so the whole chat window is a drop target.
+  useEffect(() => {
+    if (isBlocked || isReadOnlyRestricted) return;
+
+    const onDragLeave = (e) => {
+      if (e.relatedTarget === null) setIsDraggingFiles(false);
+    };
+
+    window.addEventListener("paste", handlePaste);
+    window.addEventListener("dragover", handleDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", handleDrop);
+    return () => {
+      window.removeEventListener("paste", handlePaste);
+      window.removeEventListener("dragover", handleDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", handleDrop);
+    };
+  }, [imagePreviews, isBlocked, isReadOnlyRestricted]);
 
   const compressImage = (base64, quality = 0.6) => {
     const img = document.createElement("img");
@@ -377,6 +422,15 @@ const MessageInput = () => {
   return (
     <div className="w-full px-4 py-3 bg-base-200/50 flex flex-col gap-2 relative border-t border-base-300 lg:border-t-0">
       {showPollModal && <CreatePollModal onClose={() => setShowPollModal(false)} />}
+      {isDraggingFiles && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-base-100/80 backdrop-blur-sm pointer-events-none">
+          <div className="flex flex-col items-center gap-2 px-8 py-6 border-2 border-dashed border-primary rounded-2xl bg-base-100 shadow-xl">
+            <Image size={28} className="text-primary" />
+            <span className="text-sm font-semibold">Drop images to attach</span>
+            <span className="text-xs text-base-content/60">Up to 5 images per message</span>
+          </div>
+        </div>
+      )}
       {/* Quoted Reply Banner */}
         {replyingToMessage && (
           <div className="flex items-center justify-between bg-base-200/90 px-4 py-2 border-l-4 border-primary rounded-r-lg mb-1 relative text-left">

@@ -4,6 +4,7 @@ import { useEffect, useRef, useLayoutEffect, useState } from "react";
 import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image } from "lucide-react";
 import ForwardModal from "./ForwardModal";
 import PollMessage from "./PollMessage";
+import VoiceNote from "./VoiceNote";
 import { useThemeStore } from "../store/useThemeStore";
 import { getWallpaperStyle } from "../pages/SettingsPage";
 
@@ -321,12 +322,22 @@ const DateSeparator = ({ date }) => (
   </div>
 );
 
+// Tiny heavily blurred Cloudinary derivative, used as a placeholder while the
+// full image downloads so the bubble keeps its size instead of jumping.
+const blurPlaceholder = (url) => {
+  if (typeof url !== "string" || !url.includes("/upload/")) return null;
+  return url.replace("/upload/", "/upload/w_24,e_blur:1200,q_10,f_auto/");
+};
+
 const SmoothImage = ({ src, alt, className, onClick }) => {
   const [displayedSrc, setDisplayedSrc] = useState(src);
+  const [isLoaded, setIsLoaded] = useState(false);
   const prevSrcRef = useRef(src);
+  const placeholder = blurPlaceholder(displayedSrc);
 
   useEffect(() => {
     if (src === prevSrcRef.current) return;
+    setIsLoaded(false);
 
     if (prevSrcRef.current?.startsWith("data:") && src?.startsWith("http")) {
       const img = new window.Image();
@@ -350,6 +361,14 @@ const SmoothImage = ({ src, alt, className, onClick }) => {
       src={displayedSrc}
       alt={alt}
       onClick={onClick}
+      loading="lazy"
+      onLoad={() => setIsLoaded(true)}
+      style={placeholder && !isLoaded ? {
+        backgroundImage: `url(${placeholder})`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        filter: "blur(1px)",
+      } : undefined}
       className={className}
     />
   );
@@ -408,6 +427,102 @@ const ChatContainer = () => {
   const [mobileActionId, setMobileActionId] = useState(null);
   const [mobileEmojiId, setMobileEmojiId] = useState(null);
   const longPressTimerRef = useRef(null);
+  // Mobile gestures: horizontal swipe = quote reply, double tap = heart reaction
+  const touchStartRef = useRef(null);
+  const lastTapRef = useRef({ id: null, time: 0 });
+  const suppressClickRef = useRef(0);
+  const [swipe, setSwipe] = useState({ id: null, dx: 0 });
+
+  const SWIPE_REPLY_THRESHOLD = 60;
+
+  const buzz = (pattern) => {
+    try {
+      navigator.vibrate?.(pattern);
+    } catch {
+      // Haptics are best effort.
+    }
+  };
+
+  const handleBubbleTouchStart = (message, e) => {
+    if (isSelectionMode) return;
+    if (e.target.closest(".mobile-action-bar")) return;
+
+    const touch = e.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY, id: message._id };
+
+    longPressTimerRef.current = setTimeout(() => {
+      setMobileEmojiId(message._id);
+      setMobileActionId(null);
+      longPressTimerRef.current = null;
+    }, 450);
+  };
+
+  const handleBubbleTouchMove = (message, e) => {
+    if (isSelectionMode) return;
+    const start = touchStartRef.current;
+    if (!start || start.id !== message._id) return;
+
+    const touch = e.touches[0];
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+
+    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+    }
+
+    // Only track a mostly-horizontal drag so vertical scrolling stays untouched.
+    if (Math.abs(dx) > Math.abs(dy) * 1.5 && Math.abs(dx) > 10) {
+      const clamped = Math.max(-90, Math.min(90, dx));
+      setSwipe({ id: message._id, dx: clamped });
+      start.swiping = true;
+    }
+  };
+
+  const handleBubbleTouchEnd = (message, e) => {
+    if (isSelectionMode) return;
+    if (e.target.closest(".mobile-action-bar")) return;
+
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    const swiped = start?.swiping && Math.abs(swipe.dx) >= SWIPE_REPLY_THRESHOLD;
+    setSwipe({ id: null, dx: 0 });
+
+    if (swiped) {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+      setReplyingToMessage(message);
+      suppressClickRef.current = Date.now();
+      buzz(25);
+      return;
+    }
+    if (start?.swiping) return;
+
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+
+      const now = Date.now();
+      const lastTap = lastTapRef.current;
+      if (lastTap.id === message._id && now - lastTap.time < 320) {
+        lastTapRef.current = { id: null, time: 0 };
+        suppressClickRef.current = now;
+        setMobileEmojiId(null);
+        setMobileActionId(null);
+        toggleReaction(message._id, "❤️");
+        buzz([15, 40, 15]);
+        return;
+      }
+      lastTapRef.current = { id: message._id, time: now };
+
+      setMobileEmojiId(null);
+      setMobileActionId((prev) => (prev === message._id ? null : message._id));
+    }
+  };
 
   const scrollToMessage = (messageId) => {
     const element = document.getElementById(`msg-${messageId}`);
@@ -535,15 +650,7 @@ const ChatContainer = () => {
             className="sm:max-w-[180px] rounded-md mb-1.5 cursor-zoom-in hover:opacity-95 transition-opacity"
           />
         ) : null}
-        {message.voice && (
-          <div className="py-1 pr-10 select-none">
-            <audio
-              src={message.voice}
-              controls
-              className="max-w-[200px] sm:max-w-[260px] h-10 outline-none rounded-lg"
-            />
-          </div>
-        )}
+        {message.voice && <VoiceNote src={message.voice} />}
         {message.text && (
           <div className="text-sm leading-loose break-words pr-10 select-text">
             <p>{highlightText(message.text, messageSearchQuery)}</p>
@@ -821,41 +928,30 @@ const ChatContainer = () => {
                     onClick={(e) => {
                       if (isSelectionMode) return;
                       if (e.target.closest(".mobile-action-bar") || e.target.closest("button") || e.target.closest("a") || e.target.closest("input") || e.target.closest("audio") || e.target.closest("video") || e.target.closest("iframe")) return;
+                      if (Date.now() - suppressClickRef.current < 400) return;
                       if (window.innerWidth < 1024) {
                         e.stopPropagation();
                         setMobileEmojiId(null);
                         setMobileActionId((prev) => (prev === message._id ? null : message._id));
                       }
                     }}
-                    onTouchStart={(e) => {
-                      if (isSelectionMode) return;
-                      if (e.target.closest(".mobile-action-bar")) return;
-                      longPressTimerRef.current = setTimeout(() => {
-                        setMobileEmojiId(message._id);
-                        setMobileActionId(null);
-                        longPressTimerRef.current = null;
-                      }, 450);
-                    }}
-                    onTouchEnd={(e) => {
-                      if (isSelectionMode) return;
-                      if (e.target.closest(".mobile-action-bar")) return;
-                      if (longPressTimerRef.current) {
-                        clearTimeout(longPressTimerRef.current);
-                        longPressTimerRef.current = null;
-                        // Single tap behavior: if emoji bar was open, close it and open actions; otherwise toggle actions
-                        setMobileEmojiId(null);
-                        setMobileActionId((prev) => (prev === message._id ? null : message._id));
-                      }
-                    }}
-                    onTouchMove={() => {
-                      if (isSelectionMode) return;
-                      if (longPressTimerRef.current) {
-                        clearTimeout(longPressTimerRef.current);
-                        longPressTimerRef.current = null;
-                      }
-                    }}
-                    className={`flex flex-col py-2 px-2.5 chat-bubble relative min-w-[72px] pr-12 transition-colors duration-300 select-none cursor-default ${message.reactions?.length > 0 ? "pb-4" : "pb-3"} ${isSelectionMode ? "cursor-pointer hover:bg-base-200/20" : ""}`}
+                    onTouchStart={(e) => handleBubbleTouchStart(message, e)}
+                    onTouchEnd={(e) => handleBubbleTouchEnd(message, e)}
+                    onTouchMove={(e) => handleBubbleTouchMove(message, e)}
+                    style={swipe.id === message._id ? {
+                      transform: `translateX(${swipe.dx}px)`,
+                    } : undefined}
+                    className={`flex flex-col py-2 px-2.5 chat-bubble relative min-w-[72px] pr-12 transition-colors duration-300 select-none cursor-default ${message.reactions?.length > 0 ? "pb-4" : "pb-3"} ${isSelectionMode ? "cursor-pointer hover:bg-base-200/20" : ""} ${swipe.id === message._id ? "" : "transition-transform"}`}
                   >
+                  {swipe.id === message._id && Math.abs(swipe.dx) >= 20 && (
+                    <span
+                      className={`absolute top-1/2 -translate-y-1/2 ${swipe.dx > 0 ? "-left-8" : "-right-8"} ${
+                        Math.abs(swipe.dx) >= SWIPE_REPLY_THRESHOLD ? "text-primary" : "text-base-content/30"
+                      }`}
+                    >
+                      <CornerUpLeft size={16} />
+                    </span>
+                  )}
                   {/* Group Message Sender Name Label */}
                   {selectedGroup && (message.senderId?._id || message.senderId) !== authUser._id && (
                     <span className="text-[11px] font-bold text-primary block mb-0.5 select-none">
