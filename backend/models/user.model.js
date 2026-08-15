@@ -47,8 +47,13 @@ const userSchema=new mongoose.Schema({
     },
     password:{
         type:String,
-        required:true,
+        // Not required: Google-only accounts have no local password.
         minlength:6
+    },
+    googleId:{
+        type:String,
+        unique:true,
+        sparse:true
     },
     profilePic:{
         type:String,
