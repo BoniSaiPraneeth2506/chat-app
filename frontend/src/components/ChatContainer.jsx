@@ -681,13 +681,13 @@ const ChatContainer = () => {
   };
 
   useLayoutEffect(() => {
-    if (!Array.isArray(messages) || messages.length === 0) {
+    if (!Array.isArray(activeMessages) || activeMessages.length === 0) {
       prevMessagesLengthRef.current = 0;
       lastMessageIdRef.current = null;
       return;
     }
 
-    const latestMessage = messages[messages.length - 1];
+    const latestMessage = activeMessages[activeMessages.length - 1];
     const latestMessageId = latestMessage ? latestMessage._id : null;
     const container = scrollableRef.current;
 
@@ -702,7 +702,7 @@ const ChatContainer = () => {
       }
     }
 
-    prevMessagesLengthRef.current = messages.length;
+    prevMessagesLengthRef.current = activeMessages.length;
     lastMessageIdRef.current = latestMessageId;
   }, [activeMessages]);
 

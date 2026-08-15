@@ -19,6 +19,18 @@ const useAuthStore=create((set,get)=>({
     socket:null,
     sessions:[],
     isLoadingSessions:false,
+    // Clears the client once this device's session is revoked elsewhere.
+    // Idempotent, and stays client-side so the login page is not reloaded.
+    handleSessionRevoked:()=>{
+        const {socket,authUser}=get();
+        if(socket){
+            socket.removeAllListeners?.();
+            socket.disconnect();
+        }
+        localStorage.removeItem("token");
+        set({authUser:null,socket:null,sessions:[],onlineUsers:[],isCheckingAuth:false});
+        if(authUser) toast.error("This device was logged out from another session");
+    },
     getSessions:async()=>{
         set({isLoadingSessions:true})
         try{
@@ -195,10 +207,7 @@ const useAuthStore=create((set,get)=>({
       });
 
       newSocket.on('sessionRevoked', () => {
-        newSocket.disconnect();
-        localStorage.removeItem("token");
-        set({ authUser: null, socket: null, sessions: [] });
-        toast.error("This device was logged out from another session");
+        get().handleSessionRevoked();
       });
 
       newSocket.on('getOnlineUsers',(userIds)=>{
