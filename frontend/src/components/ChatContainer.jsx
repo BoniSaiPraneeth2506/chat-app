@@ -4,7 +4,6 @@ import { useEffect, useRef, useLayoutEffect, useState } from "react";
 import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image } from "lucide-react";
 import ForwardModal from "./ForwardModal";
 import PollMessage from "./PollMessage";
-import FormattedText from "../lib/formatText";
 import { useThemeStore } from "../store/useThemeStore";
 import { getWallpaperStyle } from "../pages/SettingsPage";
 
@@ -422,6 +421,20 @@ const ChatContainer = () => {
     }
   };
 
+  const highlightText = (text, query) => {
+    if (!query || !query.trim()) return text;
+    const parts = text.split(new RegExp(`(${query})`, 'gi'));
+    return (
+      <span>
+        {parts.map((part, i) => 
+          part.toLowerCase() === query.toLowerCase() 
+            ? <mark key={i} className="bg-yellow-200 text-black px-0.5 rounded font-semibold">{part}</mark> 
+            : part
+        )}
+      </span>
+    );
+  };
+
   const renderMessageContent = (message) => {
     if (message.poll) {
       return <PollMessage message={message} />;
@@ -533,7 +546,7 @@ const ChatContainer = () => {
         )}
         {message.text && (
           <div className="text-sm leading-loose break-words pr-10 select-text">
-            <p><FormattedText text={message.text} query={messageSearchQuery} /></p>
+            <p>{highlightText(message.text, messageSearchQuery)}</p>
             {(() => {
               const urls = message.text.match(URL_REGEX);
               if (!urls) return null;

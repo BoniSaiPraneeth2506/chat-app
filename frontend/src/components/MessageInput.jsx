@@ -2,16 +2,9 @@ import { useRef, useState, useEffect } from "react";
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
 import useAuthStore from "../store/useAuthStore";
-import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, Bold, Italic, Strikethrough, Code, Type, BarChart3 } from "lucide-react";
+import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3 } from "lucide-react";
 import toast from "react-hot-toast";
 import CreatePollModal from "./CreatePollModal";
-
-const FORMATTING_MARKS = [
-  { id: "bold", mark: "*", icon: Bold, label: "Bold (*text*)" },
-  { id: "italic", mark: "_", icon: Italic, label: "Italic (_text_)" },
-  { id: "strike", mark: "~", icon: Strikethrough, label: "Strikethrough (~text~)" },
-  { id: "code", mark: "`", icon: Code, label: "Monospace (`text`)" },
-];
 
 const MessageInput = () => {
   const [text, setText] = useState("");
@@ -31,8 +24,7 @@ const MessageInput = () => {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const timerIntervalRef = useRef(null);
-  // Formatting bar + poll composer
-  const [showFormatting, setShowFormatting] = useState(false);
+  // Poll composer
   const [showPollModal, setShowPollModal] = useState(false);
   // Scheduling states
   const [showScheduler, setShowScheduler] = useState(false);
@@ -112,26 +104,6 @@ const MessageInput = () => {
         if (last) setEditingMessage(last);
       } catch (err) {}
     }
-  };
-
-  // Wraps the current selection (or caret) with a WhatsApp-style markdown mark.
-  const applyFormatting = (mark) => {
-    const input = inputRef.current;
-    if (!input) return;
-
-    const start = input.selectionStart ?? text.length;
-    const end = input.selectionEnd ?? text.length;
-    const selected = text.slice(start, end);
-    const next = `${text.slice(0, start)}${mark}${selected}${mark}${text.slice(end)}`;
-
-    setText(next);
-    if (selectedUser) setDraft(selectedUser._id, next);
-
-    requestAnimationFrame(() => {
-      input.focus();
-      const caret = selected ? end + mark.length * 2 : start + mark.length;
-      input.setSelectionRange(selected ? start + mark.length : caret, selected ? end + mark.length : caret);
-    });
   };
 
   const handleImageChange = (e) => {
@@ -499,23 +471,6 @@ const MessageInput = () => {
           </div>
         )}
 
-        {showFormatting && !isRecording && (
-          <div className="flex items-center gap-1 px-1 pb-1">
-            {FORMATTING_MARKS.map((format) => (
-              <button
-                key={format.id}
-                type="button"
-                onClick={() => applyFormatting(format.mark)}
-                title={format.label}
-                aria-label={format.label}
-                className="p-1.5 rounded-md text-base-content/60 hover:text-base-content hover:bg-base-200 transition-colors"
-              >
-                <format.icon size={14} />
-              </button>
-            ))}
-          </div>
-        )}
-
         <form onSubmit={handleSendMessage} className="flex items-center gap-3">
         <div className="flex-1 flex items-center gap-3 bg-base-100 rounded-full px-4 py-1.5 min-h-[42px] border border-base-300/30 shadow-sm">
           {isRecording ? (
@@ -554,17 +509,6 @@ const MessageInput = () => {
                 ref={fileInputRef}
                 onChange={handleImageChange}
               />
-
-              <button
-                type="button"
-                onClick={() => setShowFormatting((s) => !s)}
-                title={showFormatting ? "Hide formatting" : "Formatting (bold, italic, strikethrough, code)"}
-                className={`p-1 hover:bg-base-200 rounded-full transition-colors flex items-center justify-center ${
-                  showFormatting ? "text-primary" : "text-base-content/40 hover:text-base-content"
-                }`}
-              >
-                <Type size={18} />
-              </button>
 
               {selectedGroup && (
                 <button
