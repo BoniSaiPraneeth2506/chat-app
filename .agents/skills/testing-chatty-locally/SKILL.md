@@ -39,18 +39,30 @@ and toasts `Dev code: NNNNNN`; the same code is printed in the backend log as
 `[DEV] Password reset OTP for <email>: <otp>`.
 
 ## Testing the email providers without real credentials
-`backend/lib/mailer.js` picks Resend (HTTPS `https://api.resend.com/emails`) when `RESEND_API_KEY` is set,
+`backend/lib/mailer.js` tries HTTP providers in order Brevo (`BREVO_API_KEY`) → Resend (`RESEND_API_KEY`),
 then falls back to nodemailer SMTP when `SMTP_USER`/`SMTP_PASS` are set.
-- The Resend base URL is hardcoded; there is no env override. Least-invasive interception is a Node
-  preload that patches `globalThis.fetch` to rewrite `https://api.resend.com` → a local stub, launched via
-  `NODE_OPTIONS="--import file:///path/to/fetch-redirect.mjs" npm run dev`. (If the code ever gains a
-  configurable base URL, prefer that.)
+- Both HTTP providers honour base-URL env overrides, so point them straight at local stubs — no fetch
+  preload hack needed:
+  `BREVO_BASE_URL=http://127.0.0.1:8788/v3` (mailer POSTs `${BREVO_BASE_URL}/smtp/email`, header
+  `api-key: <BREVO_API_KEY>`, body `{ sender:{name,email}, to:[{email}], subject, textContent, htmlContent }`)
+  and `RESEND_BASE_URL=http://127.0.0.1:8787` (POSTs `${RESEND_BASE_URL}/emails`, `Authorization: Bearer`,
+  body `{ from, to:[..], subject, text, html }`).
+  If a future provider lacks such an override, the fallback trick is a Node preload patching
+  `globalThis.fetch`, launched via `NODE_OPTIONS="--import file:///path/to/fetch-redirect.mjs" npm run dev`.
+- `EMAIL_FROM="Chatty <no-reply@chatty.test>"` is split by `parseFrom` into Brevo's `sender {name,email}`;
+  a bare address yields just `{ email }`. Assert on this in the stub log.
+- A single generic stub server that logs method/URL/headers/body to a file and reads an `ok|fail` mode
+  file per provider makes it cheap to drive the whole chain (success, 500 fallthrough, all-fail).
+- To distinguish provider order, assert the *next* provider's log gained no entry when an earlier one
+  succeeded, and that backend logs `<Provider> send failed: ... 500` when it did fall through.
 - SMTP: run a fake server with the `smtp-server` npm package on 127.0.0.1:1025 and set
   `SMTP_HOST=localhost SMTP_PORT=1025 SMTP_SECURE=false SMTP_USER=x SMTP_PASS=y`. Note the mailer always
   retries port 465 after the preferred port fails, so a failing-SMTP test ends with `ECONNREFUSED :::465`.
 - Env vars must be exported in the shell that starts the backend; `dotenv` does not override existing env.
-- Ready-made harness used previously lives in `/home/ubuntu/teststub/` (resend stub, fake SMTP,
-  `run-backend.sh none|resend|fallback|bothfail`).
+- Ready-made harness used previously lives in `/home/ubuntu/teststub/` (`http-stub.mjs <brevo|resend> <port>`,
+  `fake-smtp.mjs`, `run-backend.sh none|brevo|brevofail|httpfail|allfail`, plus `*-mode.txt` files holding
+  `ok`/`fail`). Start all stub listeners BEFORE running a fallthrough scenario — a missing listener produces
+  `fetch failed` and looks like an app failure when it is only a harness gap.
 
 ## Devin Secrets Needed
 None — all email paths are testable with local stubs. Do not use real `RESEND_API_KEY` / `SMTP_*`.
