@@ -35,7 +35,8 @@ const mailOptions = (to, otp) => ({
 
 const sendViaResend = async (to, otp) => {
   const { subject, text, html, from } = mailOptions(to, otp);
-  const res = await fetch("https://api.resend.com/emails", {
+  const baseUrl = (process.env.RESEND_BASE_URL || "https://api.resend.com").replace(/\/$/, "");
+  const res = await fetch(`${baseUrl}/emails`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
