@@ -10,6 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/core": "^8.5.0",
     "axios": "^1.10.0",
     "chat-app": "file:..",
     "lucide-react": "^0.523.0",
@@ -21,6 +24,7 @@
     "zustand": "^5.0.5"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.6.8",
     "@eslint/js": "^9.29.0",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",

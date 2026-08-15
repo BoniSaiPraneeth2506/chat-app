@@ -96,7 +96,7 @@ const HomePage = () => {
         `}
       >
         <div
-          className={`bg-base-100 shadow-cl w-full rounded-none lg:rounded-lg transition-all
+          className={`bg-base-100 shadow-cl w-full rounded-none lg:rounded-lg
             ${hasActiveChat ? "h-screen" : "h-[calc(100vh-4rem)]"}
             lg:h-[calc(100vh-4.5rem)]
           `}

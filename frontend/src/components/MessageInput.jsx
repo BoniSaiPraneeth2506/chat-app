@@ -526,7 +526,7 @@ const MessageInput = () => {
         )}
 
         <form onSubmit={handleSendMessage} className="flex items-center gap-3">
-        <div className="flex-1 flex items-center gap-3 bg-base-100 rounded-full px-4 py-1.5 min-h-[42px] border border-base-300/30 shadow-sm">
+        <div className="flex-1 min-w-0 flex items-center gap-3 bg-base-100 rounded-full px-4 py-1.5 min-h-[42px] border border-base-300/30 shadow-sm">
           {isRecording ? (
             <div className="flex items-center justify-between w-full px-2">
               <div className="flex items-center gap-2">
@@ -581,7 +581,7 @@ const MessageInput = () => {
                 type="text"
                 aria-label="Write a message"
                 aria-describedby="msg-help"
-                className="flex-1 bg-transparent text-sm text-base-content placeholder-base-content/40 focus:outline-none py-1"
+                className="flex-1 min-w-0 bg-transparent text-sm text-base-content placeholder-base-content/40 focus:outline-none py-1"
                 placeholder="Type a message..."
                 value={text}
                 onChange={handleTextChange}
@@ -630,6 +630,7 @@ const MessageInput = () => {
                   : "bg-base-100 text-base-content/40 border border-base-300/30 hover:bg-base-200"
               }
             `}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
               if (!text.trim() && imagePreviews.length === 0 && !isSendingAnimation) {
                 e.preventDefault();

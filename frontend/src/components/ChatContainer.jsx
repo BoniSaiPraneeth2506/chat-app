@@ -803,7 +803,13 @@ const ChatContainer = () => {
       const deltaHeight = container.scrollHeight - prevScrollHeightRef.current;
       container.scrollTop = deltaHeight + prevScrollTopRef.current;
       isPrependingRef.current = false;
-    } else if (prevMessagesLengthRef.current === 0 || latestMessageId !== lastMessageIdRef.current) {
+    } else if (prevMessagesLengthRef.current === 0) {
+      // First render of this conversation's history: jump straight to the
+      // bottom instead of visibly scrolling through the whole thing.
+      if (messageEndRef.current) {
+        messageEndRef.current.scrollIntoView({ behavior: "auto" });
+      }
+    } else if (latestMessageId !== lastMessageIdRef.current) {
       if (messageEndRef.current) {
         messageEndRef.current.scrollIntoView({ behavior: "smooth" });
       }

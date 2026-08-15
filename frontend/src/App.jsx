@@ -46,7 +46,7 @@
 
 import React, { useEffect } from 'react'
 import NavBar from './components/NavBar'
-import { Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useParams, useNavigate, useLocation } from 'react-router-dom'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
 import SignUpPage from './pages/SignUpPage'
@@ -63,6 +63,7 @@ import GroupDetailsModal from './components/GroupDetailsModal'
 import GroupCallModal from './components/GroupCallModal'
 import CallModal from './components/CallModal'
 import { useGroupStore } from './store/useGroupStore'
+import { App as CapacitorApp } from '@capacitor/app'
 
 const PENDING_CHAT_KEY = "pendingChatUserId";
 
@@ -159,6 +160,30 @@ const App = () => {
   }, [])
 
   const navigate = useNavigate();
+  const location = useLocation();
+  const locationRef = React.useRef(location);
+  locationRef.current = location;
+
+  // Capacitor's WebView back button only knows real page loads, not React
+  // Router's client-side history, so without this it falls straight through
+  // to exiting the app from any non-root screen. An open chat/group doesn't
+  // change the route (HomePage tracks it as in-page state with its own
+  // pushState/popstate pair), so route-only routing here would exit the app
+  // straight from an open chat instead of closing it first.
+  useEffect(() => {
+    const listenerPromise = CapacitorApp.addListener('backButton', () => {
+      const hasActiveChat = !!(useChatStore.getState().selectedUser || useGroupStore.getState().selectedGroup);
+      if (locationRef.current.pathname !== '/') {
+        navigate(-1);
+      } else if (hasActiveChat) {
+        window.history.back();
+      } else {
+        CapacitorApp.exitApp();
+      }
+    });
+    return () => { listenerPromise.then((h) => h.remove()); };
+  }, [navigate]);
+
   useEffect(() => {
     if (!authUser) return;
     const pendingChatUserId = sessionStorage.getItem(PENDING_CHAT_KEY);
