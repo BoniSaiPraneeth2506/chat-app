@@ -29,6 +29,9 @@ axiosInstance.interceptors.request.use(
 );
 
 // A session revoked from another device invalidates this client immediately.
+// Handled once per page load: several in-flight requests can fail together.
+let handlingRevokedSession = false;
+
 axiosInstance.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -36,11 +39,11 @@ axiosInstance.interceptors.response.use(
       error.response?.status === 401 &&
       error.response?.data?.message === "Unauthorized: Session has been logged out";
 
-    if (isRevoked) {
-      localStorage.removeItem("token");
-      if (window.location.pathname !== "/login") {
-        window.location.href = "/login";
-      }
+    if (isRevoked && !handlingRevokedSession) {
+      handlingRevokedSession = true;
+      import("../store/useAuthStore").then(({ default: useAuthStore }) => {
+        useAuthStore.getState().handleSessionRevoked();
+      });
     }
     return Promise.reject(error);
   }
