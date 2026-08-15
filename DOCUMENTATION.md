@@ -416,7 +416,18 @@ NODE_ENV=development|production
 CLOUDINARY_CLOUD_NAME=<cloudinary cloud name>
 CLOUDINARY_API_KEY=<cloudinary api key>
 CLOUDINARY_API_SECRET=<cloudinary api secret>
+
+# Password reset email — Resend HTTPS API (preferred)
+RESEND_API_KEY=<resend api key>
+EMAIL_FROM=<verified sender, e.g. Chatty <noreply@yourdomain.com>>
+
+# Password reset email — SMTP fallback (blocked on Render's free tier)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=<smtp user>
+SMTP_PASS=<smtp app password>
 ```
+Reset codes are sent through Resend when `RESEND_API_KEY` is set, falling back to SMTP. Hosts such as Render's free tier block outbound SMTP ports 25/465/587, so the Resend path is required there. With neither configured, the code is logged to the server console instead (dev only).
 
 ### Frontend (`frontend/.env.production` — and optionally `.env.development`)
 ```env
