@@ -8,6 +8,10 @@ import CreatePollModal from "./CreatePollModal";
 
 const MessageInput = () => {
   const [text, setText] = useState("");
+  // Mentions are tracked explicitly rather than re-parsed from the text, so a
+  // name that merely looks like "@someone" never notifies a real person.
+  const [mentionIds, setMentionIds] = useState([]);
+  const [mentionQuery, setMentionQuery] = useState(null); // null = picker closed
   const [imagePreviews, setImagePreviews] = useState([]);
   const [isOneView, setIsOneView] = useState(false);
   const [isSendingAnimation, setIsSendingAnimation] = useState(false);
@@ -220,6 +224,34 @@ const MessageInput = () => {
     }, 1500);
   };
 
+  // Opens the picker when the caret sits on an "@word" and we're in a group.
+  const handleMentionScan = (value) => {
+    if (!selectedGroup) return setMentionQuery(null);
+    const match = /(?:^|\s)@([\w]*)$/.exec(value);
+    setMentionQuery(match ? match[1].toLowerCase() : null);
+  };
+
+  const mentionCandidates =
+    selectedGroup && mentionQuery !== null
+      ? (selectedGroup.members || [])
+          .map((m) => m.user)
+          .filter(Boolean)
+          .filter((u) => u._id !== authUser?._id)
+          .filter((u) => (u.fullName || "").toLowerCase().includes(mentionQuery))
+          .slice(0, 6)
+      : [];
+
+  const applyMention = (user) => {
+    // Replace the partial "@word" the caret is sitting on with the full name.
+    const next = text.replace(/(?:^|\s)@[\w]*$/, (m) =>
+      `${m.startsWith(" ") ? " " : ""}@${user.fullName} `
+    );
+    setText(next);
+    setMentionIds((prev) => (prev.includes(user._id) ? prev : [...prev, user._id]));
+    setMentionQuery(null);
+    inputRef.current?.focus();
+  };
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!text.trim() && imagePreviews.length === 0) return;
@@ -255,8 +287,10 @@ const MessageInput = () => {
           image: currentImages[0] || "",
           images: currentImages.length > 1 ? currentImages : [],
           replyTo: replyingToMessage?._id || null,
+          mentions: mentionIds,
           scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
         });
+        setMentionIds([]);
         setShowScheduler(false);
         setScheduledAt("");
         if (replyingToMessage) setReplyingToMessage(null);
@@ -525,6 +559,27 @@ const MessageInput = () => {
           </div>
         )}
 
+        {/* Mention picker — floats above the composer, group chats only */}
+        {mentionCandidates.length > 0 && (
+          <div className="absolute bottom-full left-0 right-0 mb-2 mx-3 rounded-2xl bg-base-100 shadow-2xl overflow-hidden z-30">
+            {mentionCandidates.map((user) => (
+              <button
+                key={user._id}
+                type="button"
+                onClick={() => applyMention(user)}
+                className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-base-200 transition-colors text-left"
+              >
+                <img
+                  src={user.profilePic || "/avatar.png"}
+                  alt=""
+                  className="object-cover rounded-full size-8 flex-shrink-0"
+                />
+                <span className="text-sm text-base-content truncate">{user.fullName}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         <form onSubmit={handleSendMessage} className="flex items-center gap-3">
         <div className="flex-1 min-w-0 flex items-center gap-3 bg-base-100 rounded-full px-4 py-1.5 min-h-[42px] border border-base-300/30 shadow-sm">
           {isRecording ? (
@@ -584,7 +639,7 @@ const MessageInput = () => {
                 className="flex-1 min-w-0 bg-transparent text-sm text-base-content placeholder-base-content/40 focus:outline-none py-1"
                 placeholder="Type a message..."
                 value={text}
-                onChange={handleTextChange}
+                onChange={(e) => { handleTextChange(e); handleMentionScan(e.target.value); }}
                 onKeyDown={handleKeyDown}
               />
               <div id="msg-help" className="sr-only">Press Ctrl+Enter to send on desktop. Use Arrow Up to edit your last message.</div>

@@ -400,6 +400,7 @@ const SideBar = () => {
     getGroups,
     latestGroupMessages,
     unreadGroupCounts,
+    mentionedGroups,
     setIsCreateGroupModalOpen,
     subscribeToGroupEvents,
     unsubscribeFromGroupEvents
@@ -727,6 +728,7 @@ const SideBar = () => {
                     const isSelected = selectedGroup?._id === group._id;
                     const latestMsg = latestGroupMessages[group._id];
                     const unread = unreadGroupCounts[group._id] || 0;
+                    const mentioned = Boolean(mentionedGroups?.[group._id]);
 
                     return (
                       <button
@@ -778,8 +780,18 @@ const SideBar = () => {
                                 <span className="text-base-content/40 italic">Group created</span>
                               )}
                             </div>
+                            {mentioned && (
+                              <span
+                                title="You were mentioned"
+                                className="flex items-center justify-center size-5 text-[11px] font-bold text-primary-content bg-primary rounded-full flex-shrink-0"
+                              >
+                                @
+                              </span>
+                            )}
                             {unread > 0 && (
-                              <span className="flex items-center justify-center min-w-5 h-5 px-1.5 text-[10px] font-bold text-white bg-primary rounded-full flex-shrink-0">
+                              <span className={`flex items-center justify-center min-w-5 h-5 px-1.5 text-[10px] font-bold rounded-full flex-shrink-0 ${
+                                mentioned ? "bg-primary/25 text-primary" : "bg-primary text-white"
+                              }`}>
                                 {unread}
                               </span>
                             )}

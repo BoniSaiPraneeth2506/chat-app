@@ -5,13 +5,23 @@ const LAST_ACTIVE_REFRESH_MS = 60 * 1000;
 
 const protectRoute = async (req, res, next) => {
   try {
-    let token = req.cookies.jwt;
-    if (!token && req.headers.authorization) {
-      const authHeader = req.headers.authorization;
-      if (authHeader.startsWith("Bearer ")) {
-        token = authHeader.split(" ")[1];
-      }
+    // Authorization header wins over the cookie.
+    //
+    // The `jwt` cookie is httpOnly, so the client cannot clear or replace it
+    // when switching between saved accounts — it keeps pointing at whichever
+    // account signed in most recently. Reading it first meant a switch swapped
+    // the stored bearer token but every request still resolved to the cookie's
+    // account, so the app appeared to ignore the switch entirely.
+    //
+    // The header is the more explicit credential (the client sets it per
+    // request), so it takes precedence; the cookie remains the fallback for
+    // sessions that have no bearer token.
+    let token = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      token = authHeader.split(" ")[1];
     }
+    if (!token) token = req.cookies.jwt;
 
     if (!token) {
       return res.status(401).json({ message: "Unauthorized: No token provided" });

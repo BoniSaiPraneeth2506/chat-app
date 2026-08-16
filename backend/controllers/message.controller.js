@@ -232,6 +232,59 @@ const getBlockedUsers = async (req, res) => {
   }
 };
 
+/**
+ * Exports one conversation as JSON.
+ *
+ * Deliberately server-side rather than dumping whatever the client happens to
+ * have cached: the device only holds recent pages, and an export that silently
+ * omits older messages is worse than none.
+ */
+const exportChat = async (req, res) => {
+  try {
+    const { id: contactId } = req.params;
+    const myId = req.user._id;
+
+    const [me, contact] = await Promise.all([
+      User.findById(myId).select("fullName email"),
+      User.findById(contactId).select("fullName email"),
+    ]);
+    if (!contact) return res.status(404).json({ message: "User not found" });
+
+    const messages = await Message.find({
+      $or: [
+        { senderId: myId, receiverId: contactId, groupId: null },
+        { senderId: contactId, receiverId: myId, groupId: null },
+      ],
+      deletedFor: { $ne: myId },
+    })
+      .sort({ createdAt: 1 })
+      .select("senderId text image images voice createdAt isDeletedForEveryone isCallLog callType callStatus callDuration");
+
+    const nameFor = (id) => (id.toString() === myId.toString() ? me.fullName : contact.fullName);
+
+    res.status(200).json({
+      exportedAt: new Date().toISOString(),
+      participants: [
+        { name: me.fullName, email: me.email },
+        { name: contact.fullName, email: contact.email },
+      ],
+      messageCount: messages.length,
+      messages: messages.map((m) => ({
+        from: nameFor(m.senderId),
+        at: m.createdAt,
+        text: m.isDeletedForEveryone ? "[deleted]" : m.text || "",
+        media: [m.image, ...(m.images || []), m.voice].filter(Boolean),
+        call: m.isCallLog
+          ? { type: m.callType, status: m.callStatus, durationSeconds: m.callDuration }
+          : undefined,
+      })),
+    });
+  } catch (error) {
+    console.error("Error in exportChat:", error.message);
+    res.status(500).json({ message: "Could not export this chat" });
+  }
+};
+
 const getUsersForSidebar = async (req, res) => {
   try {
     const { search } = req.query;
@@ -1092,4 +1145,5 @@ export {
   ,cancelScheduledMessage
   ,setContactNickname
   ,getBlockedUsers
+  ,exportChat
 };

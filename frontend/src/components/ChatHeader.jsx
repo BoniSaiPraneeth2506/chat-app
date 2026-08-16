@@ -75,8 +75,10 @@
 // };
 // export default ChatHeader;
 
-import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image, CheckSquare, Users, Info, Mic, MicOff, Maximize2, CornerUpLeft, Pin, Trash2, Forward, Pencil, Tag } from "lucide-react";
+import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image, CheckSquare, Users, Info, Mic, MicOff, Maximize2, CornerUpLeft, Pin, Trash2, Forward, Pencil, Tag, Download } from "lucide-react";
 import { useNicknames, displayNameOf, hasNickname } from "../lib/contacts";
+import { saveTextFile } from "../lib/download";
+import axiosInstance from "../lib/axios";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
@@ -551,6 +553,32 @@ const ChatHeader = () => {
 
                 {!isSelf && (
                   <>
+                    <li>
+                      <button
+                        onClick={async () => {
+                          document.activeElement.blur();
+                          try {
+                            const res = await axiosInstance.get(`/messages/export/${selectedUser._id}`);
+                            const name = (contactName || "chat").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+                            const result = await saveTextFile(
+                              `chatty-${name}-${new Date().toISOString().slice(0, 10)}.json`,
+                              JSON.stringify(res.data, null, 2)
+                            );
+                            if (result.savedTo) toast.success(`Saved to ${result.savedTo}`);
+                            else if (result.downloaded) toast.success("Chat exported");
+                          } catch (err) {
+                            const msg = String(err?.message || "");
+                            if (!/cancel|abort/i.test(msg)) {
+                              toast.error(err.response?.data?.message || "Could not export this chat");
+                            }
+                          }
+                        }}
+                        className="flex items-center gap-2 py-1.5 px-3 rounded-lg text-xs hover:bg-base-200 transition-colors w-full text-left"
+                      >
+                        <Download size={14} />
+                        <span>Export chat</span>
+                      </button>
+                    </li>
                     <li>
                       <button
                         onClick={() => {

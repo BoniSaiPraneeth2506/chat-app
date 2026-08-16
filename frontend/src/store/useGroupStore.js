@@ -46,6 +46,9 @@ export const useGroupStore = create((set, get) => ({
   isGroupMessagesLoading: false,
   latestGroupMessages: {},
   unreadGroupCounts: {},
+  // Groups where an unread message @-mentions you — surfaced ahead of a
+  // plain unread count, since being named is a stronger signal.
+  mentionedGroups: {},
   groupTypingUsers: {},
 
   // Modals
@@ -68,6 +71,63 @@ export const useGroupStore = create((set, get) => ({
   onGroupCallUserJoined: null,
   onGroupCallSignalReceived: null,
   onGroupUserLeftCall: null,
+
+  // ── Invite links ──────────────────────────────────────────────────────
+  createGroupInvite: async (groupId) => {
+    try {
+      const res = await axiosInstance.post(`/groups/${groupId}/invite`);
+      set((state) => ({
+        groups: state.groups.map((g) =>
+          g._id === groupId ? { ...g, inviteCode: res.data.inviteCode } : g
+        ),
+        selectedGroup:
+          state.selectedGroup?._id === groupId
+            ? { ...state.selectedGroup, inviteCode: res.data.inviteCode }
+            : state.selectedGroup,
+      }));
+      return res.data.inviteCode;
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Could not create an invite link");
+      return null;
+    }
+  },
+
+  revokeGroupInvite: async (groupId) => {
+    try {
+      await axiosInstance.delete(`/groups/${groupId}/invite`);
+      set((state) => ({
+        groups: state.groups.map((g) =>
+          g._id === groupId ? { ...g, inviteCode: undefined } : g
+        ),
+        selectedGroup:
+          state.selectedGroup?._id === groupId
+            ? { ...state.selectedGroup, inviteCode: undefined }
+            : state.selectedGroup,
+      }));
+      toast.success("Invite link revoked");
+      return true;
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Could not revoke the link");
+      return false;
+    }
+  },
+
+  joinGroupByInvite: async (code) => {
+    try {
+      const res = await axiosInstance.post(`/groups/invite/${code}/join`);
+      const group = res.data.group;
+      set((state) => ({ groups: upsertGroup(state.groups, group) }));
+
+      const socket = useAuthStore.getState().socket;
+      if (socket) socket.emit("joinGroupRoom", group._id);
+
+      toast.success(res.data.alreadyMember ? `Opened ${group.name}` : `Joined ${group.name}`);
+      return group;
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Could not join this group");
+      return null;
+    }
+  },
 
   // Raise / lower your hand in the active group call.
   toggleRaiseHand: () => {
@@ -175,12 +235,14 @@ export const useGroupStore = create((set, get) => ({
     set({ selectedGroup: group, groupMessages: [] });
 
     if (group) {
-      set((state) => ({
-        unreadGroupCounts: {
-          ...state.unreadGroupCounts,
-          [group._id]: 0,
-        },
-      }));
+      set((state) => {
+        const mentionedGroups = { ...state.mentionedGroups };
+        delete mentionedGroups[group._id];
+        return {
+          unreadGroupCounts: { ...state.unreadGroupCounts, [group._id]: 0 },
+          mentionedGroups,
+        };
+      });
       get().getGroupMessages(group._id);
     }
   },
@@ -504,11 +566,17 @@ export const useGroupStore = create((set, get) => ({
           groupMessages: [...state.groupMessages, message],
         }));
       } else {
+        const mentionsMe = (message.mentions || []).some(
+          (id) => String(id?._id || id) === String(currentUser?._id)
+        );
         set((state) => ({
           unreadGroupCounts: {
             ...state.unreadGroupCounts,
             [message.groupId]: (state.unreadGroupCounts[message.groupId] || 0) + 1,
           },
+          mentionedGroups: mentionsMe
+            ? { ...state.mentionedGroups, [message.groupId]: true }
+            : state.mentionedGroups,
         }));
       }
     });

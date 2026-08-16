@@ -154,6 +154,19 @@ const messageSchema = new Schema(
       type: Boolean,
       default: false
     },
+    // Users @-mentioned in this message. Sent explicitly by the composer's
+    // picker rather than parsed from the text, so a name that merely looks
+    // like a mention never silently notifies someone.
+    mentions: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: []
+    }],
+    // Transcript captured while the voice note was recorded.
+    voiceTranscript: {
+      type: String,
+      default: ""
+    },
     isForwarded: {
       type: Boolean,
       default: false

@@ -1,11 +1,18 @@
 import { Link } from "react-router-dom";
+import toast from "react-hot-toast";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
-import { MessageSquare, Settings, User, Laptop, ShieldOff } from "lucide-react";
+import { useState, useEffect } from "react";
+import { MessageSquare, Settings, User, Laptop, ShieldOff, UserPlus, Check, X } from "lucide-react";
 import { useGroupStore } from "../store/useGroupStore";
 
 const Navbar = () => {
-  const { authUser } = useAuthStore();
+  const { authUser, savedAccounts, switchAccount, forgetSavedAccount, refreshSavedAccounts } = useAuthStore();
+  const [isSwitching, setIsSwitching] = useState(false);
+
+  // The list is written to localStorage by the auth store, so re-read it
+  // whenever the signed-in user changes (login, switch, logout).
+  useEffect(() => { refreshSavedAccounts(); }, [authUser?._id, refreshSavedAccounts]);
   const { selectedUser } = useChatStore();
   const { selectedGroup } = useGroupStore();
 
@@ -68,6 +75,75 @@ const Navbar = () => {
                   <Link to="/linked-devices" onClick={() => document.activeElement.blur()} className="flex items-center gap-2 rounded-xl">
                     <Laptop size={16} />
                     Linked Devices
+                  </Link>
+                </li>
+
+                {/* Account switcher — only the accounts already signed in on
+                    this device. Switching reuses their stored session instead
+                    of asking for a password again. */}
+                <li className="menu-title text-[10px] uppercase tracking-wider text-base-content/40 font-bold px-3 pt-2 pb-1 select-none">
+                  Accounts
+                </li>
+                {[...savedAccounts]
+                  .sort((a, b) => (a._id === authUser._id ? -1 : b._id === authUser._id ? 1 : 0))
+                  .map((acc) => {
+                  const isActive = acc._id === authUser._id;
+                  return (
+                    <li key={acc._id}>
+                      <div
+                        className={`flex items-center gap-2 rounded-xl px-3 py-2 transition-colors ${
+                          isActive ? "bg-primary/10" : "hover:bg-base-200"
+                        }`}
+                      >
+                        <img
+                          src={acc.profilePic || "/avatar.png"}
+                          alt=""
+                          className={`object-cover rounded-full size-6 flex-shrink-0 ${
+                            isActive ? "ring-2 ring-primary" : ""
+                          }`}
+                        />
+                        <button
+                          type="button"
+                          disabled={isActive || isSwitching}
+                          onClick={async () => {
+                            document.activeElement.blur();
+                            setIsSwitching(true);
+                            const ok = await switchAccount(acc._id);
+                            setIsSwitching(false);
+                            if (ok) toast.success(`Switched to ${acc.fullName}`);
+                          }}
+                          className="flex-1 min-w-0 text-left disabled:cursor-default"
+                        >
+                          <span className="block text-xs font-medium truncate">{acc.fullName}</span>
+                          <span className="block text-[10px] text-base-content/45 truncate">{acc.email}</span>
+                        </button>
+                        {isActive ? (
+                          <Check size={14} className="text-primary flex-shrink-0" />
+                        ) : (
+                          <button
+                            type="button"
+                            title="Remove from this device"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              forgetSavedAccount(acc._id);
+                            }}
+                            className="p-1 rounded-full text-base-content/30 hover:text-error hover:bg-error/10 transition-colors flex-shrink-0"
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+                <li>
+                  <Link
+                    to="/login?add=1"
+                    onClick={() => document.activeElement.blur()}
+                    className="flex items-center gap-2 rounded-xl text-primary"
+                  >
+                    <UserPlus size={16} />
+                    Add another account
                   </Link>
                 </li>
               </ul>

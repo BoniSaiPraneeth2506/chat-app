@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { io } from 'socket.io-client';
 import { isNetworkError, subscribeOnlineStatus } from '../lib/network.js';
 import { deleteUserDb } from '../lib/db.js';
+import { rememberAccount, forgetAccount, getAccountToken, listAccounts } from '../lib/accounts.js';
 
 const BASE_URL = import.meta.env.VITE_API_URL
   ? import.meta.env.VITE_API_URL.replace(/\/api$/, "")
@@ -37,6 +38,43 @@ const persistAuthSnapshot = (user) => {
 const friendlyAuthError = (err, fallback) =>
   isNetworkError(err) ? "You're offline — check your connection and try again" : (err.response?.data?.message || err.message || fallback);
 
+/**
+ * Clears chat/group state that belongs to whoever was signed in before.
+ *
+ * The Dexie caches are keyed per user id and are deliberately left alone —
+ * each account keeps its own offline history. This only drops the in-memory
+ * copy, so one account's conversations can never paint inside another's
+ * session while the new data loads.
+ */
+const resetPerAccountState=async()=>{
+    const [{useChatStore},{useGroupStore}]=await Promise.all([
+        import("./useChatStore"),
+        import("./useGroupStore"),
+    ]);
+    useChatStore.setState({messages:[],users:[],selectedUser:null,latestMessages:{},unreadCounts:{}});
+    useGroupStore.setState({groups:[],selectedGroup:null,groupMessages:[],unreadGroupCounts:{},mentionedGroups:{}});
+};
+
+/**
+ * Loads the sidebar for whoever is signed in now.
+ *
+ * Switching accounts can't rely on a component effect to refetch: SideBar's
+ * getUsers effect is keyed on [getUsers, searchTerm], and neither changes when
+ * the identity does — so after the state reset the sidebar would sit empty
+ * until a full page reload, making a successful switch look like nothing
+ * happened.
+ */
+const hydrateForCurrentUser=async()=>{
+    const [{useChatStore},{useGroupStore}]=await Promise.all([
+        import("./useChatStore"),
+        import("./useGroupStore"),
+    ]);
+    await Promise.all([
+        useChatStore.getState().getUsers(),
+        useGroupStore.getState().getGroups(),
+    ]);
+};
+
 const useAuthStore=create((set,get)=>({
     authUser:loadAuthSnapshot(),
     isOffline: typeof navigator !== 'undefined' ? !navigator.onLine : false,
@@ -60,7 +98,7 @@ const useAuthStore=create((set,get)=>({
         }
         localStorage.removeItem("token");
         persistAuthSnapshot(null);
-        if(authUser) deleteUserDb(authUser._id);
+        if(authUser){ deleteUserDb(authUser._id); forgetAccount(authUser._id); }
         set({authUser:null,socket:null,sessions:[],onlineUsers:[],isCheckingAuth:false});
         if(authUser) toast.error("This device was logged out from another session");
     },
@@ -126,6 +164,7 @@ const useAuthStore=create((set,get)=>({
            }
            set({authUser:res.data});
            persistAuthSnapshot(res.data);
+           rememberAccount(res.data, res.data.token);
            toast.success("Account created successfully")
            get().connectSocket()
         }catch(err){
@@ -134,23 +173,142 @@ const useAuthStore=create((set,get)=>({
             set({isSigningUp:false})
         }
     },
+    deleteAccount:async({password,confirm})=>{
+        const currentUser=get().authUser;
+        try{
+            await axiosInstance.delete('/auth/account',{data:{password,confirm}});
+            // Same teardown as logout — the account no longer exists, so any
+            // cached conversation on this device is orphaned data.
+            localStorage.removeItem("token");
+            persistAuthSnapshot(null);
+            if(currentUser){ deleteUserDb(currentUser._id); forgetAccount(currentUser._id); }
+            get().disconnectSocket();
+            set({authUser:null,sessions:[],onlineUsers:[],savedAccounts:listAccounts()});
+            toast.success("Your account has been deleted");
+            return true;
+        }catch(err){
+            toast.error(friendlyAuthError(err,"Could not delete the account"));
+            return false;
+        }
+    },
+    savedAccounts: listAccounts(),
+    // The account being switched to, so the UI can show a deliberate
+    // transition instead of a blank sidebar while the new session loads.
+    switchingTo: null,
+    refreshSavedAccounts:()=>set({savedAccounts:listAccounts()}),
+
+    /**
+     * Switches to another account already signed in on this device.
+     *
+     * The per-account Dexie cache is keyed by user id, so nothing is deleted
+     * here — each account keeps its own cached conversations and the one being
+     * left behind is untouched. In-memory chat state is cleared instead, so a
+     * previous account's messages can never bleed into the new session.
+     */
+    switchAccount:async(userId)=>{
+        const token=getAccountToken(userId);
+        if(!token){
+            toast.error("Please sign in to that account again");
+            return false;
+        }
+        if(get().authUser?._id===userId) return true;
+
+        const target=get().savedAccounts.find((a)=>a._id===userId) || null;
+        const previous=get().authUser;
+        set({switchingTo:target});
+
+        // Deliberately does NOT null authUser or raise isCheckingAuth.
+        //
+        // App renders a full-screen loader whenever `isCheckingAuth && !authUser`,
+        // so clearing the user mid-switch tore the whole tree down and put a
+        // spinner over the transition — the blink. Keeping the previous user in
+        // place means the layout never unmounts; the overlay covers the swap and
+        // authUser flips exactly once, when the new session is confirmed.
+        const startedAt=Date.now();
+        get().disconnectSocket();
+        localStorage.setItem("token", token);
+
+        try{
+            const res=await axiosInstance.get('/auth/check');
+
+            await resetPerAccountState();
+            set({authUser:res.data,onlineUsers:[],sessions:[],isOffline:false});
+            persistAuthSnapshot(res.data);
+            get().connectSocket();
+            await hydrateForCurrentUser();
+
+            // A switch that resolves in 80ms reads as a flicker rather than a
+            // transition, so hold the overlay briefly for a steady handoff.
+            const elapsed=Date.now()-startedAt;
+            if(elapsed<450) await new Promise((r)=>setTimeout(r,450-elapsed));
+
+            set({switchingTo:null});
+            return true;
+        }catch(err){
+            // Put the previous session back so a failed switch leaves the app
+            // exactly where it was rather than half-signed-out.
+            const previousToken=previous ? getAccountToken(previous._id) : null;
+            if(previousToken) localStorage.setItem("token", previousToken);
+            else localStorage.removeItem("token");
+
+            if(!isNetworkError(err)){
+                // The stored token was rejected — most likely revoked from
+                // another device, so drop the dead entry.
+                forgetAccount(userId);
+                set({savedAccounts:listAccounts()});
+                toast.error("That session expired — please sign in again");
+            }else{
+                toast.error("You're offline — can't switch accounts right now");
+            }
+
+            set({switchingTo:null});
+            if(previous) get().connectSocket();
+            return false;
+        }
+    },
+
+    forgetSavedAccount:(userId)=>{
+        forgetAccount(userId);
+        set({savedAccounts:listAccounts()});
+    },
+
+    // Shown after logging out when other saved accounts remain and there is
+    // more than one to choose between.
+    accountChooserOpen:false,
+    closeAccountChooser:()=>set({accountChooserOpen:false}),
+
     logOut:async()=>{
         // Own account's cached messages must not survive a logout on a
         // shared device, or the next person to log in on it would see them.
         const currentUser=get().authUser;
+
+        const finishLogout=async()=>{
+            localStorage.removeItem("token");
+            persistAuthSnapshot(null);
+            if(currentUser){ deleteUserDb(currentUser._id); forgetAccount(currentUser._id); }
+            get().disconnectSocket();
+            await resetPerAccountState();
+
+            const remaining=listAccounts();
+            set({authUser:null,onlineUsers:[],sessions:[],savedAccounts:remaining});
+
+            // Signing out of one account shouldn't dump you at a login screen
+            // when this device still has other sessions. Always ask which to
+            // continue as — even with a single one left, auto-signing-in would
+            // take the choice away from someone who may have meant to leave.
+            if(remaining.length>0){
+                set({accountChooserOpen:true});
+            }
+        };
+
         try{
              await axiosInstance.post('/auth/logout');
-             localStorage.removeItem("token");
-             persistAuthSnapshot(null);
-             if(currentUser) deleteUserDb(currentUser._id);
-             set({authUser:null})
-             get().disconnectSocket()
-             toast.success("Logout successfull")
+             await finishLogout();
+             toast.success("Logged out");
         }catch(err){
-             localStorage.removeItem("token");
-             persistAuthSnapshot(null);
-             if(currentUser) deleteUserDb(currentUser._id);
-             set({authUser:null});
+             // The session is gone locally either way; only the server-side
+             // revoke failed, so still hand off to a remaining account.
+             await finishLogout();
              toast.error(friendlyAuthError(err, "Logout failed"));
         }
     },
@@ -194,10 +352,16 @@ const useAuthStore=create((set,get)=>({
            if (res.data && res.data.token) {
              localStorage.setItem("token", res.data.token);
            }
+           // Adding a second account signs in over an existing session, so the
+           // previous account's chats must not survive into this one.
+           const switchedIdentity = Boolean(get().authUser) && get().authUser._id !== res.data._id;
+           if (switchedIdentity) await resetPerAccountState();
            set({authUser:res.data});
            persistAuthSnapshot(res.data);
+           rememberAccount(res.data, res.data.token);
            toast.success("Logged in successfully")
            get().connectSocket()
+           if (switchedIdentity) await hydrateForCurrentUser();
         }catch(err){
           toast.error(friendlyAuthError(err, "Something went wrong"));
         }finally{
@@ -211,10 +375,14 @@ const useAuthStore=create((set,get)=>({
            if (res.data && res.data.token) {
              localStorage.setItem("token", res.data.token);
            }
+           const switchedIdentity = Boolean(get().authUser) && get().authUser._id !== res.data._id;
+           if (switchedIdentity) await resetPerAccountState();
            set({authUser:res.data});
            persistAuthSnapshot(res.data);
+           rememberAccount(res.data, res.data.token);
            toast.success("Logged in successfully")
            get().connectSocket()
+           if (switchedIdentity) await hydrateForCurrentUser();
         }catch(err){
           toast.error(friendlyAuthError(err, "Google sign-in failed"));
         }finally{

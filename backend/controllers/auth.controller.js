@@ -7,14 +7,21 @@ import bcrypt from 'bcryptjs'
 import cloudinary from "../lib/cloudinary.js";
 import { updateUserPrivacyState, disconnectRevokedSessions } from "../lib/socket.js";
 import { sendPasswordResetOtp } from "../lib/mailer.js";
+import Message from "../models/message.model.js";
+import Group from "../models/group.model.js";
+import { assetUrlsOf, destroyAssets } from "../lib/mediaCleanup.js";
 import { buildSession } from "../lib/deviceInfo.js";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 /** Reads JWT claims from the cookie or Authorization header without throwing. */
 const readTokenClaims = (req) => {
+    // Header before cookie, matching protectRoute — with saved accounts the
+    // httpOnly cookie can belong to a different account than the bearer token
+    // the client is actually using, and logout must end the right session.
     const header = req.headers.authorization;
-    const token = req.cookies?.jwt || (header?.startsWith("Bearer ") ? header.split(" ")[1] : null);
+    const token =
+        (header?.startsWith("Bearer ") ? header.split(" ")[1] : null) || req.cookies?.jwt || null;
     if (!token) return null;
     try {
         return jwt.verify(token, process.env.JWT_SECRET);
@@ -354,6 +361,67 @@ const updateProfile = async (req, res) => {
     }
 };
 
+/**
+ * Permanently deletes the signed-in account.
+ *
+ * Requires the current password (or explicit typed confirmation for
+ * Google-only accounts, which have none) because this is irreversible and a
+ * stolen session should not be enough to destroy someone's history.
+ *
+ * Messages *sent* by this user are removed along with their uploads. Messages
+ * they only received are left alone — those belong to the other person's
+ * conversation, and deleting one account should not silently gut someone
+ * else's chat history.
+ */
+const deleteAccount = async (req, res) => {
+    try {
+        const { password, confirm } = req.body || {};
+        const userId = req.user._id;
+
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ message: "Account not found" });
+
+        if (user.password) {
+            if (!password) return res.status(400).json({ message: "Enter your password to confirm" });
+            const ok = await bcrypt.compare(password, user.password);
+            if (!ok) return res.status(400).json({ message: "Incorrect password" });
+        } else if (String(confirm || "").trim().toUpperCase() !== "DELETE") {
+            // Google-only accounts have no password to check against.
+            return res.status(400).json({ message: 'Type DELETE to confirm' });
+        }
+
+        // Free the storage this user's own messages hold before dropping them.
+        const sent = await Message.find({ senderId: userId }).select("image images voice");
+        if (sent.length > 0) {
+            await destroyAssets(sent.flatMap(assetUrlsOf));
+            await Message.deleteMany({ senderId: userId });
+        }
+
+        // Leave every group. A group left with no members at all is removed;
+        // otherwise the remaining members keep it.
+        const groups = await Group.find({ "members.user": userId });
+        for (const group of groups) {
+            group.members = group.members.filter(
+                (m) => (m.user?._id || m.user).toString() !== userId.toString()
+            );
+            if (group.members.length === 0) await Group.deleteOne({ _id: group._id });
+            else await group.save();
+        }
+
+        // Stop appearing in anyone else's blocked list or nicknames.
+        await User.updateMany({ blockedUsers: userId }, { $pull: { blockedUsers: userId } });
+        await User.updateMany({}, { $unset: { [`contactNicknames.${userId}`]: "" } });
+
+        await User.deleteOne({ _id: userId });
+
+        res.cookie("jwt", "", { maxAge: 0 });
+        res.status(200).json({ deleted: true });
+    } catch (error) {
+        console.error("Error in deleteAccount:", error.message);
+        res.status(500).json({ message: "Could not delete the account" });
+    }
+};
+
 const checkAuth = (req, res) => {
     try {
         // Return only whitelisted fields — never expose full DB document
@@ -523,4 +591,4 @@ const revokeOtherSessions = async (req, res) => {
     }
 };
 
-export { signup, login, logout, googleAuth, updateProfile, checkAuth, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions };
+export { signup, login, logout, googleAuth, updateProfile, checkAuth, deleteAccount, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions };

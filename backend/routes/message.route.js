@@ -18,7 +18,8 @@ import {
   deleteMessagesBulk,
   cancelScheduledMessage,
   setContactNickname,
-  getBlockedUsers
+  getBlockedUsers,
+  exportChat
 } from "../controllers/message.controller.js";
 // rate limiting removed: middleware import intentionally omitted
 
@@ -26,6 +27,7 @@ const router=express.Router();
 
 router.get('/users',protectRoute,getUsersForSidebar)
 router.get('/blocked',protectRoute,getBlockedUsers)
+router.get('/export/:id',protectRoute,exportChat)
 router.get('/:id',protectRoute,getMessages)
 // per-user message send limiter: 20 messages per 10 seconds (cost=1)
 router.post('/send/:id', protectRoute, sendMessage)

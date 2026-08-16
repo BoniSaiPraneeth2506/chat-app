@@ -1,4 +1,5 @@
-import { Send, LogOut } from "lucide-react";
+import { Send, LogOut, AlertTriangle } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useThemeStore } from '../store/useThemeStore';
 import { useEffect, useState } from 'react';
 import useAuthStore from '../store/useAuthStore';
@@ -80,8 +81,11 @@ const SettingsPage = () => {
     setPrivacyReadReceipts 
   } = useThemeStore();
 
-  const { authUser, logOut } = useAuthStore();
+  const { authUser, logOut, deleteAccount } = useAuthStore();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [deleteDraft, setDeleteDraft] = useState(null); // null = dialog closed
+  const [isDeleting, setIsDeleting] = useState(false);
+  const navigate = useNavigate();
 
   const handleLogoutConfirm = () => {
     setShowLogoutConfirm(false);
@@ -301,7 +305,7 @@ const SettingsPage = () => {
 
         {/* Logout */}
         {authUser && (
-          <div className="pt-6 border-t" style={{ borderColor: 'var(--color-base-300)' }}>
+          <div className="flex flex-wrap items-center gap-3 pt-6 border-t" style={{ borderColor: 'var(--color-base-300)' }}>
             <button
               onClick={() => setShowLogoutConfirm(true)}
               className="flex items-center gap-2 px-4 py-2.5 rounded-lg border text-error border-error/40 hover:bg-error/10 transition-colors font-medium text-sm"
@@ -309,11 +313,80 @@ const SettingsPage = () => {
               <LogOut size={16} />
               Log out
             </button>
+            {/* Sits beside Log out but reads as heavier: filled rather than
+                outlined, since it's the one action here that can't be undone. */}
+            <button
+              onClick={() => setDeleteDraft("")}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-error/10 hover:bg-error/20 text-error transition-colors font-medium text-sm"
+            >
+              <AlertTriangle size={16} />
+              Delete my account
+            </button>
           </div>
         )}
       </div>
 
       {/* Logout Confirmation Modal */}
+      {deleteDraft !== null && (
+        <div
+          onClick={() => !isDeleting && setDeleteDraft(null)}
+          className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 backdrop-blur-[2px] p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm p-6 bg-base-100 rounded-2xl shadow-2xl text-left"
+          >
+            <h3 className="text-lg font-semibold text-error">Delete your account?</h3>
+            <p className="mt-2 mb-1 text-sm text-base-content/60">
+              This cannot be undone. Your profile, the messages you sent and their photos are
+              permanently removed, and you leave every group.
+            </p>
+            <p className="mb-5 text-xs text-base-content/40">
+              Messages other people sent you stay in their own chat history.
+            </p>
+
+            <input
+              autoFocus
+              type="password"
+              value={deleteDraft}
+              onChange={(e) => setDeleteDraft(e.target.value)}
+              placeholder="Enter your password"
+              className="w-full h-12 px-1 text-[15px] bg-transparent border-0 border-b border-base-content/15 rounded-none text-base-content placeholder:text-base-content/30 outline-none transition-colors focus:border-error focus:ring-0"
+            />
+            <p className="mt-2 text-[11px] text-base-content/35">
+              Signed in with Google and never set a password? Type DELETE instead.
+            </p>
+
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setDeleteDraft(null)}
+                className="h-10 px-4 rounded-xl bg-base-300/70 hover:bg-base-300 text-[13px] font-medium text-base-content transition-colors disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting || !deleteDraft.trim()}
+                onClick={async () => {
+                  setIsDeleting(true);
+                  const ok = await deleteAccount({ password: deleteDraft, confirm: deleteDraft });
+                  setIsDeleting(false);
+                  if (ok) {
+                    setDeleteDraft(null);
+                    navigate("/login", { replace: true });
+                  }
+                }}
+                className="h-10 px-5 rounded-xl bg-error text-error-content text-[13px] font-semibold transition-transform active:scale-[0.97] disabled:opacity-40"
+              >
+                {isDeleting ? "Deleting…" : "Delete forever"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showLogoutConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-base-100 border border-base-300 p-6 rounded-2xl w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-200 text-left mx-4">

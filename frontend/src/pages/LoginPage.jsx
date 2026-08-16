@@ -249,7 +249,7 @@ import { SocialLogin } from "@capgo/capacitor-social-login";
 
 const GOOGLE_WEB_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 
-const LoginPage = () => {
+const LoginPage = ({ isAddingAccount = false }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [view, setView] = useState("login");
@@ -355,15 +355,27 @@ const LoginPage = () => {
                 <MessageSquare className="w-6 h-6 text-primary" />
               </div>
               <h1 className="mt-2 text-2xl font-bold">
-                {view === "login" ? "Welcome Back" : view === "forgot" ? "Forgot Password" : "Reset Password"}
+                {view !== "login"
+                  ? view === "forgot" ? "Forgot Password" : "Reset Password"
+                  : isAddingAccount ? "Add another account" : "Welcome Back"}
               </h1>
               <p className="text-base-content/60">
                 {view === "login"
-                  ? "Sign in to your account"
+                  ? isAddingAccount
+                    ? "Your current account stays signed in — switch between them any time."
+                    : "Sign in to your account"
                   : view === "forgot"
                     ? "Enter your email to receive a reset code"
                     : "Enter the code and choose a new password"}
               </p>
+              {isAddingAccount && view === "login" && (
+                <Link
+                  to="/"
+                  className="mt-3 text-xs font-medium text-primary hover:underline"
+                >
+                  Cancel and go back
+                </Link>
+              )}
             </div>
           </div>
 

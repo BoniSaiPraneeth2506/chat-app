@@ -3,6 +3,7 @@ import Message from "../models/message.model.js";
 import User from "../models/user.model.js";
 import cloudinary from "../lib/cloudinary.js";
 import { io, getReceiverSocketId } from "../lib/socket.js";
+import crypto from "crypto";
 import { canDo, canManagePermissions, sanitizePermissions } from "../lib/groupPermissions.js";
 
 // Helper: Check user's role in a group
@@ -458,7 +459,7 @@ export const closeGroupPoll = async (req, res) => {
 export const sendGroupMessage = async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { text, image, images, voice, replyTo } = req.body;
+    const { text, image, images, voice, replyTo, mentions, voiceTranscript } = req.body;
     const senderId = req.user._id;
 
     const group = await Group.findById(groupId);
@@ -472,6 +473,14 @@ export const sendGroupMessage = async (req, res) => {
     if (!canDo(group, senderId, "sendMessages")) {
       return res.status(403).json({ message: "Only admins and moderators can send messages in this group" });
     }
+
+    // Only real members can be mentioned — otherwise a client could make any
+    // user id light up as "mentioned you" in a group they aren't in.
+    const memberIds = new Set(group.members.map((m) => (m.user?._id || m.user).toString()));
+    const validMentions = Array.isArray(mentions)
+      ? [...new Set(mentions.map(String))].filter((id) => memberIds.has(id))
+      : [];
+
 
     let imageUrl = "";
     if (image && image.startsWith("data:image")) {
@@ -511,6 +520,8 @@ export const sendGroupMessage = async (req, res) => {
       images: uploadedImages,
       voice: voiceUrl,
       replyTo: replyTo || null,
+      mentions: validMentions,
+      voiceTranscript: typeof voiceTranscript === "string" ? voiceTranscript.slice(0, 2000) : "",
     });
 
     await newMessage.save();
@@ -526,5 +537,134 @@ export const sendGroupMessage = async (req, res) => {
   } catch (error) {
     console.error("Error sending group message:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+// ── Invite links ─────────────────────────────────────────────────────────────
+
+/** URL-safe, unguessable, and short enough to share by hand. */
+const newInviteCode = () => crypto.randomBytes(9).toString("base64url");
+
+/**
+ * Creates or replaces the group's invite code.
+ *
+ * Regenerating is how revoking works: the old code stops resolving the moment
+ * it is overwritten, so a link that has leaked can be killed without touching
+ * the members who already joined with it.
+ */
+export const createGroupInvite = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user._id;
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ message: "Group not found" });
+
+    // Handing out a join link is effectively adding members, so it follows the
+    // same permission rather than inventing a second, looser rule.
+    if (!canDo(group, userId, "addMembers")) {
+      return res.status(403).json({ message: "You don't have permission to invite people" });
+    }
+
+    group.inviteCode = newInviteCode();
+    group.inviteCreatedBy = userId;
+    group.inviteCreatedAt = new Date();
+    await group.save();
+
+    res.status(200).json({
+      inviteCode: group.inviteCode,
+      inviteCreatedAt: group.inviteCreatedAt,
+    });
+  } catch (error) {
+    console.error("Error in createGroupInvite:", error.message);
+    res.status(500).json({ message: "Could not create an invite link" });
+  }
+};
+
+/** Removes the link entirely — no code, no joining. */
+export const revokeGroupInvite = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user._id;
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ message: "Group not found" });
+    if (!canDo(group, userId, "addMembers")) {
+      return res.status(403).json({ message: "You don't have permission to manage invites" });
+    }
+
+    group.inviteCode = undefined;
+    group.inviteCreatedBy = undefined;
+    group.inviteCreatedAt = undefined;
+    await group.save();
+
+    res.status(200).json({ revoked: true });
+  } catch (error) {
+    console.error("Error in revokeGroupInvite:", error.message);
+    res.status(500).json({ message: "Could not revoke the invite link" });
+  }
+};
+
+/** Public preview so someone can see what they are joining before committing. */
+export const previewGroupInvite = async (req, res) => {
+  try {
+    const { code } = req.params;
+    const group = await Group.findOne({ inviteCode: code }).select(
+      "name description groupPic members"
+    );
+    if (!group) return res.status(404).json({ message: "This invite link is no longer valid" });
+
+    const alreadyMember = group.members.some(
+      (m) => (m.user?._id || m.user).toString() === req.user._id.toString()
+    );
+
+    res.status(200).json({
+      _id: group._id,
+      name: group.name,
+      description: group.description,
+      groupPic: group.groupPic,
+      memberCount: group.members.length,
+      alreadyMember,
+    });
+  } catch (error) {
+    console.error("Error in previewGroupInvite:", error.message);
+    res.status(500).json({ message: "Could not load this invite" });
+  }
+};
+
+export const joinGroupByInvite = async (req, res) => {
+  try {
+    const { code } = req.params;
+    const userId = req.user._id;
+
+    const group = await Group.findOne({ inviteCode: code });
+    if (!group) return res.status(404).json({ message: "This invite link is no longer valid" });
+
+    const alreadyMember = group.members.some(
+      (m) => (m.user?._id || m.user).toString() === userId.toString()
+    );
+    if (!alreadyMember) {
+      group.members.push({ user: userId, role: "member", joinedAt: new Date() });
+      await group.save();
+    }
+
+    const populated = await Group.findById(group._id).populate(
+      "members.user",
+      "fullName email profilePic bio lastSeen"
+    );
+
+    // Tell the room so existing members see the new arrival without a refetch,
+    // and the joiner's own session gets the group added to their list.
+    if (!alreadyMember) {
+      io.to(`group_${group._id.toString()}`).emit("groupUpdated", populated);
+      const joinerSocketId = getReceiverSocketId(userId.toString());
+      if (joinerSocketId) io.to(joinerSocketId).emit("groupCreated", populated);
+    }
+
+    res.status(200).json({ group: populated, alreadyMember });
+  } catch (error) {
+    console.error("Error in joinGroupByInvite:", error.message);
+    res.status(500).json({ message: "Could not join this group" });
   }
 };

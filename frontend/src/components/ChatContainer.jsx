@@ -663,7 +663,7 @@ const ChatContainer = () => {
         {message.voice && <VoiceNote src={message.voice} />}
         {message.text && (
           <div className="text-sm leading-loose break-words pr-10 select-text">
-            <p>{highlightText(message.text, messageSearchQuery)}</p>
+            <p>{renderWithMentions(message, highlightText(message.text, messageSearchQuery))}</p>
             {(() => {
               const urls = message.text.match(URL_REGEX);
               if (!urls) return null;
@@ -717,6 +717,36 @@ const ChatContainer = () => {
     if (fromList) return fromList;
     const member = selectedGroup?.members?.find((m) => (m.user?._id || m.user) === id);
     return member?.user || null;
+  };
+
+  // Highlights "@Name" for people actually recorded in message.mentions, so a
+  // literal "@someone" in prose is never styled as if it notified anyone.
+  // Falls back to the already-highlighted search output when there's nothing
+  // to mark, keeping in-chat search working unchanged.
+  const renderWithMentions = (message, fallback) => {
+    const ids = message.mentions || [];
+    if (ids.length === 0 || !message.text) return fallback;
+    if (messageSearchQuery) return fallback; // don't fight the search highlighter
+
+    const names = ids
+      .map((id) => resolveReactor(id)?.fullName)
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length); // longest first, so "Sai Praneeth" wins over "Sai"
+    if (names.length === 0) return fallback;
+
+    const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const pattern = new RegExp(`@(?:${escaped.join("|")})`, "g");
+    const parts = message.text.split(pattern);
+    const hits = message.text.match(pattern) || [];
+
+    return parts.flatMap((part, i) => [
+      part,
+      hits[i] ? (
+        <span key={`m-${i}`} className="font-semibold text-primary">
+          {hits[i]}
+        </span>
+      ) : null,
+    ]);
   };
 
   const renderReactions = (message) => {

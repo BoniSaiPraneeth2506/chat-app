@@ -40,6 +40,11 @@ export function buildChatLink(userId) {
   return `${getPublicAppUrl()}/chat-with/${userId}`;
 }
 
+/** The shareable link that lets someone join a group (see /join/:code). */
+export function buildInviteLink(code) {
+  return `${getPublicAppUrl()}/join/${code}`;
+}
+
 /**
  * Pulls a user id out of a scanned QR payload. Accepts a full chat link, a
  * bare `/chat-with/<id>` path, or the raw id itself, so a code produced by

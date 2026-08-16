@@ -58,6 +58,13 @@
 .cg-chip      { animation: cg-chip-in 160ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 .cg-check     { animation: cg-check-in 160ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 
+/* Account switch: the panel settles in rather than popping. */
+@keyframes cg-switch-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.cg-switch { animation: cg-switch-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
 /* Horizontal chip strip: scrollable without a visible scrollbar. */
 .cg-scroll-x {
   scrollbar-width: none;
@@ -66,7 +73,7 @@
 .cg-scroll-x::-webkit-scrollbar { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  .cg-fade, .cg-sheet, .cg-dialog,
+  .cg-fade, .cg-sheet, .cg-dialog, .cg-switch,
   .cg-step, .cg-step-back, .cg-chip, .cg-check {
     animation-duration: 1ms;
     animation-delay: 0ms;

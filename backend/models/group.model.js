@@ -52,6 +52,21 @@ const groupSchema = new mongoose.Schema(
       editInfo: { type: String, enum: ["everyone", "admins"] },
       startCalls: { type: String, enum: ["everyone", "admins"] },
     },
+    // Shareable join link. Absent until an admin generates one, and replaced
+    // wholesale when revoked so an old link can never work again. Indexed
+    // sparsely because most groups will never have one.
+    inviteCode: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    inviteCreatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    inviteCreatedAt: {
+      type: Date,
+    },
     activeCall: {
       isActive: { type: Boolean, default: false },
       type: { type: String, enum: ["voice", "video"] },

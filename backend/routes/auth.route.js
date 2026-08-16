@@ -1,5 +1,5 @@
 import express from "express";
-import { checkAuth, login, logout, signup, googleAuth, updateProfile, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions } from "../controllers/auth.controller.js";
+import { checkAuth, login, logout, signup, googleAuth, updateProfile, deleteAccount, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions } from "../controllers/auth.controller.js";
 import protectRoute from "../middlewares/auth.middleware.js";
 const router=express.Router();
 
@@ -18,6 +18,8 @@ router.post('/reset-password', resetPassword)
 router.put('/update-profile',protectRoute,updateProfile)
 
 router.get('/check',protectRoute,checkAuth)
+
+router.delete('/account',protectRoute,deleteAccount)
 
 router.get('/sessions',protectRoute,getSessions)
 

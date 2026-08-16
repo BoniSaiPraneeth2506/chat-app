@@ -13,15 +13,23 @@ import {
   createGroupPoll,
   voteGroupPoll,
   closeGroupPoll,
+  createGroupInvite,
+  revokeGroupInvite,
+  previewGroupInvite,
+  joinGroupByInvite,
 } from "../controllers/group.controller.js";
 
 const router = express.Router();
 
 router.post("/", protectRoute, createGroup);
 router.get("/", protectRoute, getUserGroups);
+router.get("/invite/:code", protectRoute, previewGroupInvite);
+router.post("/invite/:code/join", protectRoute, joinGroupByInvite);
 router.get("/:groupId", protectRoute, getGroupDetails);
 router.put("/:groupId", protectRoute, updateGroup);
 router.post("/:groupId/members", protectRoute, addGroupMembers);
+router.post("/:groupId/invite", protectRoute, createGroupInvite);
+router.delete("/:groupId/invite", protectRoute, revokeGroupInvite);
 router.delete("/:groupId/members/:memberId", protectRoute, removeGroupMember);
 router.put("/:groupId/roles", protectRoute, updateMemberRole);
 router.get("/:groupId/messages", protectRoute, getGroupMessages);

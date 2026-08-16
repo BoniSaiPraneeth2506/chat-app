@@ -2,7 +2,11 @@ import { useState } from "react";
 import { useGroupStore } from "../store/useGroupStore";
 import { useChatStore } from "../store/useChatStore";
 import useAuthStore from "../store/useAuthStore";
-import { GROUP_PERMISSIONS, levelFor } from "../lib/groupPermissions";
+import toast from "react-hot-toast";
+import { GROUP_PERMISSIONS, levelFor, canDo } from "../lib/groupPermissions";
+import { buildInviteLink } from "../lib/utils";
+
+const sectionLabel = "text-[11px] font-semibold uppercase tracking-wider text-base-content/40 px-1";
 import {
   X,
   Users,
@@ -28,6 +32,8 @@ const GroupDetailsModal = () => {
     addGroupMembers,
     removeGroupMember,
     updateMemberRole,
+    createGroupInvite,
+    revokeGroupInvite,
   } = useGroupStore();
 
   const { users } = useChatStore();
@@ -40,6 +46,7 @@ const GroupDetailsModal = () => {
   const [showAddMembers, setShowAddMembers] = useState(false);
   const [selectedNewMembers, setSelectedNewMembers] = useState([]);
   const [isUpdatingGroup, setIsUpdatingGroup] = useState(false);
+  const [isInviteBusy, setIsInviteBusy] = useState(false);
 
   if (!isGroupDetailsModalOpen || !selectedGroup) return null;
 
@@ -385,6 +392,78 @@ const GroupDetailsModal = () => {
               })}
             </div>
           </div>
+
+          {/* Invite link — gated on the same permission as adding members,
+              since handing out a join link is that same act by another route. */}
+          {canDo(selectedGroup, currentUserRole, "addMembers") && (
+            <div className="space-y-2">
+              <span className={sectionLabel}>Invite link</span>
+              <div className="rounded-2xl bg-base-200 p-4 space-y-3">
+                {selectedGroup.inviteCode ? (
+                  <>
+                    <p className="text-[11px] text-base-content/50 break-all select-all">
+                      {buildInviteLink(selectedGroup.inviteCode)}
+                    </p>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(buildInviteLink(selectedGroup.inviteCode));
+                            toast.success("Invite link copied");
+                          } catch {
+                            toast.error("Couldn't copy — long-press the link");
+                          }
+                        }}
+                        className="h-10 rounded-xl bg-base-300/70 hover:bg-base-300 text-[12px] font-medium transition-colors"
+                      >
+                        Copy
+                      </button>
+                      <button
+                        disabled={isInviteBusy}
+                        onClick={async () => {
+                          setIsInviteBusy(true);
+                          const code = await createGroupInvite(selectedGroup._id);
+                          setIsInviteBusy(false);
+                          if (code) toast.success("New link created — the old one no longer works");
+                        }}
+                        className="h-10 rounded-xl bg-base-300/70 hover:bg-base-300 text-[12px] font-medium transition-colors disabled:opacity-40"
+                      >
+                        Reset
+                      </button>
+                      <button
+                        disabled={isInviteBusy}
+                        onClick={async () => {
+                          setIsInviteBusy(true);
+                          await revokeGroupInvite(selectedGroup._id);
+                          setIsInviteBusy(false);
+                        }}
+                        className="h-10 rounded-xl bg-error/10 hover:bg-error/20 text-error text-[12px] font-semibold transition-colors disabled:opacity-40"
+                      >
+                        Revoke
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-base-content/50">
+                      Anyone with the link can join. You can reset or revoke it at any time.
+                    </p>
+                    <button
+                      disabled={isInviteBusy}
+                      onClick={async () => {
+                        setIsInviteBusy(true);
+                        await createGroupInvite(selectedGroup._id);
+                        setIsInviteBusy(false);
+                      }}
+                      className="w-full h-11 rounded-xl bg-primary/15 hover:bg-primary/25 text-primary text-[13px] font-semibold transition-colors disabled:opacity-40"
+                    >
+                      Create invite link
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Group permissions — one row per restricted action.
               Visible to admins and moderators so everyone in charge can see

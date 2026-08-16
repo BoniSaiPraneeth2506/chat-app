@@ -54,6 +54,7 @@ import SettingsPage from './pages/SettingsPage'
 import ProfilePage from './pages/ProfilePage'
 import LinkedDevicesPage from './pages/LinkedDevicesPage'
 import BlockedUsersPage from './pages/BlockedUsersPage'
+import JoinGroupPage from './pages/JoinGroupPage'
 import useAuthStore from './store/useAuthStore'
 import { useChatStore } from './store/useChatStore'
 import { Loader, X, MessageSquare, Phone, Info } from 'lucide-react'
@@ -69,6 +70,31 @@ import { App as CapacitorApp } from '@capacitor/app'
 import OfflineBanner from './components/OfflineBanner'
 
 const PENDING_CHAT_KEY = "pendingChatUserId";
+
+/**
+ * The login screen, reachable even while signed in.
+ *
+ * Normally /login bounces an authenticated user home. That made "Add another
+ * account" a dead click: the switcher sends you to /login precisely *because*
+ * you are already signed in. `?add=1` is the explicit opt-out — the existing
+ * session stays saved in the switcher while a second one is signed into.
+ */
+const LoginRoute = ({ authUser }) => {
+  const location = useLocation();
+  const isAddingAccount = new URLSearchParams(location.search).get("add") === "1";
+
+  // Who was signed in when this screen opened. In add mode the guard below
+  // can't simply key off "is anyone signed in" — someone always is — so it
+  // watches for the identity *changing* instead. The moment a different
+  // account signs in, the screen hands off to it, the way switching does.
+  const startedAsRef = React.useRef(authUser?._id ?? null);
+
+  if (authUser && !isAddingAccount) return <Navigate to="/" replace />;
+  if (isAddingAccount && authUser?._id && authUser._id !== startedAsRef.current) {
+    return <Navigate to="/" replace />;
+  }
+  return <LoginPage isAddingAccount={isAddingAccount} />;
+};
 
 const ChatRedirectHandler = () => {
   const { userId } = useParams();
@@ -126,7 +152,8 @@ const PendingChatRedirect = () => {
 };
 
 const App = () => {
-  const { authUser, checkAuth, isCheckingAuth, onlineUsers, socket } = useAuthStore();
+  const { authUser, checkAuth, isCheckingAuth, onlineUsers, socket, switchingTo,
+          accountChooserOpen, closeAccountChooser, savedAccounts, switchAccount } = useAuthStore();
   const { theme } = useThemeStore()
   const { getGroups, subscribeToGroupEvents, unsubscribeFromGroupEvents } = useGroupStore();
   const { 
@@ -275,12 +302,13 @@ const App = () => {
       <NavBar />
       <Routes>
         <Route path='/' element={authUser ? <HomePage /> : <Navigate to='/login' />} />
-        <Route path='/login' element={!authUser ? <LoginPage /> : <Navigate to='/' />} />
+        <Route path='/login' element={<LoginRoute authUser={authUser} />} />
         <Route path='/signup' element={!authUser ? <SignUpPage /> : <Navigate to='/' />} />
         <Route path='/settings' element={authUser ? <SettingsPage /> : <Navigate to='/login' />} />
         <Route path='/profile' element={authUser ? <ProfilePage /> : <Navigate to='/login' />} />
         <Route path='/linked-devices' element={authUser ? <LinkedDevicesPage /> : <Navigate to='/login' />} />
         <Route path='/blocked' element={authUser ? <BlockedUsersPage /> : <Navigate to='/login' />} />
+        <Route path='/join/:code' element={authUser ? <JoinGroupPage /> : <Navigate to='/login' />} />
         <Route path='/chat-with/:userId' element={authUser ? <ChatRedirectHandler /> : <PendingChatRedirect />} />
         <Route path='*' element={<Navigate to='/' />} />
       </Routes>
@@ -394,6 +422,82 @@ const App = () => {
           </div>
         </div>
       )}
+      {/* After logging out with several accounts still saved on this device,
+          pick which one to continue as rather than defaulting to a login form. */}
+      {accountChooserOpen && !authUser && (
+        <div className="fixed inset-0 z-[190] flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm cg-fade sm:p-4">
+          <div className="w-full sm:max-w-sm bg-base-100 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden cg-sheet sm:cg-dialog">
+            <div className="px-6 pt-6 pb-3 text-center">
+              <h3 className="text-lg font-semibold text-base-content">Continue as</h3>
+              <p className="mt-1 text-sm text-base-content/50">
+                {savedAccounts.length === 1
+                  ? "This account is still signed in on this device."
+                  : "These accounts are still signed in on this device."}
+              </p>
+            </div>
+
+            <div className="px-3 pb-2 max-h-[50dvh] overflow-y-auto">
+              {savedAccounts.map((acc) => (
+                <button
+                  key={acc._id}
+                  type="button"
+                  onClick={async () => {
+                    closeAccountChooser();
+                    await switchAccount(acc._id);
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl hover:bg-base-200 active:bg-base-300 transition-colors text-left"
+                >
+                  <img
+                    src={acc.profilePic || "/avatar.png"}
+                    alt=""
+                    className="object-cover rounded-full size-11 flex-shrink-0"
+                  />
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-[15px] font-medium text-base-content truncate">
+                      {acc.fullName}
+                    </span>
+                    <span className="block text-xs text-base-content/45 truncate">{acc.email}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  closeAccountChooser();
+                  navigate("/login", { replace: true });
+                }}
+                className="w-full h-12 rounded-2xl bg-base-300/70 hover:bg-base-300 text-[15px] font-medium text-base-content active:scale-[0.98] transition-all"
+              >
+                Use another account
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Account switch transition.
+          Without it the screen briefly empties — state is cleared before the
+          new session's data arrives — which reads as a glitch rather than a
+          deliberate switch. Showing who you're moving to makes the wait feel
+          intentional and confirms the right account was picked. */}
+      {switchingTo && (
+        <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center gap-4 bg-base-100/95 backdrop-blur-sm cg-fade">
+          <img
+            src={switchingTo.profilePic || "/avatar.png"}
+            alt=""
+            className="object-cover rounded-full size-20 ring-4 ring-primary/25 shadow-xl cg-switch"
+          />
+          <div className="text-center cg-switch">
+            <p className="text-[15px] font-semibold text-base-content">{switchingTo.fullName}</p>
+            <p className="mt-0.5 text-xs text-base-content/45">Switching account…</p>
+          </div>
+          <span className="loading loading-dots loading-sm text-primary" />
+        </div>
+      )}
+
       <CallModal />
       <CreateGroupModal />
       <GroupDetailsModal />
