@@ -173,6 +173,45 @@ const attachUnreadCounts = async (users, me) => {
   return users.map((u) => ({ ...u, unreadCount: countBySender.get(u._id.toString()) || 0 }));
 };
 
+const MAX_NICKNAME_LENGTH = 40;
+
+/**
+ * Sets or clears a private alias for one contact.
+ *
+ * The alias lives on the caller's own user document, so it never touches the
+ * contact's real profile and is invisible to them. Sending an empty string
+ * clears it and falls back to their real name.
+ */
+const setContactNickname = async (req, res) => {
+  try {
+    const { id: contactId } = req.params;
+    const { nickname } = req.body || {};
+    const userId = req.user._id;
+
+    if (contactId === userId.toString()) {
+      return res.status(400).json({ message: "You can't rename yourself here" });
+    }
+
+    const contact = await User.findById(contactId).select("_id");
+    if (!contact) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const cleaned = sanitizeText(String(nickname ?? "")).trim().slice(0, MAX_NICKNAME_LENGTH);
+
+    if (cleaned) {
+      await User.updateOne({ _id: userId }, { $set: { [`contactNicknames.${contactId}`]: cleaned } });
+    } else {
+      await User.updateOne({ _id: userId }, { $unset: { [`contactNicknames.${contactId}`]: "" } });
+    }
+
+    res.status(200).json({ contactId, nickname: cleaned });
+  } catch (error) {
+    console.error("Error in setContactNickname:", error.message);
+    res.status(500).json({ message: "Could not save the nickname" });
+  }
+};
+
 const getUsersForSidebar = async (req, res) => {
   try {
     const { search } = req.query;
@@ -991,4 +1030,5 @@ export {
   viewOneViewMessage,
   deleteMessagesBulk
   ,cancelScheduledMessage
+  ,setContactNickname
 };

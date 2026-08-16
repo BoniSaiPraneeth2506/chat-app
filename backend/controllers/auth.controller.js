@@ -81,6 +81,13 @@ const normalizeSocialLinksForResponse = (socialLinks) => {
   }, {});
 };
 
+/** Mongoose Map (or a lean plain object) to a plain object, always. */
+const mapToObject = (value) => {
+  if (!value) return {};
+  if (value instanceof Map) return Object.fromEntries(value);
+  return typeof value === "object" ? { ...value } : {};
+};
+
 /**
  * Returns a safe, whitelisted subset of a user object for API responses.
  * Prevents internal/sensitive fields from leaking to the client.
@@ -94,6 +101,9 @@ const sanitizeUser = (user) => ({
   bio: user.bio,
   link: user.link,
   socialLinks: normalizeSocialLinksForResponse(user.socialLinks),
+  // Sent as a plain object so the client can index it directly. Only ever
+  // returned for the signed-in user — never for the contacts they list.
+  contactNicknames: mapToObject(user.contactNicknames),
   onlinePrivacy: user.onlinePrivacy,
   blockedUsers: user.blockedUsers || [],
   favorites: user.favorites || [],

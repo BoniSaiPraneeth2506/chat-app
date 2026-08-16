@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useChatStore } from "../store/useChatStore";
-import { Phone, PhoneOff, Video, Mic, MicOff, VideoOff, Minus, Maximize2 } from "lucide-react";
+import { useNicknames, displayNameOf } from "../lib/contacts";
+import { Phone, PhoneOff, Video, Mic, MicOff, VideoOff, Minus, Maximize2, MonitorUp, MonitorX } from "lucide-react";
+import { Capacitor } from "@capacitor/core";
 
 const CallModal = () => {
+  const nicknames = useNicknames();
   const {
     callState,
     callType,
@@ -13,13 +16,20 @@ const CallModal = () => {
     rejectCall,
     endCall,
     isCallMinimized,
-    toggleCallMinimize
+    toggleCallMinimize,
+    isScreenSharing,
+    startScreenShare,
+    stopScreenShare
   } = useChatStore();
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  // getDisplayMedia isn't implemented in Android's WebView, so the control is
+  // hidden on the app rather than shown and failing on tap.
+  const canShareScreen =
+    !Capacitor.isNativePlatform() && typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia;
   const [callDuration, setCallDuration] = useState(0);
 
   // Bind local stream to video element
@@ -171,7 +181,7 @@ const CallModal = () => {
           <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
         </span>
         <span className="text-xs font-semibold tracking-wide">
-          {callPartner?.fullName} • {callState === "connected" ? formatTime(callDuration) : "Ringing..."}
+          {displayNameOf(callPartner, nicknames)} • {callState === "connected" ? formatTime(callDuration) : "Ringing..."}
         </span>
         <div className="flex items-center gap-1.5 ml-2">
           <button
@@ -217,7 +227,7 @@ const CallModal = () => {
           <div className="relative">
             <img
               src={callPartner?.profilePic || "/avatar.png"}
-              alt={callPartner?.fullName}
+              alt={displayNameOf(callPartner, nicknames)}
               className="w-24 h-24 object-cover rounded-full border-4 border-primary/20 shadow-lg"
             />
             {callState === "connected" && (
@@ -227,7 +237,7 @@ const CallModal = () => {
               </span>
             )}
           </div>
-          <h2 className="text-2xl font-bold tracking-wide mt-2">{callPartner?.fullName}</h2>
+          <h2 className="text-2xl font-bold tracking-wide mt-2">{displayNameOf(callPartner, nicknames)}</h2>
           <p className="text-zinc-400 text-sm font-medium uppercase tracking-widest">
             {callState === "ringing" && "Ringing..."}
             {callState === "incoming" && `Incoming ${callType} Call`}
@@ -318,6 +328,22 @@ const CallModal = () => {
                   }`}
                 >
                   {isVideoOff ? <VideoOff className="size-5" /> : <Video className="size-5" />}
+                </button>
+              )}
+
+              {/* Screen share — video calls only: replaceTrack needs an
+                  existing video sender, and a voice call has none. */}
+              {callState === "connected" && callType === "video" && canShareScreen && (
+                <button
+                  onClick={() => (isScreenSharing ? stopScreenShare() : startScreenShare())}
+                  title={isScreenSharing ? "Stop sharing your screen" : "Share your screen"}
+                  className={`p-3.5 rounded-full border transition-all ${
+                    isScreenSharing
+                      ? "bg-primary/25 border-primary text-primary hover:bg-primary/35"
+                      : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700"
+                  }`}
+                >
+                  {isScreenSharing ? <MonitorX className="size-5" /> : <MonitorUp className="size-5" />}
                 </button>
               )}
 

@@ -6,6 +6,7 @@ import User from '../models/user.model.js';
 import Message from '../models/message.model.js';
 import Group from '../models/group.model.js';
 import { isOriginAllowed } from './origins.js';
+import { canDo } from './groupPermissions.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -231,12 +232,30 @@ io.on("connection", async (socket) => {
     });
 
     // ── Group Multi-Peer Call Events (Mesh WebRTC) ───────────────────────────
-    socket.on("startGroupCall", ({ groupId, type, groupName }) => {
+    socket.on("startGroupCall", async ({ groupId, type, groupName }) => {
         // Throttle group call starts: max 3 starts per 10 minutes
         if (!socketAllow(userId, 'startGroupCall', 3, 10 * 60 * 1000)) {
             socket.emit('rateLimited', { action: 'startGroupCall', message: 'Too many group call starts. Try later.' });
             return;
         }
+
+        // Previously unguarded: any member — or anyone who knew a group id —
+        // could start a call for everyone. Now it respects the group's
+        // startCalls permission, and membership is required either way.
+        try {
+            const group = await Group.findById(groupId).select("members permissions isReadOnly");
+            if (!group || !canDo(group, userId, "startCalls")) {
+                socket.emit("groupCallDenied", {
+                    groupId,
+                    message: "You don't have permission to start a call in this group",
+                });
+                return;
+            }
+        } catch (err) {
+            console.error("Error checking group call permission:", err.message);
+            return;
+        }
+
         console.log(`[Group Call] User ${userId} started ${type} call in group ${groupId}`);
         // initialize runtime call state
         activeGroupCalls.set(groupId, {

@@ -75,7 +75,8 @@
 // };
 // export default ChatHeader;
 
-import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image, CheckSquare, Users, Info, Mic, MicOff, Maximize2, CornerUpLeft, Pin, Trash2, Forward, Pencil } from "lucide-react";
+import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image, CheckSquare, Users, Info, Mic, MicOff, Maximize2, CornerUpLeft, Pin, Trash2, Forward, Pencil, Tag } from "lucide-react";
+import { useNicknames, displayNameOf, hasNickname } from "../lib/contacts";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
@@ -117,6 +118,7 @@ const ChatHeader = () => {
     typingUsers,
     startCall,
     toggleBlockUser,
+    setContactNickname,
     setConversationWallpaper,
     setLightboxImage,
     isSelectionMode,
@@ -141,6 +143,9 @@ const ChatHeader = () => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const { callState, localStream, isScreenSharing, toggleLocalMute, toggleScreenShare } = useChatStore();
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
+  const [nicknameDraft, setNicknameDraft] = useState(null); // null = dialog closed
+  const nicknames = useNicknames();
+  const contactName = displayNameOf(selectedUser, nicknames);
   const [pendingWallpaper, setPendingWallpaper] = useState(null);
   const [dimLevel, setDimLevel] = useState(35);
 
@@ -330,14 +335,14 @@ const ChatHeader = () => {
                   className="avatar hover:opacity-80 transition-opacity cursor-zoom-in"
                 >
                   <div className="relative rounded-full size-10">
-                    <img src={selectedUser?.profilePic || "/avatar.png"} alt={selectedUser?.fullName} />
+                    <img src={selectedUser?.profilePic || "/avatar.png"} alt={contactName} />
                   </div>
                 </div>
 
                 {/* User Info */}
                 <div className="text-left select-none">
                   <h3 className="font-medium group-hover:text-primary transition-colors flex items-center gap-1.5">
-                    {selectedUser?.fullName}
+                    {contactName}
                     {authUser?.disappearingTimers?.[selectedUser?._id] && authUser?.disappearingTimers?.[selectedUser?._id] !== "off" && (
                       <Clock className="size-3 text-zinc-400" title={`Disappearing messages: ${authUser.disappearingTimers[selectedUser._id]}`} />
                     )}
@@ -549,6 +554,20 @@ const ChatHeader = () => {
                     <li>
                       <button
                         onClick={() => {
+                          setNicknameDraft(nicknames[selectedUser._id] || "");
+                          document.activeElement.blur();
+                        }}
+                        className="flex items-center gap-2 py-1.5 px-3 rounded-lg text-xs hover:bg-base-200 transition-colors w-full text-left"
+                      >
+                        <Tag size={14} />
+                        <span>
+                          {hasNickname(selectedUser, nicknames) ? "Edit nickname" : "Add nickname"}
+                        </span>
+                      </button>
+                    </li>
+                    <li>
+                      <button
+                        onClick={() => {
                           if (authUser?.blockedUsers?.includes(selectedUser?._id)) {
                             toggleBlockUser(selectedUser._id);
                           } else {
@@ -593,11 +612,79 @@ const ChatHeader = () => {
         </div>
       )}
 
+      {/* Nickname Dialog — private rename, only ever visible to you */}
+      {nicknameDraft !== null && (
+        <div
+          onClick={() => setNicknameDraft(null)}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-[1.5px] p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm p-6 bg-base-100 rounded-2xl shadow-2xl text-left"
+          >
+            <h3 className="text-lg font-semibold text-base-content">Nickname</h3>
+            <p className="mt-1 mb-5 text-sm text-base-content/55">
+              Only you see this. {selectedUser?.fullName} keeps their real name everywhere else,
+              and is never told.
+            </p>
+
+            <input
+              autoFocus
+              type="text"
+              maxLength={40}
+              value={nicknameDraft}
+              onChange={(e) => setNicknameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  setContactNickname(selectedUser._id, nicknameDraft);
+                  setNicknameDraft(null);
+                }
+              }}
+              placeholder={selectedUser?.fullName || "Nickname"}
+              className="w-full h-12 px-1 text-[15px] bg-transparent border-0 border-b border-base-content/15 rounded-none text-base-content placeholder:text-base-content/30 outline-none transition-colors focus:border-primary focus:ring-0"
+            />
+
+            <div className="flex items-center justify-between gap-3 mt-6">
+              <button
+                type="button"
+                onClick={() => {
+                  setContactNickname(selectedUser._id, "");
+                  setNicknameDraft(null);
+                }}
+                disabled={!hasNickname(selectedUser, nicknames)}
+                className="text-[13px] font-medium text-error disabled:opacity-30 disabled:cursor-default"
+              >
+                Remove
+              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNicknameDraft(null)}
+                  className="h-10 px-4 rounded-xl bg-base-300/70 hover:bg-base-300 text-[13px] font-medium text-base-content transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setContactNickname(selectedUser._id, nicknameDraft);
+                    setNicknameDraft(null);
+                  }}
+                  className="h-10 px-5 rounded-xl bg-primary text-primary-content text-[13px] font-semibold transition-transform active:scale-[0.97]"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Block Confirmation Modal */}
       {showBlockConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[1.5px] animate-in fade-in duration-200">
           <div className="bg-base-100 p-6 rounded-2xl border border-base-300 shadow-2xl max-w-sm w-full mx-4 animate-in zoom-in-95 duration-200 text-left">
-            <h3 className="font-bold text-lg text-base-content mb-2">Block {selectedUser?.fullName}?</h3>
+            <h3 className="font-bold text-lg text-base-content mb-2">Block {contactName}?</h3>
             <p className="text-sm text-base-content/70 mb-6">Are you sure you want to block this user? You will not be able to send or receive messages from them.</p>
             <div className="flex justify-end gap-3">
               <button 

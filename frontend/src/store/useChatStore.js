@@ -133,6 +133,79 @@ export const useChatStore = create((set, get) => ({
   peerConnection: null,
   incomingSignal: null,
   setPeerConnection: (pc) => set({ peerConnection: pc }),
+
+  isScreenSharing: false,
+  screenStream: null,
+
+  /**
+   * Swap the outgoing camera track for the screen.
+   *
+   * Uses `replaceTrack` on the existing video sender, so there is no
+   * renegotiation and the other side needs no new code — the same track just
+   * starts carrying different pixels. That's also why this is offered on video
+   * calls only: a voice call has no video sender to replace, and adding one
+   * would require a fresh offer/answer round trip.
+   *
+   * Not available on Android: `getDisplayMedia` isn't implemented in the
+   * WebView, so the UI hides the control there rather than failing on tap.
+   */
+  startScreenShare: async () => {
+    const { peerConnection, callState, callType, isScreenSharing } = get();
+    if (isScreenSharing || callState !== "connected" || callType !== "video") return false;
+    if (!peerConnection || !navigator.mediaDevices?.getDisplayMedia) {
+      toast.error("Screen sharing isn't supported on this device");
+      return false;
+    }
+
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      });
+      const screenTrack = screenStream.getVideoTracks()[0];
+      const sender = peerConnection.getSenders().find((s) => s.track?.kind === "video");
+
+      if (!sender || !screenTrack) {
+        screenStream.getTracks().forEach((t) => t.stop());
+        toast.error("Couldn't start screen sharing");
+        return false;
+      }
+
+      await sender.replaceTrack(screenTrack);
+
+      // The browser's own "Stop sharing" bar ends the track without telling
+      // our UI, so restore the camera when that happens.
+      screenTrack.onended = () => get().stopScreenShare();
+
+      set({ isScreenSharing: true, screenStream });
+      return true;
+    } catch (err) {
+      // Dismissing the picker rejects with NotAllowedError — not an error worth
+      // showing.
+      if (err?.name !== "NotAllowedError") {
+        console.error("Screen share failed:", err);
+        toast.error("Couldn't start screen sharing");
+      }
+      return false;
+    }
+  },
+
+  stopScreenShare: async () => {
+    const { peerConnection, localStream, screenStream, isScreenSharing } = get();
+    if (!isScreenSharing) return;
+
+    try {
+      const cameraTrack = localStream?.getVideoTracks?.()[0];
+      const sender = peerConnection?.getSenders?.().find((s) => s.track?.kind === "video");
+      // If the call ended mid-share there may be nothing left to restore to.
+      if (sender && cameraTrack) await sender.replaceTrack(cameraTrack);
+    } catch (err) {
+      console.error("Failed to restore camera after screen share:", err);
+    } finally {
+      screenStream?.getTracks?.().forEach((t) => t.stop());
+      set({ isScreenSharing: false, screenStream: null });
+    }
+  },
   toggleCallMinimize: () => set((state) => ({ isCallMinimized: !state.isCallMinimized })),
 
   pinnedMessage: null,
@@ -769,6 +842,12 @@ export const useChatStore = create((set, get) => ({
           peerConnection.close();
         } catch (e) {}
       }
+      const sharedScreen = get().screenStream;
+      if (sharedScreen) {
+        // A screen capture keeps the browser's "sharing" indicator up until
+        // its tracks are stopped, even after the call is gone.
+        sharedScreen.getTracks().forEach((track) => track.stop());
+      }
       if (localStream) {
         try {
           localStream.getTracks().forEach((track) => track.stop());
@@ -776,6 +855,8 @@ export const useChatStore = create((set, get) => ({
       }
       set({
         callState: null,
+        isScreenSharing: false,
+        screenStream: null,
         callType: null,
         callPartner: null,
         localStream: null,
@@ -1065,6 +1146,40 @@ export const useChatStore = create((set, get) => ({
       toast.success('Scheduled message cancelled');
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to cancel scheduled message');
+    }
+  },
+
+  // Private rename for one contact. Lives on the signed-in user's own record,
+  // so it follows the account across devices and is invisible to the contact.
+  // Passing an empty string clears it and restores their real name.
+  setContactNickname: async (contactId, nickname) => {
+    const authUser = useAuthStore.getState().authUser;
+    if (!authUser) return false;
+
+    const previous = authUser.contactNicknames || {};
+    const trimmed = String(nickname || "").trim();
+
+    // Optimistic: renaming should feel instant, and the failure path below
+    // puts the old value back.
+    const optimistic = { ...previous };
+    if (trimmed) optimistic[contactId] = trimmed;
+    else delete optimistic[contactId];
+    useAuthStore.setState({ authUser: { ...authUser, contactNicknames: optimistic } });
+
+    try {
+      await axiosInstance.post(`/messages/nickname/${contactId}`, { nickname: trimmed });
+      toast.success(trimmed ? "Nickname saved" : "Nickname removed");
+      return true;
+    } catch (error) {
+      useAuthStore.setState({
+        authUser: { ...useAuthStore.getState().authUser, contactNicknames: previous },
+      });
+      toast.error(
+        isNetworkError(error)
+          ? "You're offline — nickname not saved"
+          : error.response?.data?.message || "Could not save the nickname"
+      );
+      return false;
     }
   },
 

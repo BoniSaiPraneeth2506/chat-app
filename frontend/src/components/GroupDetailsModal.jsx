@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useGroupStore } from "../store/useGroupStore";
 import { useChatStore } from "../store/useChatStore";
 import useAuthStore from "../store/useAuthStore";
+import { GROUP_PERMISSIONS, levelFor } from "../lib/groupPermissions";
 import {
   X,
   Users,
@@ -38,6 +39,7 @@ const GroupDetailsModal = () => {
   const [groupPic, setGroupPic] = useState("");
   const [showAddMembers, setShowAddMembers] = useState(false);
   const [selectedNewMembers, setSelectedNewMembers] = useState([]);
+  const [isUpdatingGroup, setIsUpdatingGroup] = useState(false);
 
   if (!isGroupDetailsModalOpen || !selectedGroup) return null;
 
@@ -62,10 +64,17 @@ const GroupDetailsModal = () => {
     setIsEditing(false);
   };
 
-  const handleToggleReadOnly = async () => {
-    await updateGroup(selectedGroup._id, {
-      isReadOnly: !selectedGroup.isReadOnly,
-    });
+  // Sends only the one key being changed; the server merges it over whatever
+  // is already stored, so two admins editing different rows can't clobber
+  // each other.
+  const handleSetPermission = async (key, level) => {
+    if (levelFor(selectedGroup, key) === level) return;
+    setIsUpdatingGroup(true);
+    try {
+      await updateGroup(selectedGroup._id, { permissions: { [key]: level } });
+    } finally {
+      setIsUpdatingGroup(false);
+    }
   };
 
   const handleAddMembersSubmit = async () => {
@@ -88,35 +97,37 @@ const GroupDetailsModal = () => {
   return (
     <div
       onClick={() => setIsGroupDetailsModalOpen(false)}
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/65 backdrop-blur-[2px] cg-fade sm:p-4"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg bg-base-100 border border-base-300 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200"
+        className="w-full sm:max-w-lg h-[92dvh] sm:h-auto sm:max-h-[88dvh] bg-base-100 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col cg-sheet sm:cg-dialog"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-base-300 bg-base-200/50">
-          <div className="flex items-center gap-2">
-            <Users className="size-5 text-primary" />
-            <h3 className="font-bold text-lg">Group Details & Settings</h3>
-          </div>
+        <div className="sm:hidden pt-2.5 pb-1 flex justify-center flex-shrink-0">
+          <span className="w-9 h-1 rounded-full bg-base-content/20" />
+        </div>
+        <div className="flex items-center gap-3 px-5 pt-2 pb-3 flex-shrink-0">
           <button
             onClick={() => setIsGroupDetailsModalOpen(false)}
-            className="btn btn-sm btn-ghost btn-circle"
+            data-modal-close
+            className="p-2 -ml-2 rounded-full text-base-content/70 hover:text-base-content hover:bg-base-200 active:scale-95 transition-all"
+            aria-label="Close"
           >
-            <X size={18} />
+            <X size={20} />
           </button>
+          <h3 className="font-semibold text-[17px] text-base-content">Group info</h3>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto px-5 pb-6 space-y-6">
           {/* Group Overview Banner */}
           <div className="flex flex-col items-center justify-center gap-3 text-center">
             <div className="relative group">
               <img
                 src={groupPic || selectedGroup.groupPic || "/avatar.png"}
                 alt={selectedGroup.name}
-                className="w-24 h-24 rounded-full object-cover border-4 border-primary/20 shadow-md"
+                className="w-24 h-24 rounded-full object-cover ring-4 ring-base-200 shadow-lg"
               />
               {isAdminOrMod && isEditing && (
                 <label className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center cursor-pointer text-white">
@@ -164,14 +175,14 @@ const GroupDetailsModal = () => {
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="input input-sm input-bordered w-full font-bold text-center"
+                  className="w-full h-11 px-1 text-center font-semibold text-[15px] bg-transparent border-0 border-b border-base-content/15 rounded-none outline-none transition-colors focus:border-primary focus:ring-0"
                   placeholder="Group Name"
                   required
                 />
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="textarea textarea-sm textarea-bordered w-full resize-none text-center"
+                  className="w-full px-1 py-2 text-center text-[14px] bg-transparent border-0 border-b border-base-content/15 rounded-none resize-none outline-none transition-colors focus:border-primary focus:ring-0"
                   placeholder="Group Description"
                 />
                 <div className="flex items-center justify-center gap-2">
@@ -190,33 +201,6 @@ const GroupDetailsModal = () => {
             )}
           </div>
 
-          {/* Admin Permissions & Read-Only Toggle */}
-          {isAdminOrMod && (
-            <div className="bg-base-200/50 border border-base-300 rounded-xl p-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {selectedGroup.isReadOnly ? (
-                  <Lock className="size-5 text-amber-500" />
-                ) : (
-                  <Unlock className="size-5 text-green-500" />
-                )}
-                <div>
-                  <h4 className="text-sm font-semibold">Read-Only Mode</h4>
-                  <p className="text-xs text-base-content/60">
-                    {selectedGroup.isReadOnly
-                      ? "Only Admins and Moderators can send messages"
-                      : "All members can send messages"}
-                  </p>
-                </div>
-              </div>
-              <input
-                type="checkbox"
-                checked={selectedGroup.isReadOnly || false}
-                onChange={handleToggleReadOnly}
-                className="toggle toggle-primary toggle-sm"
-              />
-            </div>
-          )}
-
           {/* Members List Header & Add Member Button */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -227,7 +211,7 @@ const GroupDetailsModal = () => {
               {isAdminOrMod && (
                 <button
                   onClick={() => setShowAddMembers(!showAddMembers)}
-                  className="btn btn-xs btn-outline btn-primary gap-1"
+                  className="flex items-center gap-1 px-3 h-8 rounded-xl bg-primary/15 hover:bg-primary/25 text-primary text-[11px] font-semibold transition-colors active:scale-95"
                 >
                   <Plus size={14} /> Add Members
                 </button>
@@ -236,7 +220,7 @@ const GroupDetailsModal = () => {
 
             {/* Add New Members Panel */}
             {showAddMembers && (
-              <div className="bg-base-200 border border-base-300 rounded-xl p-3 space-y-3 animate-in fade-in duration-150">
+              <div className="rounded-2xl bg-base-200 p-3 space-y-3">
                 <h5 className="text-xs font-bold text-base-content/70">Select contacts to add:</h5>
                 <div className="max-h-36 overflow-y-auto space-y-1">
                   {nonMembers.length === 0 ? (
@@ -286,8 +270,8 @@ const GroupDetailsModal = () => {
             )}
 
             {/* Existing Member List */}
-            <div className="border border-base-300 rounded-xl divide-y divide-base-300 bg-base-100">
-              {selectedGroup.members.map((member) => {
+            <div className="rounded-2xl bg-base-200">
+              {selectedGroup.members.map((member, index) => {
                 const u = member.user;
                 if (!u) return null;
                 const isSelf = u._id?.toString() === authUser?._id?.toString();
@@ -295,7 +279,7 @@ const GroupDetailsModal = () => {
                 return (
                   <div
                     key={u._id}
-                    className="flex items-center justify-between p-3 text-sm hover:bg-base-200/40 transition-colors"
+                    className="flex items-center justify-between p-3 text-sm hover:bg-base-300/40 transition-colors first:rounded-t-2xl last:rounded-b-2xl"
                   >
                     <div className="flex items-center gap-3">
                       <img
@@ -324,10 +308,10 @@ const GroupDetailsModal = () => {
                       <span
                         className={`text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1 ${
                           member.role === "admin"
-                            ? "bg-red-500/10 text-red-500 border border-red-500/20"
+                            ? "bg-red-500/15 text-red-500"
                             : member.role === "moderator"
-                            ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
-                            : "bg-base-200 text-base-content/70"
+                            ? "bg-amber-500/15 text-amber-500"
+                            : "bg-base-300/70 text-base-content/70"
                         }`}
                       >
                         {member.role === "admin" && <ShieldAlert size={12} />}
@@ -337,13 +321,17 @@ const GroupDetailsModal = () => {
 
                       {/* Admin Controls Dropdown for this member */}
                       {isAdmin && !isSelf && (
-                        <div className="dropdown dropdown-end">
+                        <div
+                          className={`dropdown dropdown-end ${
+                            index >= selectedGroup.members.length - 2 ? "dropdown-top" : ""
+                          }`}
+                        >
                           <label tabIndex={0} className="btn btn-ghost btn-xs btn-circle">
                             •••
                           </label>
                           <ul
                             tabIndex={0}
-                            className="dropdown-content z-[1] menu p-2 shadow-xl bg-base-100 border border-base-300 rounded-xl w-44 text-xs space-y-1"
+                            className="dropdown-content z-[1] menu p-2 shadow-2xl bg-base-100 rounded-2xl w-44 text-xs space-y-1"
                           >
                             <li className="menu-title text-[10px]">Set Role</li>
                             {member.role !== "admin" && (
@@ -398,15 +386,65 @@ const GroupDetailsModal = () => {
             </div>
           </div>
 
+          {/* Group permissions — one row per restricted action.
+              Visible to admins and moderators so everyone in charge can see
+              the rules; only admins can change them, which the server enforces
+              independently. */}
+          {isAdminOrMod && (
+            <div className="rounded-2xl bg-base-200 p-4 space-y-3.5">
+              <div className="flex items-center gap-2">
+                {levelFor(selectedGroup, "sendMessages") === "admins" ? (
+                  <Lock className="size-4 text-amber-500" />
+                ) : (
+                  <Unlock className="size-4 text-green-500" />
+                )}
+                <h4 className="text-sm font-semibold">Permissions</h4>
+              </div>
+
+              {GROUP_PERMISSIONS.map(({ key, label, hint }) => {
+                const current = levelFor(selectedGroup, key);
+                return (
+                  <div key={key} className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-base-content truncate">{label}</p>
+                      <p className="text-[10px] text-base-content/50 truncate">{hint}</p>
+                    </div>
+                    <div className="flex rounded-lg bg-base-300/60 p-0.5 flex-shrink-0">
+                      {["everyone", "admins"].map((level) => (
+                        <button
+                          key={level}
+                          type="button"
+                          disabled={!isAdmin || isUpdatingGroup}
+                          onClick={() => handleSetPermission(key, level)}
+                          className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                            current === level
+                              ? "bg-primary text-primary-content"
+                              : "text-base-content/60 hover:text-base-content"
+                          }`}
+                        >
+                          {level === "everyone" ? "Everyone" : "Admins"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {!isAdmin && (
+                <p className="text-[10px] text-base-content/45 pt-1">
+                  Only admins can change these.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Leave Group Action */}
-          <div className="pt-4 border-t border-base-300">
-            <button
-              onClick={() => removeGroupMember(selectedGroup._id, authUser._id)}
-              className="btn btn-outline btn-error btn-sm w-full gap-2"
-            >
-              <LogOut size={16} /> Leave Group
-            </button>
-          </div>
+          <button
+            onClick={() => removeGroupMember(selectedGroup._id, authUser._id)}
+            className="w-full h-12 rounded-2xl bg-error/10 hover:bg-error/15 text-error font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition-all"
+          >
+            <LogOut size={17} /> Leave group
+          </button>
         </div>
       </div>
     </div>

@@ -202,7 +202,11 @@ const ProfilePage = () => {
             </div>
           </div>
 
-          <div className="flex flex-col items-center px-6 pb-6 -mt-16">
+          {/* relative + z-10 so the avatar sits on top of the cover photo.
+              The banner above is positioned, so a static sibling overlapping
+              it gets painted underneath — the cover was slicing across the
+              profile picture. */}
+          <div className="relative z-10 flex flex-col items-center px-6 pb-6 -mt-16">
             <div className="relative">
               <img
                 src={selectedImg || authUser.profilePic || "/avatar.png"}

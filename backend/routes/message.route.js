@@ -16,7 +16,8 @@ import {
   updateChatWallpaper,
   viewOneViewMessage,
   deleteMessagesBulk,
-  cancelScheduledMessage
+  cancelScheduledMessage,
+  setContactNickname
 } from "../controllers/message.controller.js";
 // rate limiting removed: middleware import intentionally omitted
 
@@ -40,5 +41,6 @@ router.post('/delete-bulk',protectRoute,deleteMessagesBulk)
 router.delete('/:id',protectRoute,deleteMessage)
 router.delete('/clear/:id',protectRoute,clearChatHistory)
 router.post('/schedule/cancel/:id', protectRoute, cancelScheduledMessage);
+router.post('/nickname/:id', protectRoute, setContactNickname);
 
 export default router;

@@ -361,6 +361,7 @@ import useAuthStore from "../store/useAuthStore";
 import { useGroupStore } from "../store/useGroupStore";
 import SidebarSkeleton from "./skeletons/SidebarSkeleton";
 import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus } from "lucide-react";
+import { useNicknames, displayNameOf } from "../lib/contacts";
 import { formatMessageTime } from "../lib/utils";
 import toast from "react-hot-toast";
 
@@ -378,6 +379,7 @@ const DoubleCheck = ({ className }) => (
 );
 
 const SideBar = () => {
+  const nicknames = useNicknames();
   const { 
     getUsers, 
     users, 
@@ -825,7 +827,7 @@ const SideBar = () => {
                 >
                   <img
                     src={user.profilePic || "/avatar.png"}
-                    alt={user.fullName}
+                    alt={displayNameOf(user, nicknames)}
                     className="object-cover rounded-full size-12 hover:opacity-90 active:scale-95 transition-all"
                   />
                   {onlineUsers.includes(user._id) && (
@@ -838,7 +840,7 @@ const SideBar = () => {
                   {/* Row 1: Name & Time */}
                   <div className="flex items-center justify-between">
                     <div className="font-medium truncate text-base-content flex items-center gap-1.5 min-w-0">
-                      <span className="truncate">{user.fullName}</span>
+                      <span className="truncate">{displayNameOf(user, nicknames)}</span>
                       {favoriteUsers.includes(user._id) && (
                         <Star className="size-3 text-yellow-500 fill-yellow-500 flex-shrink-0" />
                       )}

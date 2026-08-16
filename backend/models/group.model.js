@@ -40,7 +40,17 @@ const groupSchema = new mongoose.Schema(
     members: [groupMemberSchema],
     isReadOnly: {
       type: Boolean,
-      default: false, // If true, only admin & moderator can send messages
+      default: false, // Legacy: kept in sync with permissions.sendMessages
+    },
+    // Per-action restrictions. Each is "everyone" or "admins" (which includes
+    // moderators). Left undefined the effective value is derived — see
+    // lib/groupPermissions.js — so groups created before this existed keep
+    // behaving exactly as they did.
+    permissions: {
+      sendMessages: { type: String, enum: ["everyone", "admins"] },
+      addMembers: { type: String, enum: ["everyone", "admins"] },
+      editInfo: { type: String, enum: ["everyone", "admins"] },
+      startCalls: { type: String, enum: ["everyone", "admins"] },
     },
     activeCall: {
       isActive: { type: Boolean, default: false },

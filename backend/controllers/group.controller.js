@@ -3,6 +3,7 @@ import Message from "../models/message.model.js";
 import User from "../models/user.model.js";
 import cloudinary from "../lib/cloudinary.js";
 import { io, getReceiverSocketId } from "../lib/socket.js";
+import { canDo, canManagePermissions, sanitizePermissions } from "../lib/groupPermissions.js";
 
 // Helper: Check user's role in a group
 const getUserRole = (group, userId) => {
@@ -115,20 +116,34 @@ export const getGroupDetails = async (req, res) => {
 export const updateGroup = async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { name, description, groupPic, isReadOnly } = req.body;
+    const { name, description, groupPic, isReadOnly, permissions } = req.body;
     const userId = req.user._id;
 
     const group = await Group.findById(groupId);
     if (!group) return res.status(404).json({ message: "Group not found" });
 
-    const role = getUserRole(group, userId);
-    if (!role || (role !== "admin" && role !== "moderator")) {
-      return res.status(403).json({ message: "Only Admins and Moderators can update group settings" });
+    if (!canDo(group, userId, "editInfo")) {
+      return res.status(403).json({ message: "You don't have permission to edit this group" });
     }
 
     if (name !== undefined) group.name = name.trim();
     if (description !== undefined) group.description = description.trim();
-    if (isReadOnly !== undefined) group.isReadOnly = isReadOnly;
+    if (isReadOnly !== undefined) {
+      group.isReadOnly = isReadOnly;
+      // Keep the legacy flag and the new permission from contradicting.
+      group.permissions = { ...(group.permissions || {}), sendMessages: isReadOnly ? "admins" : "everyone" };
+    }
+
+    // Changing the rules themselves is an admin-only act, even where editing
+    // the name or picture has been opened up to everyone.
+    if (permissions !== undefined) {
+      if (!canManagePermissions(group, userId)) {
+        return res.status(403).json({ message: "Only admins can change group permissions" });
+      }
+      const next = sanitizePermissions(permissions, group.permissions || {});
+      group.permissions = { ...(group.permissions || {}), ...next };
+      if (next.sendMessages) group.isReadOnly = next.sendMessages === "admins";
+    }
 
     if (groupPic && groupPic.startsWith("data:image")) {
       const uploadResponse = await cloudinary.uploader.upload(groupPic);
@@ -160,9 +175,8 @@ export const addGroupMembers = async (req, res) => {
     const group = await Group.findById(groupId);
     if (!group) return res.status(404).json({ message: "Group not found" });
 
-    const role = getUserRole(group, userId);
-    if (!role || (role !== "admin" && role !== "moderator")) {
-      return res.status(403).json({ message: "Only Admins and Moderators can add members" });
+    if (!canDo(group, userId, "addMembers")) {
+      return res.status(403).json({ message: "You don't have permission to add members" });
     }
 
     if (!Array.isArray(newMembers) || newMembers.length === 0) {
@@ -455,8 +469,8 @@ export const sendGroupMessage = async (req, res) => {
       return res.status(403).json({ message: "You are not a member of this group" });
     }
 
-    if (group.isReadOnly && userRole === "member") {
-      return res.status(403).json({ message: "Only Admins and Moderators can send messages in this group" });
+    if (!canDo(group, senderId, "sendMessages")) {
+      return res.status(403).json({ message: "Only admins and moderators can send messages in this group" });
     }
 
     let imageUrl = "";

@@ -115,6 +115,16 @@ const userSchema=new mongoose.Schema({
         type:Date,
         default:Date.now
     },
+    // Private per-contact renames, keyed by the other user's id. Only ever
+    // visible to the person who set them — the contact's real fullName is
+    // untouched, and nobody else can see or is notified about the alias.
+    // Stored server-side rather than in localStorage so it follows the account
+    // across devices, unlike favorites/archive.
+    contactNicknames:{
+        type:Map,
+        of:String,
+        default:new Map()
+    },
     // When this user last read each 1-on-1 conversation, keyed by the other
     // user's id. Unread counts were previously held only in browser memory,
     // so they were lost whenever the app was closed or the user logged out —

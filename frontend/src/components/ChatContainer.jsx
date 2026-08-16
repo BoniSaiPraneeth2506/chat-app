@@ -4,6 +4,7 @@ import { useEffect, useRef, useLayoutEffect, useState } from "react";
 import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image, Link2 } from "lucide-react";
 import ForwardModal from "./ForwardModal";
 import SocialLinksRow from "./SocialLinksRow";
+import { useNicknames, displayNameOf } from "../lib/contacts";
 import PollMessage from "./PollMessage";
 import VoiceNote from "./VoiceNote";
 import { useThemeStore } from "../store/useThemeStore";
@@ -376,6 +377,7 @@ const SmoothImage = ({ src, alt, className, onClick }) => {
 };
 
 const ChatContainer = () => {
+  const nicknames = useNicknames();
   const {
     messages,
     getMessages,
@@ -987,7 +989,7 @@ const ChatContainer = () => {
                       className="bg-black/15 dark:bg-white/10 border-l-4 border-primary px-2.5 py-1.5 rounded-r-md text-left mb-2 text-xs cursor-pointer select-none transition-all hover:bg-black/20 dark:hover:bg-white/15"
                     >
                       <span className="text-[10px] font-bold text-primary block mb-0.5">
-                        {message.replyTo.senderId === authUser._id ? "You" : selectedUser?.fullName}
+                        {message.replyTo.senderId === authUser._id ? "You" : displayNameOf(selectedUser, nicknames)}
                       </span>
                       <p className="truncate opacity-80 text-base-content/90 max-w-[200px] sm:max-w-[300px]">
                         {message.replyTo.text || (message.replyTo.image || message.replyTo.images?.length ? "📷 Photo" : message.replyTo.voice ? "🎙️ Voice Message" : "Message")}
@@ -1110,9 +1112,9 @@ const ChatContainer = () => {
 
       {/* Right Column: Recipient Profile Info Sidebar */}
       {isRecipientProfileOpen && (
-        <div className="absolute lg:relative top-0 right-0 z-50 w-full lg:w-80 h-full border-l border-base-300 bg-base-100 flex flex-col shadow-2xl lg:shadow-none animate-in slide-in-from-right duration-200">
+        <div className="absolute lg:relative top-0 right-0 z-50 w-full lg:w-80 h-full bg-base-100 flex flex-col shadow-2xl lg:shadow-none">
           {/* Header */}
-          <div className="p-4 border-b border-base-300 flex items-center justify-between">
+          <div className="px-4 py-3 flex items-center justify-between flex-shrink-0">
             <h3 className="font-semibold text-base text-base-content">Contact Info</h3>
             <button 
               onClick={() => setIsRecipientProfileOpen(false)}
@@ -1137,15 +1139,19 @@ const ChatContainer = () => {
                 )}
                 <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-base-100 via-base-100/10 to-transparent" />
               </div>
-              <div className="flex flex-col items-center text-center px-5 -mt-14">
+              {/* relative + z-10: the cover above is positioned, so without a
+                  stacking context of its own this block paints *under* it and
+                  the cover photo (and its fade) cut across the avatar. The
+                  picture has to sit on top of the banner, as on LinkedIn. */}
+              <div className="relative z-10 flex flex-col items-center text-center px-5 -mt-14">
                 <img
                   src={selectedUser.profilePic || "/avatar.png"}
-                  alt={selectedUser.fullName}
+                  alt={displayNameOf(selectedUser, nicknames)}
                   onClick={() => setLightboxImage(selectedUser.profilePic || "/avatar.png")}
-                  className="object-cover border-4 border-base-100 bg-base-100 rounded-full size-28 shadow-md cursor-zoom-in hover:opacity-90 transition-opacity"
+                  className="object-cover ring-4 ring-base-100 bg-base-200 rounded-full size-28 shadow-lg cursor-zoom-in hover:opacity-90 transition-opacity"
                 />
                 <h2 className="font-semibold text-lg text-base-content mt-3">
-                  {selectedUser._id === authUser._id ? "Personal Notes (You)" : selectedUser.fullName}
+                  {selectedUser._id === authUser._id ? "Personal Notes (You)" : displayNameOf(selectedUser, nicknames)}
                 </h2>
                 <span className="text-xs text-base-content/50 select-all">{selectedUser.email}</span>
                 <div className="mt-2.5">
@@ -1174,7 +1180,7 @@ const ChatContainer = () => {
                         <div 
                           key={msg._id}
                           onClick={() => setLightboxImage(msg.image)}
-                          className="aspect-square rounded-lg overflow-hidden border border-base-300 bg-base-200 cursor-zoom-in group relative hover:opacity-90 transition-all shadow-sm"
+                          className="aspect-square rounded-xl overflow-hidden bg-base-200 cursor-zoom-in group relative hover:opacity-90 transition-all"
                         >
                           <img 
                             src={msg.image} 
@@ -1185,7 +1191,7 @@ const ChatContainer = () => {
                       ))}
                     </div>
                   ) : (
-                    <div className="bg-base-200/40 p-3 rounded-lg border border-base-300/30 text-center">
+                    <div className="bg-base-200 p-3 rounded-xl text-center">
                       <p className="text-xs text-base-content/40 italic">No media shared yet</p>
                     </div>
                   )}
@@ -1201,7 +1207,7 @@ const ChatContainer = () => {
                 <FileText size={12} />
                 Bio
               </span>
-              <p className="text-sm bg-base-200/50 p-3 rounded-lg border border-base-300/30 text-base-content/80 whitespace-pre-wrap leading-relaxed">
+              <p className="text-sm bg-base-200 p-3.5 rounded-2xl text-base-content/80 whitespace-pre-wrap leading-relaxed">
                 {selectedUser.bio || <span className="text-zinc-500 italic">No bio added yet</span>}
               </p>
             </div>
@@ -1212,7 +1218,7 @@ const ChatContainer = () => {
                 <Globe size={12} />
                 Website / Social Link
               </span>
-              <div className="text-sm bg-base-200/50 p-3 rounded-lg border border-base-300/30 text-base-content/80 truncate">
+              <div className="text-sm bg-base-200 p-3.5 rounded-2xl text-base-content/80 truncate">
                 {selectedUser.link ? (
                   <a 
                     href={selectedUser.link.startsWith("http") ? selectedUser.link : `https://${selectedUser.link}`} 
@@ -1239,13 +1245,13 @@ const ChatContainer = () => {
 
             {/* Disappearing Messages Section */}
             {selectedUser._id !== authUser._id && (
-              <div className="space-y-1.5 pt-4 border-t border-base-200 text-left">
+              <div className="space-y-1.5 pt-5 text-left">
                 <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold flex items-center gap-1 select-none">
                   <Clock size={12} />
                   Disappearing Messages
                 </span>
                 <select
-                  className="select select-sm select-bordered w-full bg-base-200/50 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary text-base-content"
+                  className="w-full h-11 px-3 rounded-2xl bg-base-200 border-0 text-xs text-base-content outline-none focus:ring-2 focus:ring-primary/30 transition-shadow"
                   value={authUser?.disappearingTimers?.[selectedUser._id] || "off"}
                   onChange={(e) => setDisappearingTimer(selectedUser._id, e.target.value)}
                 >
@@ -1258,7 +1264,7 @@ const ChatContainer = () => {
             )}
 
             {/* Meta details */}
-            <div className="pt-4 border-t border-base-200 space-y-3 text-xs text-base-content/60">
+            <div className="pt-5 space-y-3 text-xs text-base-content/60">
               <div className="flex items-center gap-2">
                 <Calendar size={14} />
                 <span>Joined: {selectedUser.createdAt?.split("T")[0]}</span>
