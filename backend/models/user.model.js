@@ -35,6 +35,32 @@ const sessionSchema=new mongoose.Schema({
     }
 },{_id:false})
 
+// Structured social/portfolio links, replacing the single free-text `link`
+// field for networking use. `link` is kept alongside it so existing profiles
+// (and every place that already renders it) keep working untouched.
+const socialLinksSchema=new mongoose.Schema({
+    github:{
+        type:String,
+        default:""
+    },
+    twitter:{
+        type:String,
+        default:""
+    },
+    linkedin:{
+        type:String,
+        default:""
+    },
+    youtube:{
+        type:String,
+        default:""
+    },
+    portfolio:{
+        type:String,
+        default:""
+    }
+},{_id:false})
+
 const userSchema=new mongoose.Schema({
      fullName:{
         type:String,
@@ -59,6 +85,11 @@ const userSchema=new mongoose.Schema({
         type:String,
         default:""
     },
+    // Wide cover photo shown behind the avatar on the profile header.
+    bannerPic:{
+        type:String,
+        default:""
+    },
     bio:{
         type:String,
         default:""
@@ -66,6 +97,10 @@ const userSchema=new mongoose.Schema({
     link:{
         type:String,
         default:""
+    },
+    socialLinks:{
+        type:socialLinksSchema,
+        default:()=>({})
     },
     onlinePrivacy:{
         type:Boolean,

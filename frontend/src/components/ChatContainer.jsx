@@ -1,8 +1,9 @@
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
 import { useEffect, useRef, useLayoutEffect, useState } from "react";
-import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image } from "lucide-react";
+import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image, Link2 } from "lucide-react";
 import ForwardModal from "./ForwardModal";
+import SocialLinksRow from "./SocialLinksRow";
 import PollMessage from "./PollMessage";
 import VoiceNote from "./VoiceNote";
 import { useThemeStore } from "../store/useThemeStore";
@@ -1123,18 +1124,34 @@ const ChatContainer = () => {
 
           {/* Details Scroll Area */}
           <div className="flex-1 overflow-y-auto p-5 space-y-6">
-            {/* Center avatar & name */}
-            <div className="flex flex-col items-center text-center">
-              <img 
-                src={selectedUser.profilePic || "/avatar.png"} 
-                alt={selectedUser.fullName}
-                onClick={() => setLightboxImage(selectedUser.profilePic || "/avatar.png")}
-                className="object-cover border-4 border-base-200 rounded-full size-28 shadow-md cursor-zoom-in hover:opacity-90 transition-opacity"
-              />
-              <h2 className="font-semibold text-lg text-base-content mt-3">
-                {selectedUser._id === authUser._id ? "Personal Notes (You)" : selectedUser.fullName}
-              </h2>
-              <span className="text-xs text-base-content/50 select-all">{selectedUser.email}</span>
+            {/* Cover banner + center avatar & name */}
+            <div className="-mx-5 -mt-5">
+              <div className="relative w-full h-24 overflow-hidden bg-gradient-to-r from-primary/25 via-secondary/20 to-accent/25">
+                {selectedUser.bannerPic && (
+                  <img
+                    src={selectedUser.bannerPic}
+                    alt=""
+                    onClick={() => setLightboxImage(selectedUser.bannerPic)}
+                    className="object-cover w-full h-full cursor-zoom-in hover:opacity-90 transition-opacity"
+                  />
+                )}
+                <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-base-100 via-base-100/10 to-transparent" />
+              </div>
+              <div className="flex flex-col items-center text-center px-5 -mt-14">
+                <img
+                  src={selectedUser.profilePic || "/avatar.png"}
+                  alt={selectedUser.fullName}
+                  onClick={() => setLightboxImage(selectedUser.profilePic || "/avatar.png")}
+                  className="object-cover border-4 border-base-100 bg-base-100 rounded-full size-28 shadow-md cursor-zoom-in hover:opacity-90 transition-opacity"
+                />
+                <h2 className="font-semibold text-lg text-base-content mt-3">
+                  {selectedUser._id === authUser._id ? "Personal Notes (You)" : selectedUser.fullName}
+                </h2>
+                <span className="text-xs text-base-content/50 select-all">{selectedUser.email}</span>
+                <div className="mt-2.5">
+                  <SocialLinksRow user={selectedUser} variant="icons" emptyText="" />
+                </div>
+              </div>
             </div>
 
             {/* Media, links and docs gallery section (WhatsApp Desktop style) */}
@@ -1209,6 +1226,15 @@ const ChatContainer = () => {
                   <span className="text-zinc-500 italic">No link added yet</span>
                 )}
               </div>
+            </div>
+
+            {/* Social & portfolio links */}
+            <div className="space-y-1">
+              <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold flex items-center gap-1">
+                <Link2 size={12} />
+                Social & Portfolio
+              </span>
+              <SocialLinksRow user={selectedUser} variant="list" />
             </div>
 
             {/* Disappearing Messages Section */}

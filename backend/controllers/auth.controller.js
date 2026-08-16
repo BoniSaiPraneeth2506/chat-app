@@ -32,6 +32,55 @@ const startSession = async (user, req, res) => {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/** The only social platforms accepted on a profile — anything else is dropped. */
+const SOCIAL_LINK_KEYS = ["github", "twitter", "linkedin", "youtube", "portfolio"];
+const MAX_SOCIAL_LINK_LENGTH = 300;
+
+/**
+ * Normalizes one user-supplied social URL, or returns "" to clear it.
+ * Every value is rendered client-side as an <a href>, so anything that isn't
+ * plainly http(s) (`javascript:`, `data:`, ...) is rejected outright rather
+ * than escaped — a profile link has no legitimate reason to use those.
+ */
+const sanitizeSocialLink = (value) => {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (trimmed.length > MAX_SOCIAL_LINK_LENGTH) return "";
+  // Bare inputs like "github.com/me" are a normal thing to type, so give
+  // them a scheme before parsing instead of rejecting them.
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const url = new URL(withScheme);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    if (!url.hostname.includes(".")) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+};
+
+/** Builds the full 5-key social links object from arbitrary request input. */
+const sanitizeSocialLinks = (input) => {
+  const source = input && typeof input === "object" ? input : {};
+  return SOCIAL_LINK_KEYS.reduce((acc, key) => {
+    acc[key] = sanitizeSocialLink(source[key]);
+    return acc;
+  }, {});
+};
+
+/**
+ * Always hands the client all 5 keys, even for profiles saved before the
+ * field existed, so the UI never has to null-check individual platforms.
+ */
+const normalizeSocialLinksForResponse = (socialLinks) => {
+  const source = socialLinks?.toObject ? socialLinks.toObject() : (socialLinks || {});
+  return SOCIAL_LINK_KEYS.reduce((acc, key) => {
+    acc[key] = typeof source[key] === "string" ? source[key] : "";
+    return acc;
+  }, {});
+};
+
 /**
  * Returns a safe, whitelisted subset of a user object for API responses.
  * Prevents internal/sensitive fields from leaking to the client.
@@ -41,8 +90,10 @@ const sanitizeUser = (user) => ({
   fullName: user.fullName,
   email: user.email,
   profilePic: user.profilePic,
+  bannerPic: user.bannerPic,
   bio: user.bio,
   link: user.link,
+  socialLinks: normalizeSocialLinksForResponse(user.socialLinks),
   onlinePrivacy: user.onlinePrivacy,
   blockedUsers: user.blockedUsers || [],
   favorites: user.favorites || [],
@@ -225,7 +276,7 @@ const logout = async (req, res) => {
 
 const updateProfile = async (req, res) => {
     try {
-        const { profilePic, fullName, email, bio, link, onlinePrivacy, messageTimer } = req.body;
+        const { profilePic, bannerPic, fullName, email, bio, link, socialLinks, onlinePrivacy, messageTimer } = req.body;
         const userId = req.user._id;
 
         const updateData = {};
@@ -243,6 +294,8 @@ const updateProfile = async (req, res) => {
         if (bio !== undefined) updateData.bio = bio;
         if (link !== undefined) updateData.link = link;
 
+        if (socialLinks !== undefined) updateData.socialLinks = sanitizeSocialLinks(socialLinks);
+
         if (onlinePrivacy !== undefined) {
             updateData.onlinePrivacy = onlinePrivacy;
             updateUserPrivacyState(userId, onlinePrivacy === false);
@@ -258,6 +311,22 @@ const updateProfile = async (req, res) => {
             }
             const uploadResponse = await cloudinary.uploader.upload(profilePic);
             updateData.profilePic = uploadResponse.secure_url;
+        }
+
+        // Unlike profilePic, an empty string is meaningful here: it's how the
+        // client removes a cover photo it previously set.
+        if (bannerPic !== undefined) {
+            if (!bannerPic) {
+                updateData.bannerPic = "";
+            } else if (bannerPic.startsWith("data:")) {
+                const validation = validateImageUpload(bannerPic);
+                if (!validation.valid) {
+                    return res.status(400).json({ message: validation.reason });
+                }
+                const uploadResponse = await cloudinary.uploader.upload(bannerPic);
+                updateData.bannerPic = uploadResponse.secure_url;
+            }
+            // An already-hosted URL resent unchanged needs no re-upload.
         }
 
         const updatedUser = await User.findByIdAndUpdate(
