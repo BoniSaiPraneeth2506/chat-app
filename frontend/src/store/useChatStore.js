@@ -169,7 +169,27 @@ export const useChatStore = create((set, get) => ({
     try {
       const res = await axiosInstance.get(`/messages/users?search=${search}`);
       const users = Array.isArray(res.data) ? res.data : [];
-      set({ users });
+
+      // Seed unread badges from the server's count. Without this the badge
+      // only ever reflected messages seen live over the socket, so anything
+      // that arrived while the app was closed or logged out came back looking
+      // already read. `Math.max` keeps any increment that landed over the
+      // socket while this request was still in flight.
+      set((state) => {
+        const unreadCounts = { ...state.unreadCounts };
+        users.forEach((user) => {
+          if (typeof user.unreadCount !== "number") return;
+          // The chat that's currently open is read by definition. Its
+          // markAsRead may not have hit the database yet, so trusting the
+          // server here would flash a badge onto the conversation being read.
+          if (state.selectedUser?._id === user._id) {
+            unreadCounts[user._id] = 0;
+            return;
+          }
+          unreadCounts[user._id] = Math.max(user.unreadCount, unreadCounts[user._id] || 0);
+        });
+        return { users, unreadCounts };
+      });
 
       // Fetch the last message for each user to populate latestMessages
       const latestMsgs = {};

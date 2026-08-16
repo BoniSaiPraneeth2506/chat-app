@@ -96,34 +96,61 @@ io.on("connection", async (socket) => {
     }
     userSocketMap[userId] = socket.id;
 
-    // Query onlinePrivacy setting of the connecting user
-    try {
-        const user = await User.findById(userId).select("onlinePrivacy");
-        if (user && user.onlinePrivacy === false) {
-            privateUsersSet.add(userId.toString());
-        } else {
-            privateUsersSet.delete(userId.toString());
-        }
-    } catch (err) {
-        console.error("Error fetching user settings on connection:", err);
-    }
-
     if (oldSocketId) {
         console.log(`User ${userId} reconnected. Old socket: ${oldSocketId}, New socket: ${socket.id}`);
     } else {
         console.log(`User ${userId} connected. Current online users:`, Object.keys(userSocketMap));
     }
 
-    broadcastOnlineUsers();
+    // Deliberately NOT awaited here.
+    //
+    // Every socket.on(...) below must be registered in the same tick as the
+    // connection. Socket.IO does not buffer events for listeners that don't
+    // exist yet, so awaiting a database round-trip at this point silently
+    // dropped anything a client emitted immediately on connect — which is
+    // exactly what the app does with markAsRead when it opens a chat.
+    User.findById(userId)
+        .select("onlinePrivacy")
+        .then((user) => {
+            if (user && user.onlinePrivacy === false) {
+                privateUsersSet.add(userId.toString());
+            } else {
+                privateUsersSet.delete(userId.toString());
+            }
+        })
+        .catch((err) => {
+            console.error("Error fetching user settings on connection:", err);
+        })
+        .finally(() => {
+            // Broadcast once the privacy flag is known, so a user who opted
+            // out is never briefly announced as online.
+            broadcastOnlineUsers();
+        });
 
     // ── Event: markAsRead ───────────────────────────────────────────────────
-    socket.on("markAsRead", ({ senderId, receiverId }) => {
+    socket.on("markAsRead", async ({ senderId, receiverId }) => {
         // Validate: only the authenticated user can claim to be the receiver
         if (receiverId !== userId) {
             console.warn(`[Security] User ${userId} tried to spoof markAsRead as ${receiverId}`);
             return;
         }
         console.log(`[Socket] User ${receiverId} read messages from User ${senderId}`);
+
+        // Persist the read mark so unread counts can be rebuilt after the app
+        // is closed or the user logs out. Previously this handler only relayed
+        // the receipt, leaving read state entirely in the reader's memory.
+        if (senderId) {
+            try {
+                await User.updateOne(
+                    { _id: receiverId },
+                    { $set: { [`lastReadAt.${senderId}`]: new Date() } }
+                );
+            } catch (err) {
+                // A failed write must not stop the sender's ticks from updating.
+                console.error("Error persisting lastReadAt:", err.message);
+            }
+        }
+
         const senderSocketId = getReceiverSocketId(senderId);
         if (senderSocketId) {
             io.to(senderSocketId).emit("messagesRead", { userId: receiverId });

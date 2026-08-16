@@ -31,6 +31,51 @@ const pollSchema = new Schema({
   },
 }, { _id: false });
 
+// Large attachments (video, documents) live in Cloudflare R2 rather than
+// Cloudinary, and are described by one polymorphic array instead of another
+// pair of top-level fields. `key` is the source of truth: if the bucket or the
+// domain in front of it ever changes, the key survives and `url` is rebuilt.
+const attachmentSchema = new Schema({
+  kind: {
+    type: String,
+    enum: ["video", "document"],
+    required: true,
+  },
+  key: {
+    type: String,
+    required: true,
+  },
+  url: {
+    type: String,
+    required: true,
+  },
+  name: {
+    type: String,
+    default: "",
+  },
+  mime: {
+    type: String,
+    required: true,
+  },
+  size: {
+    type: Number,
+    required: true,
+  },
+  duration: {
+    type: Number, // video length in seconds
+  },
+  width: {
+    type: Number,
+  },
+  height: {
+    type: Number,
+  },
+  posterUrl: {
+    type: String, // client-generated video thumbnail; R2 does no transcoding
+    default: "",
+  },
+}, { _id: false });
+
 const messageSchema = new Schema(
   {
     senderId: {
@@ -59,6 +104,10 @@ const messageSchema = new Schema(
     }],
     voice: {
       type: String,
+    },
+    attachments: {
+      type: [attachmentSchema],
+      default: [],
     },
     isEdited: {
       type: Boolean,

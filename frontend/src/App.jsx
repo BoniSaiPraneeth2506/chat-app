@@ -174,6 +174,19 @@ const App = () => {
   // straight from an open chat instead of closing it first.
   useEffect(() => {
     const listenerPromise = CapacitorApp.addListener('backButton', () => {
+      // An open sheet is the topmost thing on screen, so back must dismiss it
+      // first. Without this, pressing back while creating a group exits the
+      // app outright — the route is still "/" and no chat is open.
+      const groupState = useGroupStore.getState();
+      if (groupState.isCreateGroupModalOpen) {
+        groupState.setIsCreateGroupModalOpen(false);
+        return;
+      }
+      if (groupState.isGroupDetailsModalOpen) {
+        groupState.setIsGroupDetailsModalOpen(false);
+        return;
+      }
+
       const hasActiveChat = !!(useChatStore.getState().selectedUser || useGroupStore.getState().selectedGroup);
       if (locationRef.current.pathname !== '/') {
         navigate(-1);

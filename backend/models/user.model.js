@@ -115,6 +115,17 @@ const userSchema=new mongoose.Schema({
         type:Date,
         default:Date.now
     },
+    // When this user last read each 1-on-1 conversation, keyed by the other
+    // user's id. Unread counts were previously held only in browser memory,
+    // so they were lost whenever the app was closed or the user logged out —
+    // messages that arrived while away came back looking already read.
+    // Persisting the read mark here makes the count survive restarts and
+    // stay consistent across devices.
+    lastReadAt:{
+        type:Map,
+        of:Date,
+        default:new Map()
+    },
     favorites:[{
         type:mongoose.Schema.Types.ObjectId,
         ref:"User",

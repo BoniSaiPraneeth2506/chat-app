@@ -70,6 +70,12 @@ import User from "../models/user.model.js";
 import cloudinary from "../lib/cloudinary.js";
 import { getReceiverSocketId, io } from "../lib/socket.js";
 import sanitizeHtml from "sanitize-html";
+import {
+  verifyAttachment,
+  publicUrlForKey,
+  safeDisplayName,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+} from "../lib/attachments.js";
 
 // ── Security Helpers ──────────────────────────────────────────────────────────
 
@@ -118,6 +124,55 @@ const validateVoice = (dataUri) => {
   return { valid: true };
 };
 
+/**
+ * Fields never sent to the client when listing other users. `lastReadAt` is a
+ * private record of when someone read each of their chats, and the reset/
+ * session fields were already sensitive — `-password` alone let all of them
+ * through on the sidebar payload.
+ */
+const SIDEBAR_USER_FIELDS = "-password -lastReadAt -resetPasswordOtp -resetPasswordExpires -sessions";
+
+/**
+ * Attaches an `unreadCount` to each sidebar user: messages they sent me since
+ * I last read that conversation.
+ *
+ * This is what makes unread badges survive the app being closed. The count
+ * used to be incremented purely from live socket events, so anything that
+ * arrived while the app wasn't running was never counted.
+ */
+const attachUnreadCounts = async (users, me) => {
+  if (!users.length) return users;
+
+  const lastReadAt = me.lastReadAt || new Map();
+  const readAtFor = (id) => {
+    const value = lastReadAt instanceof Map ? lastReadAt.get(id) : lastReadAt[id];
+    return value ? new Date(value) : new Date(0);
+  };
+
+  // One clause per conversation, because the "unread since" threshold differs
+  // per sender. Never-opened chats fall back to epoch, so everything counts.
+  const clauses = users.map((u) => ({
+    senderId: u._id,
+    createdAt: { $gt: readAtFor(u._id.toString()) },
+  }));
+
+  const counts = await Message.aggregate([
+    {
+      $match: {
+        receiverId: me._id,
+        groupId: null,
+        deletedFor: { $ne: me._id },
+        isDeletedForEveryone: { $ne: true },
+        $or: clauses,
+      },
+    },
+    { $group: { _id: "$senderId", count: { $sum: 1 } } },
+  ]);
+
+  const countBySender = new Map(counts.map((c) => [c._id.toString(), c.count]));
+  return users.map((u) => ({ ...u, unreadCount: countBySender.get(u._id.toString()) || 0 }));
+};
+
 const getUsersForSidebar = async (req, res) => {
   try {
     const { search } = req.query;
@@ -129,8 +184,8 @@ const getUsersForSidebar = async (req, res) => {
       const filteredUsers = await User.find({
         _id: { $ne: loggedInUserId },
         fullName: { $regex: safeSearch, $options: "i" }
-      }).select("-password");
-      return res.status(200).json(filteredUsers);
+      }).select(SIDEBAR_USER_FIELDS).lean();
+      return res.status(200).json(await attachUnreadCounts(filteredUsers, req.user));
     }
 
     // 1. Get IDs of users the logged-in user has chatted with (1-on-1 only, exclude group messages where groupId is set)
@@ -148,7 +203,7 @@ const getUsersForSidebar = async (req, res) => {
     const chattedUsers = await User.find({
       _id: { $in: chattedIds, $ne: loggedInUserId },
       fullName: { $exists: true, $ne: "" }
-    }).select("-password");
+    }).select(SIDEBAR_USER_FIELDS).lean();
 
     // 3. Fetch up to 4 dummy seeded users (excluding the logged-in user, and excluding already chatted users)
     const dummyUsers = await User.find({
@@ -157,12 +212,13 @@ const getUsersForSidebar = async (req, res) => {
       email: { $regex: "@example\\.com$" }
     })
     .limit(4)
-    .select("-password");
+    .select(SIDEBAR_USER_FIELDS)
+    .lean();
 
     // 4. Combine chatted users and dummy users
     const combinedUsers = [...chattedUsers, ...dummyUsers];
 
-    return res.status(200).json(combinedUsers);
+    return res.status(200).json(await attachUnreadCounts(combinedUsers, req.user));
   } catch (err) {
     console.log(err);
     res.status(500).json({ message: "Internal server error" });
@@ -224,7 +280,7 @@ const getMessages = async (req, res) => {
 const sendMessage = async (req, res) => {
   try {
     const { id: receiverId } = req.params;
-    const { text, image, images, voice, replyTo, isForwarded, isOneView, scheduledAt } = req.body;
+    const { text, image, images, voice, replyTo, isForwarded, isOneView, scheduledAt, attachments } = req.body;
     const senderId = req.user._id;
 
     // Check block list
@@ -273,6 +329,46 @@ const sendMessage = async (req, res) => {
         resource_type: "video"
       });
       voiceUrl = uploadResponse.secure_url;
+    }
+
+    // R2 attachments arrive as metadata only — the bytes went straight from the
+    // client to the bucket. Each one is confirmed to actually exist and match
+    // what was authorized before it is allowed onto a message, otherwise a
+    // client could reference a key it never uploaded.
+    let verifiedAttachments = [];
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      if (attachments.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+        return res.status(400).json({
+          message: `You can attach up to ${MAX_ATTACHMENTS_PER_MESSAGE} files at once`,
+        });
+      }
+
+      for (const att of attachments) {
+        const check = await verifyAttachment({
+          key: att?.key,
+          kind: att?.kind,
+          size: att?.size,
+          mime: att?.mime,
+        });
+        if (!check.valid) {
+          return res.status(400).json({ message: check.reason });
+        }
+
+        verifiedAttachments.push({
+          kind: att.kind,
+          key: att.key,
+          // Rebuilt server-side so a client cannot point the bubble at an
+          // arbitrary URL while passing a legitimate key.
+          url: publicUrlForKey(att.key),
+          name: safeDisplayName(att.name),
+          mime: check.mime,
+          size: check.size,
+          duration: Number.isFinite(att.duration) ? att.duration : undefined,
+          width: Number.isFinite(att.width) ? att.width : undefined,
+          height: Number.isFinite(att.height) ? att.height : undefined,
+          posterUrl: typeof att.posterUrl === "string" ? att.posterUrl : "",
+        });
+      }
     }
 
     const timer = sender?.disappearingTimers?.get(receiverId) || "off";

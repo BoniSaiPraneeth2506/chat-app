@@ -18,6 +18,26 @@ import { isNetworkError } from "../lib/network";
 // Mirrors dmKey in useChatStore.js — same per-conversation cache, distinct prefix.
 const groupKey = (groupId) => `group:${groupId}`;
 
+/**
+ * Inserts a group at the top of the list, or replaces it in place if it's
+ * already there.
+ *
+ * A newly created group arrives twice for its creator: once as the HTTP
+ * response to POST /groups, and once as the `groupCreated` socket event, which
+ * the server broadcasts to every member — the creator included. Prepending
+ * blindly on both paths showed the group twice until the next refetch replaced
+ * the list. Deduping here rather than suppressing the emit keeps the event
+ * useful for the creator's other sessions.
+ */
+const upsertGroup = (groups, group) => {
+  if (!group?._id) return groups;
+  const id = String(group._id);
+  const exists = groups.some((g) => String(g._id) === id);
+  return exists
+    ? groups.map((g) => (String(g._id) === id ? group : g)) // refresh in place
+    : [group, ...groups];                                   // genuinely new
+};
+
 export const useGroupStore = create((set, get) => ({
   groups: [],
   selectedGroup: null,
@@ -108,7 +128,7 @@ export const useGroupStore = create((set, get) => ({
     try {
       const res = await axiosInstance.post("/groups", groupData);
       set((state) => ({
-        groups: [res.data, ...state.groups],
+        groups: upsertGroup(state.groups, res.data),
         isCreateGroupModalOpen: false,
       }));
 
@@ -485,7 +505,7 @@ export const useGroupStore = create((set, get) => ({
     // Group Created Notification
     socket.on("groupCreated", (newGroup) => {
       set((state) => ({
-        groups: [newGroup, ...state.groups],
+        groups: upsertGroup(state.groups, newGroup),
       }));
       socket.emit("joinGroupRoom", newGroup._id);
     });
