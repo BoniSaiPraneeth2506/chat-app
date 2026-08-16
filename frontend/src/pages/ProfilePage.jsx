@@ -1,12 +1,43 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useAuthStore from "../store/useAuthStore";
-import { Camera, Mail, User, FileText, Globe, ImagePlus, Trash2, Link2 } from "lucide-react";
+import { Camera, Mail, User, FileText, Globe, ImagePlus, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
-import { SOCIAL_PLATFORMS, toSocialLinksForm } from "../lib/social";
+import {
+  SOCIAL_PLATFORMS,
+  toSocialLinksForm,
+  getFilledSocialLinks,
+  toDisplayHandle,
+} from "../lib/social";
 import SocialLinksRow from "../components/SocialLinksRow";
 import ProfileQrCard from "../components/ProfileQrCard";
 import QrScannerModal from "../components/QrScannerModal";
+
+// Shared surface treatment.
+//
+// Nothing here draws an outline. Boxes with visible borders are what made this
+// screen read as unfinished: every value sat inside its own rectangle, so the
+// eye counted frames instead of content. Real chat apps group by *surface* —
+// a section is a slightly lighter panel with no edge — and separate rows with
+// a hairline, not a box.
+//
+// Fields follow the same rule: a single underline that lights up on focus,
+// instead of a rectangle around every input.
+const fieldClass =
+  "w-full bg-transparent border-0 border-b border-base-content/15 rounded-none " +
+  "text-base-content placeholder:text-base-content/30 outline-none " +
+  "transition-colors focus:border-primary focus:ring-0";
+
+// Solid base-200 rather than a translucent tint: the avatar ring and the cover
+// gradient both blend to this exact colour, so there is no seam anywhere.
+const cardClass = "rounded-2xl bg-base-200";
+
+const sectionLabel = "text-[11px] font-semibold uppercase tracking-wider text-base-content/40 px-1";
+
+/** Quiet secondary action — a filled surface, never an outlined box. */
+const ghostButton =
+  "bg-base-300/70 hover:bg-base-300 text-base-content font-medium " +
+  "active:scale-[0.97] transition-all";
 
 const ProfilePage = () => {
   const { authUser, isUpdatingProfile, updateProfile } = useAuthStore();
@@ -117,176 +148,178 @@ const ProfilePage = () => {
   };
 
   const bannerSrc = selectedBanner || authUser?.bannerPic || "";
+  const websiteHref = authUser?.link
+    ? authUser.link.startsWith("http")
+      ? authUser.link
+      : `https://${authUser.link}`
+    : "";
+  // Shown without the scheme so a long URL reads as a name, not a address bar.
+  const websiteLabel = toDisplayHandle(authUser?.link);
+  const hasSocials = getFilledSocialLinks(authUser).length > 0;
+  const hasAbout = Boolean(authUser?.bio || websiteHref || hasSocials);
 
   return (
-    <div className="min-h-screen pt-20 pb-10">
-      <div className="max-w-2xl p-4 py-8 mx-auto">
-        <div className="space-y-8 overflow-hidden bg-base-300 rounded-xl">
-          {/* Cover banner + overlapping avatar (Discord/LinkedIn style header) */}
-          <div className="relative">
-            <div className="relative w-full h-36 sm:h-44 overflow-hidden bg-gradient-to-r from-primary/30 via-secondary/25 to-accent/30">
+    <div className="min-h-screen pt-20 pb-14">
+      <div className="max-w-2xl px-4 mx-auto space-y-5">
+
+        {/* ── Hero: cover, avatar, identity ── */}
+        <div className={`${cardClass} overflow-hidden`}>
+          <div className="relative w-full h-36 sm:h-44 overflow-hidden bg-gradient-to-br from-primary/25 via-secondary/20 to-accent/25">
+            {bannerSrc && (
+              <img src={bannerSrc} alt="Profile banner" className="object-cover w-full h-full" />
+            )}
+            {/* Fades the cover into the card so the avatar never sits on a hard seam */}
+            <div className="absolute inset-0 bg-gradient-to-t from-base-200 via-base-200/25 to-transparent" />
+
+            <div className="absolute flex gap-2 top-3 right-3">
+              <label
+                htmlFor="banner-upload"
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-full bg-base-100/80 hover:bg-base-100 text-base-content backdrop-blur-md shadow-sm cursor-pointer transition-all active:scale-95
+                  ${isUploadingBanner ? "animate-pulse pointer-events-none" : ""}`}
+              >
+                <ImagePlus className="w-3.5 h-3.5" />
+                {isUploadingBanner ? "Uploading…" : bannerSrc ? "Change cover" : "Add cover"}
+                <input
+                  type="file"
+                  id="banner-upload"
+                  className="hidden"
+                  accept="image/*"
+                  onChange={handleBannerUpload}
+                  disabled={isUploadingBanner || isUpdatingProfile}
+                />
+              </label>
               {bannerSrc && (
-                <img
-                  src={bannerSrc}
-                  alt="Profile banner"
-                  className="object-cover w-full h-full"
-                />
-              )}
-              {/* Keeps the avatar and buttons legible over any uploaded photo */}
-              <div className="absolute inset-0 bg-gradient-to-t from-base-300/80 via-base-300/10 to-transparent" />
-
-              <div className="absolute flex gap-2 top-3 right-3">
-                <label
-                  htmlFor="banner-upload"
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg bg-base-100/85 hover:bg-base-100 text-base-content backdrop-blur-sm shadow-sm cursor-pointer transition-all
-                    ${isUploadingBanner ? "animate-pulse pointer-events-none" : ""}`}
+                <button
+                  type="button"
+                  onClick={handleRemoveBanner}
+                  disabled={isUploadingBanner || isUpdatingProfile}
+                  className="flex items-center px-2.5 py-1.5 rounded-full bg-base-100/80 hover:bg-base-100 text-error backdrop-blur-md shadow-sm transition-all active:scale-95"
+                  title="Remove cover photo"
                 >
-                  <ImagePlus className="w-3.5 h-3.5" />
-                  {isUploadingBanner ? "Uploading…" : bannerSrc ? "Change cover" : "Add cover"}
-                  <input
-                    type="file"
-                    id="banner-upload"
-                    className="hidden"
-                    accept="image/*"
-                    onChange={handleBannerUpload}
-                    disabled={isUploadingBanner || isUpdatingProfile}
-                  />
-                </label>
-                {bannerSrc && (
-                  <button
-                    type="button"
-                    onClick={handleRemoveBanner}
-                    disabled={isUploadingBanner || isUpdatingProfile}
-                    className="flex items-center px-2 py-1.5 rounded-lg bg-base-100/85 hover:bg-base-100 text-error backdrop-blur-sm shadow-sm transition-all"
-                    title="Remove cover photo"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* avatar upload section — overlaps the banner's lower edge */}
-            <div className="flex flex-col items-center gap-2 px-6 -mt-16">
-              <div className="relative">
-                <img
-                  src={selectedImg || authUser.profilePic || "/avatar.png"}
-                  alt="Profile"
-                  className="object-cover border-4 rounded-full shadow-lg border-base-300 bg-base-300 size-32"
-                />
-                <label
-                  htmlFor="avatar-upload"
-                  className={`
-                    absolute bottom-0 right-0
-                    bg-base-content hover:scale-105
-                    p-2 rounded-full cursor-pointer
-                    transition-all duration-200
-                    ${isUpdatingProfile ? "animate-pulse pointer-events-none" : ""}
-                  `}
-                >
-                  <Camera className="w-5 h-5 text-base-200" />
-                  <input
-                    type="file"
-                    id="avatar-upload"
-                    className="hidden"
-                    accept="image/*"
-                    onChange={handleImageUpload}
-                    disabled={isUpdatingProfile}
-                  />
-                </label>
-              </div>
-              <h1 className="text-xl font-semibold">{authUser?.fullName}</h1>
-              <p className="text-xs text-zinc-400">
-                {isUpdatingProfile ? "Uploading..." : "Click the camera icon to update your photo"}
-              </p>
-              {!isEditing && (
-                <div className="pt-1">
-                  <SocialLinksRow user={authUser} variant="icons" emptyText="" />
-                </div>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
               )}
             </div>
           </div>
 
-          <div className="px-6 pb-6 space-y-8">
-
-          {/* Details form/static display */}
-          {isEditing ? (
-            <div className="space-y-6">
-              <div className="space-y-1.5">
-                <label className="flex items-center gap-2 text-sm text-zinc-400">
-                  <User className="w-4 h-4" />
-                  Full Name
-                </label>
+          <div className="flex flex-col items-center px-6 pb-6 -mt-16">
+            <div className="relative">
+              <img
+                src={selectedImg || authUser.profilePic || "/avatar.png"}
+                alt="Profile"
+                className="object-cover rounded-full shadow-xl ring-4 ring-base-200 bg-base-200 size-28"
+              />
+              <label
+                htmlFor="avatar-upload"
+                className={`absolute bottom-0 right-0 grid place-items-center size-9 rounded-full bg-primary text-primary-content ring-4 ring-base-200 cursor-pointer transition-transform hover:scale-105 active:scale-95
+                  ${isUpdatingProfile ? "animate-pulse pointer-events-none" : ""}`}
+              >
+                <Camera className="w-4 h-4" />
                 <input
-                  type="text"
-                  className="w-full px-4 py-2.5 bg-base-200 rounded-lg border border-base-300/40 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-base-content"
-                  value={formData.fullName}
-                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                  placeholder="Enter full name"
+                  type="file"
+                  id="avatar-upload"
+                  className="hidden"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  disabled={isUpdatingProfile}
                 />
-              </div>
+              </label>
+            </div>
 
-              <div className="space-y-1.5">
-                <label className="flex items-center gap-2 text-sm text-zinc-400">
-                  <Mail className="w-4 h-4" />
-                  Email Address
-                </label>
-                <input
-                  type="email"
-                  className="w-full px-4 py-2.5 bg-base-200 rounded-lg border border-base-300/40 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-base-content"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  placeholder="Enter email address"
-                />
-              </div>
+            <h1 className="mt-3 text-xl font-semibold text-base-content">{authUser?.fullName}</h1>
+            <p className="text-sm text-base-content/45">{authUser?.email}</p>
+            <p className="mt-1 text-[11px] text-base-content/35">
+              {isUpdatingProfile ? "Uploading…" : "Tap the camera to change your photo"}
+            </p>
 
-              <div className="space-y-1.5">
-                <label className="flex items-center gap-2 text-sm text-zinc-400">
-                  <FileText className="w-4 h-4" />
-                  Bio
-                </label>
-                <textarea
-                  className="w-full px-4 py-2.5 bg-base-200 rounded-lg border border-base-300/40 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-base-content h-24 resize-none"
-                  value={formData.bio}
-                  onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
-                  placeholder="Write a brief bio about yourself..."
-                />
+            {!isEditing && (
+              <div className="pt-3">
+                <SocialLinksRow user={authUser} variant="icons" emptyText="" />
               </div>
+            )}
+          </div>
+        </div>
 
-              <div className="space-y-1.5">
-                <label className="flex items-center gap-2 text-sm text-zinc-400">
-                  <Globe className="w-4 h-4" />
-                  Website / Social Link
-                </label>
-                <input
-                  type="text"
-                  className="w-full px-4 py-2.5 bg-base-200 rounded-lg border border-base-300/40 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-base-content"
-                  value={formData.link}
-                  onChange={(e) => setFormData({ ...formData, link: e.target.value })}
-                  placeholder="e.g. https://github.com/myprofile"
-                />
-              </div>
-
-              {/* Structured social & portfolio links */}
-              <div className="space-y-3">
-                <div className="space-y-0.5">
-                  <label className="flex items-center gap-2 text-sm text-zinc-400">
-                    <Link2 className="w-4 h-4" />
-                    Social Links & Portfolio
+        {isEditing ? (
+          /* ── Edit mode ── */
+          <>
+            <div className="space-y-2">
+              <span className={sectionLabel}>Your details</span>
+              <div className={`${cardClass} p-4 space-y-4`}>
+                <div className="space-y-1.5">
+                  <label htmlFor="pf-name" className="flex items-center gap-2 text-xs font-medium text-base-content/55">
+                    <User className="w-3.5 h-3.5" />
+                    Full name
                   </label>
-                  <p className="text-[10px] opacity-60">
-                    Leave a field empty to hide that platform from your profile.
-                  </p>
+                  <input
+                    id="pf-name"
+                    type="text"
+                    className={`${fieldClass} h-11 px-1 text-[15px]`}
+                    value={formData.fullName}
+                    onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                    placeholder="Your name"
+                  />
                 </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="pf-email" className="flex items-center gap-2 text-xs font-medium text-base-content/55">
+                    <Mail className="w-3.5 h-3.5" />
+                    Email address
+                  </label>
+                  <input
+                    id="pf-email"
+                    type="email"
+                    className={`${fieldClass} h-11 px-1 text-[15px]`}
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    placeholder="you@example.com"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="pf-bio" className="flex items-center gap-2 text-xs font-medium text-base-content/55">
+                    <FileText className="w-3.5 h-3.5" />
+                    Bio
+                  </label>
+                  <textarea
+                    id="pf-bio"
+                    rows={3}
+                    className={`${fieldClass} px-1 py-2 text-[15px] resize-none`}
+                    value={formData.bio}
+                    onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
+                    placeholder="Tell people a little about yourself"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="pf-link" className="flex items-center gap-2 text-xs font-medium text-base-content/55">
+                    <Globe className="w-3.5 h-3.5" />
+                    Website
+                  </label>
+                  <input
+                    id="pf-link"
+                    type="text"
+                    className={`${fieldClass} h-11 px-1 text-[15px]`}
+                    value={formData.link}
+                    onChange={(e) => setFormData({ ...formData, link: e.target.value })}
+                    placeholder="yourname.dev"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <span className={sectionLabel}>Social &amp; portfolio</span>
+              <div className={`${cardClass} p-4 space-y-3`}>
                 {SOCIAL_PLATFORMS.map(({ key, label, icon: Icon, colorClass, placeholder }) => (
                   <div key={key} className="relative">
                     <Icon
-                      className={`absolute w-4 h-4 -translate-y-1/2 left-3.5 top-1/2 ${colorClass} pointer-events-none`}
+                      className={`absolute w-4 h-4 -translate-y-1/2 left-0 top-1/2 ${colorClass} pointer-events-none`}
                     />
                     <input
                       type="text"
                       aria-label={label}
-                      className="w-full py-2.5 pl-10 pr-3 bg-base-200 rounded-lg border border-base-300/40 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-base-content"
+                      className={`${fieldClass} h-11 pl-8 pr-1 text-[15px]`}
                       value={formData.socialLinks[key]}
                       onChange={(e) =>
                         setFormData({
@@ -298,147 +331,144 @@ const ProfilePage = () => {
                     />
                   </div>
                 ))}
+                <p className="text-[11px] text-base-content/35 px-1">
+                  Leave a field empty to hide that platform.
+                </p>
               </div>
+            </div>
 
-              {/* Online Privacy Toggle */}
-              <div className="flex items-center justify-between p-3.5 rounded-xl bg-base-200 border border-base-300/40">
-                <div className="space-y-0.5">
-                  <span className="text-xs font-semibold text-base-content">Show Online Status</span>
-                  <p className="text-[10px] opacity-70">Let other users see when you are online</p>
-                </div>
+            <div className="space-y-2">
+              <span className={sectionLabel}>Privacy</span>
+              <label className={`${cardClass} flex items-center justify-between gap-4 px-4 py-3.5 cursor-pointer`}>
+                <span className="min-w-0">
+                  <span className="block text-[15px] text-base-content">Show online status</span>
+                  <span className="block text-xs text-base-content/45 mt-0.5">
+                    Let others see when you&apos;re active
+                  </span>
+                </span>
                 <input
                   type="checkbox"
-                  className="toggle toggle-primary toggle-sm"
+                  className="toggle toggle-primary toggle-sm flex-shrink-0"
                   checked={formData.onlinePrivacy}
                   onChange={(e) => setFormData({ ...formData, onlinePrivacy: e.target.checked })}
                 />
-              </div>
-
-              </div>
-          ) : (
-            <div className="space-y-6">
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2 text-sm text-zinc-400">
-                  <User className="w-4 h-4" />
-                  Full Name
-                </div>
-                <p className="px-4 py-2.5 bg-base-200 rounded-lg border border-base-300/10 text-sm text-base-content">
-                  {authUser?.fullName}
-                </p>
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2 text-sm text-zinc-400">
-                  <Mail className="w-4 h-4" />
-                  Email Address
-                </div>
-                <p className="px-4 py-2.5 bg-base-200 rounded-lg border border-base-300/10 text-sm text-base-content">
-                  {authUser?.email}
-                </p>
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2 text-sm text-zinc-400">
-                  <FileText className="w-4 h-4" />
-                  Bio
-                </div>
-                <p className="px-4 py-2.5 bg-base-200 rounded-lg border border-base-300/10 text-sm text-base-content min-h-[42px] whitespace-pre-wrap">
-                  {authUser?.bio || <span className="text-zinc-500 italic">No bio added yet</span>}
-                </p>
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2 text-sm text-zinc-400">
-                  <Globe className="w-4 h-4" />
-                  Website / Social Link
-                </div>
-                <p className="px-4 py-2.5 bg-base-200 rounded-lg border border-base-300/10 text-sm text-base-content min-h-[42px] truncate">
-                  {authUser?.link ? (
-                    <a
-                      href={authUser.link.startsWith("http") ? authUser.link : `https://${authUser.link}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary hover:underline font-medium"
-                    >
-                      {authUser.link}
-                    </a>
-                  ) : (
-                    <span className="text-zinc-500 italic">No website link added yet</span>
-                  )}
-                </p>
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2 text-sm text-zinc-400">
-                  <Link2 className="w-4 h-4" />
-                  Social Links & Portfolio
-                </div>
-                <SocialLinksRow user={authUser} variant="list" />
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="text-sm text-zinc-400">Online Status Privacy</div>
-                <p className="px-4 py-2.5 bg-base-200 rounded-lg border border-base-300/10 text-sm text-base-content">
-                  {authUser?.onlinePrivacy !== false ? "Visible to everyone" : "Hidden (Always Offline)"}
-                </p>
-              </div>
-
-
+              </label>
             </div>
-          )}
 
-          {/* Action buttons */}
-          <div className="flex justify-end gap-3 mt-6 pt-2 border-t border-base-200">
-            {isEditing ? (
-              <>
-                <button
-                  type="button"
-                  onClick={handleCancelEdit}
-                  className="px-4 py-2 text-sm font-medium rounded-lg bg-base-200 hover:bg-base-300 text-base-content transition-colors"
-                  disabled={isUpdatingProfile}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  className="px-4 py-2 text-sm font-medium rounded-lg bg-primary hover:bg-primary/95 text-primary-content transition-all shadow-md flex items-center justify-center min-w-[100px]"
-                  disabled={isUpdatingProfile}
-                >
-                  {isUpdatingProfile ? "Saving..." : "Save Changes"}
-                </button>
-              </>
-            ) : (
+            <div className="flex gap-3 pt-1">
               <button
                 type="button"
-                onClick={handleStartEdit}
-                className="px-4 py-2 text-sm font-medium rounded-lg bg-primary hover:bg-primary/95 text-primary-content transition-all shadow-md"
+                onClick={handleCancelEdit}
+                disabled={isUpdatingProfile}
+                className={`flex-1 h-12 rounded-2xl text-[15px] disabled:opacity-40 ${ghostButton}`}
               >
-                Edit Profile Settings
+                Cancel
               </button>
-            )}
-          </div>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={isUpdatingProfile}
+                className="flex-1 h-12 rounded-2xl bg-primary text-primary-content font-semibold text-[15px] shadow-lg shadow-primary/20 active:scale-[0.98] transition-all disabled:opacity-40 disabled:shadow-none"
+              >
+                {isUpdatingProfile ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </>
+        ) : (
+          /* ── View mode ── */
+          <>
+            {/* About — content first.
+                No dividers, no repeated micro-labels: the bio is just read as
+                text, links are tappable pills, and the status is a quiet
+                footnote. Empty blocks are omitted entirely rather than shown
+                as "not added yet" rows, which is what made this look like a
+                half-filled form. */}
+            <div className="space-y-2">
+              <span className={sectionLabel}>About</span>
+              <div className={`${cardClass} p-5`}>
+                {hasAbout ? (
+                  <div className="space-y-4">
+                    {authUser?.bio && (
+                      <p className="text-[15px] leading-relaxed text-base-content whitespace-pre-wrap">
+                        {authUser.bio}
+                      </p>
+                    )}
 
-          {/* QR Code Profile Sharing */}
-          {!isEditing && (
-            <ProfileQrCard user={authUser} onScanClick={() => setIsScannerOpen(true)} />
-          )}
+                    {/* Flush left, no pill: a tinted pill's background is nearly
+                        invisible on this surface, so only its padded contents
+                        read — which made the link look indented against the
+                        bio. Plain icon + text lines up exactly. */}
+                    {websiteHref && (
+                      <a
+                        href={websiteHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 max-w-full group"
+                      >
+                        <Globe size={15} className="text-primary flex-shrink-0" />
+                        <span className="text-[14px] font-medium text-primary truncate group-hover:underline">
+                          {websiteLabel}
+                        </span>
+                      </a>
+                    )}
 
-          <div className="p-6 bg-base-200/50 rounded-xl border border-base-200">
-            <h2 className="mb-4 text-lg font-medium">Account Information</h2>
-            <div className="space-y-3 text-sm">
-              <div className="flex items-center justify-between py-2 border-b border-base-200">
-                <span>Member Since</span>
-                <span>{authUser.createdAt?.split("T")[0]}</span>
-              </div>
-              <div className="flex items-center justify-between py-2">
-                <span>Account Status</span>
-                <span className="text-green-500 font-medium">Active</span>
+                    {hasSocials && <SocialLinksRow user={authUser} variant="chips" emptyText="" />}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleStartEdit}
+                    className="w-full text-left text-[15px] text-base-content/40 hover:text-base-content/60 transition-colors"
+                  >
+                    Add a bio and your links so people know who you are.
+                  </button>
+                )}
+
+                <div className="flex items-center gap-2 pt-5">
+                  <span
+                    className={`size-1.5 rounded-full flex-shrink-0 ${
+                      authUser?.onlinePrivacy !== false ? "bg-green-500" : "bg-base-content/30"
+                    }`}
+                  />
+                  <span className="text-xs text-base-content/45">
+                    {authUser?.onlinePrivacy !== false
+                      ? "Online status visible to everyone"
+                      : "Online status hidden — you always appear offline"}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
-          </div>
-        </div>
+
+            <button
+              type="button"
+              onClick={handleStartEdit}
+              className="w-full h-12 rounded-2xl bg-primary text-primary-content font-semibold text-[15px] shadow-lg shadow-primary/20 active:scale-[0.98] transition-all"
+            >
+              Edit profile
+            </button>
+
+            <ProfileQrCard user={authUser} onScanClick={() => setIsScannerOpen(true)} />
+
+            <div className="space-y-2">
+              <span className={sectionLabel}>Account</span>
+              <div className={`${cardClass} divide-y divide-base-content/5`}>
+                <div className="flex items-center justify-between px-4 py-3.5">
+                  <span className="text-[15px] text-base-content/70">Member since</span>
+                  <span className="text-[15px] text-base-content tabular-nums">
+                    {authUser.createdAt?.split("T")[0]}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between px-4 py-3.5">
+                  <span className="text-[15px] text-base-content/70">Status</span>
+                  <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-green-500">
+                    <span className="size-1.5 rounded-full bg-green-500" />
+                    Active
+                  </span>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       <QrScannerModal

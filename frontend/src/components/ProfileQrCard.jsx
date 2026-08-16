@@ -126,44 +126,58 @@ const ProfileQrCard = ({ user, onScanClick }) => {
   };
 
   return (
-    <div className="p-6 bg-base-200/50 rounded-xl border border-base-200 flex flex-col items-center text-center space-y-4">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-base font-semibold flex items-center justify-center gap-2">
-          <QrCode size={17} className="text-primary" />
-          My Shareable QR Code
+    <div className="space-y-2">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-base-content/45 px-1">
+        Share your profile
+      </span>
+
+      <div className="rounded-2xl bg-base-200 p-6 flex flex-col items-center text-center">
+        <h2 className="text-[15px] font-semibold flex items-center gap-2 text-base-content">
+          <QrCode size={16} className="text-primary" />
+          My QR code
         </h2>
-        <p className="text-xs opacity-70">
-          Allow others to scan and open a direct chat conversation with you instantly.
+        <p className="mt-1 text-xs text-base-content/45 max-w-xs">
+          Others can scan this to open a chat with you instantly.
         </p>
-      </div>
 
-      <div className="bg-white p-3 rounded-xl shadow-md border border-zinc-200">
-        <canvas
-          ref={canvasRef}
-          aria-label="Your profile QR code"
-          className="block select-none size-40"
-        />
-      </div>
+        {/* The code itself stays on white — QR contrast is a scanning
+            requirement, not a style choice. The ring softens it into the card. */}
+        <div className="mt-5 bg-white p-3.5 rounded-2xl shadow-lg ring-1 ring-black/5">
+          <canvas
+            ref={canvasRef}
+            aria-label="Your profile QR code"
+            className="block select-none size-40"
+          />
+        </div>
 
-      <p className="text-[11px] text-base-content/50 break-all max-w-xs select-all">{chatLink}</p>
+        <p className="mt-4 text-[11px] text-base-content/35 break-all max-w-xs select-all">
+          {chatLink}
+        </p>
 
-      <div className="flex flex-wrap justify-center gap-2">
-        <button onClick={handleCopy} className="btn btn-sm btn-outline text-xs gap-1.5">
-          <Copy size={14} />
-          Copy Chat Link
-        </button>
-        <button
-          onClick={handleDownload}
-          disabled={isSaving}
-          className="btn btn-sm btn-primary text-xs gap-1.5 text-primary-content"
-        >
-          <Download size={14} />
-          {isSaving ? "Saving…" : "Download QR"}
-        </button>
-        <button onClick={onScanClick} className="btn btn-sm btn-outline text-xs gap-1.5">
-          <ScanLine size={14} />
-          Scan QR Code
-        </button>
+        <div className="mt-5 grid grid-cols-2 gap-2.5 w-full max-w-xs">
+          <button
+            onClick={handleCopy}
+            className="h-11 rounded-xl bg-base-300/70 hover:bg-base-300 text-[13px] font-medium text-base-content active:scale-[0.97] transition-all flex items-center justify-center gap-1.5"
+          >
+            <Copy size={14} />
+            Copy link
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={isSaving}
+            className="h-11 rounded-xl bg-primary text-primary-content text-[13px] font-semibold shadow-lg shadow-primary/20 active:scale-[0.97] transition-all disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-1.5"
+          >
+            <Download size={14} />
+            {isSaving ? "Saving…" : "Download"}
+          </button>
+          <button
+            onClick={onScanClick}
+            className="col-span-2 h-11 rounded-xl bg-base-300/70 hover:bg-base-300 text-[13px] font-medium text-base-content active:scale-[0.97] transition-all flex items-center justify-center gap-1.5"
+          >
+            <ScanLine size={14} />
+            Scan someone&apos;s code
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -33,6 +33,28 @@ const SocialLinksRow = ({ user, variant = "list", emptyText = "No social links a
     );
   }
 
+  if (variant === "chips") {
+    // Icon + handle in a pill. Reads as content rather than as a table row,
+    // which is what makes it suit a profile's About block.
+    return (
+      <div className="flex flex-wrap gap-2">
+        {links.map(({ key, label, icon: Icon, colorClass, href, handle }) => (
+          <a
+            key={key}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={label}
+            className="inline-flex items-center gap-1.5 max-w-full px-3 py-1.5 rounded-full bg-base-300/70 hover:bg-base-300 transition-colors"
+          >
+            <Icon size={13} className={`${colorClass} flex-shrink-0`} />
+            <span className="text-[13px] text-base-content/80 truncate">{handle}</span>
+          </a>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-1.5">
       {links.map(({ key, label, icon: Icon, colorClass, href, handle }) => (
