@@ -53,6 +53,7 @@ import SignUpPage from './pages/SignUpPage'
 import SettingsPage from './pages/SettingsPage'
 import ProfilePage from './pages/ProfilePage'
 import LinkedDevicesPage from './pages/LinkedDevicesPage'
+import BlockedUsersPage from './pages/BlockedUsersPage'
 import useAuthStore from './store/useAuthStore'
 import { useChatStore } from './store/useChatStore'
 import { Loader, X, MessageSquare, Phone, Info } from 'lucide-react'
@@ -279,6 +280,7 @@ const App = () => {
         <Route path='/settings' element={authUser ? <SettingsPage /> : <Navigate to='/login' />} />
         <Route path='/profile' element={authUser ? <ProfilePage /> : <Navigate to='/login' />} />
         <Route path='/linked-devices' element={authUser ? <LinkedDevicesPage /> : <Navigate to='/login' />} />
+        <Route path='/blocked' element={authUser ? <BlockedUsersPage /> : <Navigate to='/login' />} />
         <Route path='/chat-with/:userId' element={authUser ? <ChatRedirectHandler /> : <PendingChatRedirect />} />
         <Route path='*' element={<Navigate to='/' />} />
       </Routes>

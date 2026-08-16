@@ -13,7 +13,7 @@ import fs from "fs";
 import cookieParser from 'cookie-parser';
 import cors from 'cors'
 import { app, server } from './lib/socket.js';
-import { startScheduler } from './jobs/scheduler.js';
+import { startScheduler, startMediaPurge } from './jobs/scheduler.js';
 import { getAllowedOrigins, isOriginAllowed } from './lib/origins.js';
 
 const ALLOWED_ORIGINS = getAllowedOrigins();
@@ -117,4 +117,6 @@ server.listen(PORT, () => {
   connectDB();
   // Start the scheduled message dispatcher
   startScheduler();
+  // Reclaim Cloudinary storage from expired disappearing messages
+  startMediaPurge();
 });

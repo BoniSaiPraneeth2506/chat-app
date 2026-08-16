@@ -413,6 +413,8 @@ const ChatContainer = () => {
     isGroupMessagesLoading,
   } = useGroupStore();
 
+  const [reactionsSheet, setReactionsSheet] = useState(null);
+
   const { authUser, onlineUsers } = useAuthStore();
   const { theme, wallpaper, privacyReadReceipts } = useThemeStore();
 
@@ -703,6 +705,20 @@ const ChatContainer = () => {
     );
   };
 
+  // Reactions store only a userId, so the name has to be resolved from
+  // whoever is on screen: the two people in a DM, the sidebar list, or the
+  // members of the open group.
+  const resolveReactor = (rawId) => {
+    const id = typeof rawId === "object" && rawId !== null ? rawId._id : rawId;
+    if (!id) return null;
+    if (id === authUser?._id) return { ...authUser, isMe: true };
+    if (selectedUser?._id === id) return selectedUser;
+    const fromList = users?.find((u) => u._id === id);
+    if (fromList) return fromList;
+    const member = selectedGroup?.members?.find((m) => (m.user?._id || m.user) === id);
+    return member?.user || null;
+  };
+
   const renderReactions = (message) => {
     if (!message.reactions || message.reactions.length === 0) return null;
 
@@ -716,15 +732,17 @@ const ChatContainer = () => {
     );
 
     return (
-      <div 
+      <div
         onClick={(e) => {
           e.stopPropagation();
-          if (myReaction) {
-            toggleReaction(message._id, myReaction.emoji);
-          }
+          // Opens the who-reacted sheet. Removing your own reaction still
+          // lives here — it's the first row of that sheet — so the old
+          // one-tap-to-remove behaviour is preserved, just one step deeper
+          // and now discoverable rather than hidden in a tooltip.
+          setReactionsSheet(message);
         }}
-        className={`absolute bottom-[-8px] right-[-4px] flex items-center gap-1 bg-base-200 border border-base-300 rounded-full px-1.5 py-0.5 shadow-sm text-[10px] select-none z-10 text-base-content font-medium cursor-pointer hover:bg-base-300 transition-colors ${myReaction ? "border-primary/50" : ""}`}
-        title={myReaction ? "Click to remove reaction" : ""}
+        className={`absolute bottom-[-8px] right-[-4px] flex items-center gap-1 bg-base-200 rounded-full px-1.5 py-0.5 shadow-sm text-[10px] select-none z-10 text-base-content font-medium cursor-pointer hover:bg-base-300 transition-colors ${myReaction ? "ring-1 ring-primary/50" : ""}`}
+        title="See who reacted"
       >
         <span className="flex gap-0.5">
           {Object.keys(counts).map((emoji) => (
@@ -1277,6 +1295,76 @@ const ChatContainer = () => {
           </div>
         </div>
       )}
+      {/* Who reacted — grouped by emoji, your own row removes the reaction */}
+      {reactionsSheet && (
+        <div
+          onClick={() => setReactionsSheet(null)}
+          className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center bg-black/65 backdrop-blur-[2px] cg-fade sm:p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full sm:max-w-sm max-h-[70dvh] bg-base-100 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col cg-sheet sm:cg-dialog"
+          >
+            <div className="sm:hidden pt-2.5 pb-1 flex justify-center flex-shrink-0">
+              <span className="w-9 h-1 rounded-full bg-base-content/20" />
+            </div>
+            <div className="flex items-center gap-3 px-5 pt-2 pb-3 flex-shrink-0">
+              <button
+                onClick={() => setReactionsSheet(null)}
+                data-modal-close
+                className="p-2 -ml-2 rounded-full text-base-content/70 hover:text-base-content hover:bg-base-200 active:scale-95 transition-all"
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+              <h3 className="font-semibold text-[17px] text-base-content">
+                Reactions
+                <span className="ml-2 text-sm font-normal text-base-content/45">
+                  {reactionsSheet.reactions?.length || 0}
+                </span>
+              </h3>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              {(reactionsSheet.reactions || []).map((reaction, i) => {
+                const person = resolveReactor(reaction.userId);
+                const isMe = person?.isMe;
+                return (
+                  <button
+                    key={`${reaction.userId}-${i}`}
+                    type="button"
+                    onClick={() => {
+                      if (!isMe) return;
+                      toggleReaction(reactionsSheet._id, reaction.emoji);
+                      setReactionsSheet(null);
+                    }}
+                    disabled={!isMe}
+                    className={`w-full flex items-center gap-3 px-2 py-2.5 rounded-2xl text-left transition-colors ${
+                      isMe ? "hover:bg-base-200 active:bg-base-300" : "cursor-default"
+                    }`}
+                  >
+                    <img
+                      src={person?.profilePic || "/avatar.png"}
+                      alt=""
+                      className="object-cover rounded-full size-10 flex-shrink-0"
+                    />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[15px] font-medium text-base-content truncate">
+                        {isMe ? "You" : displayNameOf(person, nicknames) || "Someone"}
+                      </span>
+                      {isMe && (
+                        <span className="block text-xs text-base-content/45">Tap to remove</span>
+                      )}
+                    </span>
+                    <span className="text-xl flex-shrink-0">{reaction.emoji}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Forward Modal */}
       {forwardingMessage && (
         <ForwardModal

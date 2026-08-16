@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
-import { MessageSquare, Settings, User, Laptop } from "lucide-react";
+import { MessageSquare, Settings, User, Laptop, ShieldOff } from "lucide-react";
 import { useGroupStore } from "../store/useGroupStore";
 
 const Navbar = () => {
@@ -56,6 +56,12 @@ const Navbar = () => {
                   <Link to="/settings" onClick={() => document.activeElement.blur()} className="flex items-center gap-2 rounded-xl">
                     <Settings size={16} />
                     Settings
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/blocked" onClick={() => document.activeElement.blur()} className="flex items-center gap-2 rounded-xl">
+                    <ShieldOff size={16} />
+                    Blocked
                   </Link>
                 </li>
                 <li>

@@ -60,12 +60,35 @@ export const useGroupStore = create((set, get) => ({
   groupLocalStream: null,
   groupCallStartTime: null,
   groupRemoteStreams: {}, // { [socketId]: { stream, user } }
+  raisedHands: {}, // { [userId]: true } — who currently has a hand up
+  isHandRaised: false,
   peerConnectionsRef: {}, // { [socketId]: RTCPeerConnection }
   // Internal callbacks for centralized signaling handlers
   onAllGroupCallParticipants: null,
   onGroupCallUserJoined: null,
   onGroupCallSignalReceived: null,
   onGroupUserLeftCall: null,
+
+  // Raise / lower your hand in the active group call.
+  toggleRaiseHand: () => {
+    const { activeGroupCall, isHandRaised } = get();
+    const socket = useAuthStore.getState().socket;
+    if (!activeGroupCall || !socket) return;
+    const raised = !isHandRaised;
+    set({ isHandRaised: raised });
+    socket.emit("groupRaiseHand", { groupId: activeGroupCall.groupId, raised });
+  },
+
+  // Ask everyone else to mute. Only the person who started the call may do
+  // this, and the server enforces that — a client cannot silence another
+  // client's microphone directly, so each one mutes itself on receipt.
+  muteAllParticipants: () => {
+    const { activeGroupCall } = get();
+    const socket = useAuthStore.getState().socket;
+    if (!activeGroupCall || !socket) return;
+    socket.emit("groupMuteAll", { groupId: activeGroupCall.groupId });
+    toast.success("Asked everyone to mute");
+  },
 
   // 1. Fetch User Groups
   getGroups: async () => {
@@ -541,6 +564,24 @@ export const useGroupStore = create((set, get) => ({
     });
 
     // ── Group Multi-Peer Call Event Listeners ──
+    socket.on("groupHandRaised", ({ userId, raised }) => {
+      set((state) => {
+        const raisedHands = { ...state.raisedHands };
+        if (raised) raisedHands[userId] = true;
+        else delete raisedHands[userId];
+        return { raisedHands };
+      });
+    });
+
+    // The server can't mute anyone's microphone, so this arrives as a request
+    // and each client silences itself.
+    socket.on("groupMuteAllRequested", () => {
+      const stream = get().groupLocalStream;
+      if (stream) stream.getAudioTracks().forEach((t) => (t.enabled = false));
+      set({ mutedByHostAt: Date.now() });
+      toast("You were muted by the host");
+    });
+
     socket.on("groupCallStarted", ({ groupId, type, groupName, startedBy }) => {
       const authUser = useAuthStore.getState().authUser;
       // Show modal for incoming group call and allow user to join (not auto-join)
@@ -591,6 +632,8 @@ export const useGroupStore = create((set, get) => ({
           groupLocalStream: null,
           groupRemoteStreams: {},
           peerConnectionsRef: {},
+          raisedHands: {},
+          isHandRaised: false,
         });
 
         toast(`Group call ended (${Math.max(0, Math.floor(duration/60))}m ${duration%60}s)`);

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useGroupStore } from "../store/useGroupStore";
-import { PhoneOff, Mic, MicOff, Video, VideoOff, Users } from "lucide-react";
+import { PhoneOff, Mic, MicOff, Video, VideoOff, Users, Hand, MicVocal } from "lucide-react";
+import useAuthStore from "../store/useAuthStore";
 
 const GroupCallModal = () => {
   const {
@@ -10,7 +11,13 @@ const GroupCallModal = () => {
     groupRemoteStreams,
     leaveGroupCall,
     startOrJoinGroupCall,
+    raisedHands,
+    isHandRaised,
+    toggleRaiseHand,
+    muteAllParticipants,
   } = useGroupStore();
+
+  const { authUser } = useAuthStore();
 
   const localVideoRef = useRef(null);
   const [isMuted, setIsMuted] = useState(false);
@@ -79,13 +86,24 @@ const GroupCallModal = () => {
             <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-0.5 rounded text-[11px] font-medium text-zinc-200">
               You {isMuted ? "(Muted)" : ""}
             </div>
+            {isHandRaised && (
+              <div className="absolute top-2 right-2 grid size-7 place-items-center rounded-full bg-amber-400 text-black shadow-lg">
+                <Hand size={14} />
+              </div>
+            )}
           </div>
 
           {/* Remote Streams */}
           {remoteSocketIds.map((sockId) => {
             const { stream, user } = groupRemoteStreams[sockId];
             return (
-              <RemoteParticipantVideo key={sockId} stream={stream} user={user} type={activeGroupCall.type} />
+              <RemoteParticipantVideo
+                key={sockId}
+                stream={stream}
+                user={user}
+                type={activeGroupCall.type}
+                handRaised={Boolean(raisedHands[user?._id])}
+              />
             );
           })}
         </div>
@@ -113,6 +131,29 @@ const GroupCallModal = () => {
               >
                 {isMuted ? <MicOff className="size-5" /> : <Mic className="size-5" />}
               </button>
+
+              <button
+                onClick={toggleRaiseHand}
+                title={isHandRaised ? "Lower hand" : "Raise hand"}
+                className={`p-3.5 rounded-full border transition-all ${
+                  isHandRaised
+                    ? "bg-amber-400/25 border-amber-400 text-amber-300 hover:bg-amber-400/35"
+                    : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700"
+                }`}
+              >
+                <Hand className="size-5" />
+              </button>
+
+              {/* Only the host sees this — the server rejects it from anyone else */}
+              {activeGroupCall.startedBy === authUser?._id && (
+                <button
+                  onClick={muteAllParticipants}
+                  title="Ask everyone to mute"
+                  className="p-3.5 rounded-full border bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700 transition-all"
+                >
+                  <MicVocal className="size-5" />
+                </button>
+              )}
 
               {activeGroupCall.type === "video" && (
                 <button
@@ -145,7 +186,7 @@ const GroupCallModal = () => {
 };
 
 // Sub-component to attach remote streams safely
-const RemoteParticipantVideo = ({ stream, user, type }) => {
+const RemoteParticipantVideo = ({ stream, user, type, handRaised }) => {
   const videoRef = useRef(null);
 
   useEffect(() => {
@@ -177,6 +218,11 @@ const RemoteParticipantVideo = ({ stream, user, type }) => {
       <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-0.5 rounded text-[11px] font-medium text-zinc-200">
         {user.fullName || "Group Member"}
       </div>
+      {handRaised && (
+        <div className="absolute top-2 right-2 grid size-7 place-items-center rounded-full bg-amber-400 text-black shadow-lg">
+          <Hand size={14} />
+        </div>
+      )}
     </div>
   );
 };

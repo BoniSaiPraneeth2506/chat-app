@@ -319,6 +319,28 @@ io.on("connection", async (socket) => {
     });
 
     // Host-initiated end of group call: ends call for everyone and creates call log
+    // ── Raise hand ──────────────────────────────────────────────────────
+    // Purely a broadcast flag: the server tracks nothing, it just relays so
+    // every participant's UI agrees on who has a hand up.
+    socket.on("groupRaiseHand", ({ groupId, raised }) => {
+      if (!groupId) return;
+      io.to(`group_call_${groupId}`).emit("groupHandRaised", {
+        userId,
+        socketId: socket.id,
+        raised: Boolean(raised),
+      });
+    });
+
+    // ── Mute all ────────────────────────────────────────────────────────
+    // A request, not a command: a server cannot switch off someone else's
+    // microphone, so each client mutes itself on receipt. Only whoever
+    // started the call may ask.
+    socket.on("groupMuteAll", ({ groupId }) => {
+      const call = activeGroupCalls.get(groupId);
+      if (!call || call.startedBy !== userId) return;
+      socket.to(`group_call_${groupId}`).emit("groupMuteAllRequested", { by: userId });
+    });
+
     socket.on("endGroupCall", async ({ groupId }) => {
         const runtime = activeGroupCalls.get(groupId);
         if (!runtime) return;

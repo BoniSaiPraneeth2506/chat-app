@@ -70,6 +70,7 @@ import User from "../models/user.model.js";
 import cloudinary from "../lib/cloudinary.js";
 import { getReceiverSocketId, io } from "../lib/socket.js";
 import sanitizeHtml from "sanitize-html";
+import { destroyMessageAssets, assetUrlsOf, destroyAssets } from "../lib/mediaCleanup.js";
 import {
   verifyAttachment,
   publicUrlForKey,
@@ -209,6 +210,25 @@ const setContactNickname = async (req, res) => {
   } catch (error) {
     console.error("Error in setContactNickname:", error.message);
     res.status(500).json({ message: "Could not save the nickname" });
+  }
+};
+
+/**
+ * The people this user has blocked, with enough profile to recognise them.
+ *
+ * `authUser.blockedUsers` is only an array of ids, and a blocked contact may
+ * have no chat history — so there is no guarantee the sidebar list contains
+ * them and the client cannot resolve the names on its own.
+ */
+const getBlockedUsers = async (req, res) => {
+  try {
+    const me = await User.findById(req.user._id)
+      .select("blockedUsers")
+      .populate("blockedUsers", "fullName email profilePic bio");
+    res.status(200).json(me?.blockedUsers || []);
+  } catch (error) {
+    console.error("Error in getBlockedUsers:", error.message);
+    res.status(500).json({ message: "Could not load blocked users" });
   }
 };
 
@@ -628,15 +648,36 @@ const deleteMessage = async (req, res) => {
         message.deletedFor.push(userId);
         await message.save();
       }
+
+      // Hidden by both participants (or by the only participant, in a
+      // self-chat) means it is unreachable — reclaim the row and its media
+      // instead of keeping a document nobody can ever load.
+      const participants = new Set(
+        [message.senderId?.toString(), message.receiverId?.toString()].filter(Boolean)
+      );
+      const hiddenBy = new Set(message.deletedFor.map((id) => id.toString()));
+      const hiddenByAll = !message.groupId && [...participants].every((id) => hiddenBy.has(id));
+
+      if (hiddenByAll) {
+        await destroyMessageAssets(message);
+        await Message.deleteOne({ _id: message._id });
+        return res.status(200).json({ _id: message._id, purged: true });
+      }
     } else if (type === "everyone") {
       // Validate that caller is the sender
       if (message.senderId.toString() !== userId.toString()) {
         return res.status(403).json({ message: "You can only delete your own messages for everyone" });
       }
 
+      // Free the Cloudinary assets before clearing the URLs — once the
+      // fields are blanked there is no record of what to delete.
+      await destroyMessageAssets(message);
+
       message.isDeletedForEveryone = true;
       message.text = "";
       message.image = "";
+      message.images = [];
+      message.voice = undefined;
       message.reactions = []; // Clear reactions
       await message.save();
 
@@ -679,7 +720,26 @@ const clearChatHistory = async (req, res) => {
       }
     );
 
-    res.status(200).json({ message: "Chat history cleared successfully" });
+    // Anything now hidden by both sides is unreachable forever, so reclaim
+    // the media and the rows. Clearing a long chat is the single biggest
+    // source of stranded uploads, since every image in it becomes orphaned.
+    const purgeable = await Message.find({
+      $or: [
+        { senderId: myId, receiverId: contactId, groupId: null },
+        { senderId: contactId, receiverId: myId, groupId: null },
+      ],
+      deletedFor: { $all: [myId, contactId] },
+    }).select("image images voice");
+
+    if (purgeable.length > 0) {
+      await destroyAssets(purgeable.flatMap(assetUrlsOf));
+      await Message.deleteMany({ _id: { $in: purgeable.map((m) => m._id) } });
+    }
+
+    res.status(200).json({
+      message: "Chat history cleared successfully",
+      purged: purgeable.length,
+    });
   } catch (error) {
     console.error("Error in clearChatHistory:", error);
     res.status(500).json({ message: "Failed to clear chat history" });
@@ -1031,4 +1091,5 @@ export {
   deleteMessagesBulk
   ,cancelScheduledMessage
   ,setContactNickname
+  ,getBlockedUsers
 };
