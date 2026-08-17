@@ -653,7 +653,7 @@ const ChatContainer = () => {
             src={message.image}
             alt="Attachment"
             onClick={() => setLightboxImage(message.image)}
-            className="sm:max-w-[180px] rounded-md mb-1.5 cursor-zoom-in hover:opacity-95 transition-opacity"
+            className="max-w-[220px] sm:max-w-[280px] max-h-[320px] w-auto object-cover rounded-xl mb-1.5 cursor-zoom-in hover:opacity-95 transition-opacity"
           />
         ) : null}
         {message.voice && <VoiceNote src={message.voice} />}

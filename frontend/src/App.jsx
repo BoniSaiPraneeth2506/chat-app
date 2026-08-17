@@ -445,12 +445,16 @@ const App = () => {
           
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="relative max-w-full max-h-[85vh] aspect-square overflow-hidden rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200"
+            className="relative max-w-full max-h-[85vh] overflow-hidden rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200"
           >
-            <img 
-              src={lightboxImage} 
-              alt="Profile Pic Expanded" 
-              className="w-full h-full object-contain max-h-[85vh]"
+            {/* No forced aspect ratio. This started life as a profile-picture
+                viewer, where square was fine, but it now opens chat photos too —
+                and aspect-square letterboxed every portrait and landscape shot
+                into a square instead of using the screen. */}
+            <img
+              src={lightboxImage}
+              alt="Expanded"
+              className="block max-w-full max-h-[85vh] w-auto h-auto object-contain"
             />
           </div>
         </div>

@@ -566,7 +566,7 @@ const MessageInput = () => {
                 <img
                   src={imgSrc}
                   alt={`Preview ${idx + 1}`}
-                  className="object-cover w-20 h-20 border rounded-lg border-zinc-700 shadow-sm"
+                  className="object-cover w-24 h-24 rounded-xl"
                 />
                 {isUploading && (
                   <div className="absolute inset-0 bg-black/30 rounded-lg flex items-end">
@@ -583,29 +583,30 @@ const MessageInput = () => {
                 )}
                 <button
                   onClick={() => removeImage(idx)}
-                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-base-300
-                  flex items-center justify-center shadow-md hover:bg-base-200"
+                  className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/55 backdrop-blur-sm
+                  flex items-center justify-center hover:bg-black/75 transition-colors"
                   type="button"
+                  title="Remove"
                 >
-                  <X className="size-3 text-base-content" />
+                  <X className="size-3.5 text-white" />
                 </button>
                 {!isUploading && (
                   <button
                     onClick={() => { haptic("tap"); setEditingIndex(idx); }}
-                    className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-base-300 flex items-center justify-center shadow-md hover:bg-base-200"
+                    className="absolute top-1 left-1 w-6 h-6 rounded-full bg-black/55 backdrop-blur-sm flex items-center justify-center hover:bg-black/75 transition-colors"
                     type="button"
                     title="Edit photo"
                   >
-                    <Pencil className="size-3 text-base-content" />
+                    <Pencil className="size-3.5 text-white" />
                   </button>
                 )}
                 {imagePreviews.length === 1 && (
                   <button
                     onClick={() => setIsOneView(!isOneView)}
-                    className={`absolute -bottom-1.5 -right-1.5 w-6 h-6 rounded-full flex items-center justify-center shadow-md font-bold text-xs transition-all border select-none
-                      ${isOneView 
-                        ? "bg-emerald-500 text-white border-emerald-600 ring-2 ring-emerald-500/20 scale-110" 
-                        : "bg-base-300 text-base-content border-base-300 hover:bg-base-200"
+                    className={`absolute bottom-1 right-1 w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs transition-all select-none
+                      ${isOneView
+                        ? "bg-emerald-500 text-white scale-110"
+                        : "bg-black/55 backdrop-blur-sm text-white hover:bg-black/75"
                       }
                     `}
                     title={isOneView ? "View Once Photo enabled" : "Set as View Once Photo"}
