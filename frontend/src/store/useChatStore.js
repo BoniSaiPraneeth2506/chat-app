@@ -74,6 +74,18 @@ import { isNetworkError } from "../lib/network";
 // "dm:<userId>" keeps a DM's cache distinct from a group's ("group:<id>").
 const dmKey = (userId) => `dm:${userId}`;
 
+/** Content carried over when forwarding; a deleted message forwards empty. */
+const buildForwardPayload = (message) => {
+  const payload = { isForwarded: true };
+  if (!message.isDeletedForEveryone) {
+    if (message.text) payload.text = message.text;
+    if (message.image) payload.image = message.image;
+    if (message.images) payload.images = message.images;
+    if (message.voice) payload.voice = message.voice;
+  }
+  return payload;
+};
+
 let callStartTime = null;
 let pendingIceCandidates = [];
 
@@ -109,6 +121,12 @@ export const useChatStore = create((set, get) => ({
   editingMessage: null,
   forwardingMessage: null,
   setForwardingMessage: (message) => set({ forwardingMessage: message }),
+
+  // Multi-select forwarding keeps its own field rather than overloading
+  // `forwardingMessage` with an array, so every existing single-message
+  // caller and the modal's preview logic stay unchanged.
+  forwardingMessages: [],
+  setForwardingMessages: (messages) => set({ forwardingMessages: messages || [] }),
   showArchivedOnly: false,
   isSelectionMode: false,
   selectedMessageIds: [],
@@ -567,14 +585,7 @@ export const useChatStore = create((set, get) => ({
 
   forwardMessage: async (message, recipientIds) => {
     try {
-      // Build forward payload from original message content
-      const payload = { isForwarded: true };
-      if (!message.isDeletedForEveryone) {
-        if (message.text) payload.text = message.text;
-        if (message.image) payload.image = message.image;
-        if (message.images) payload.images = message.images;
-        if (message.voice) payload.voice = message.voice;
-      }
+      const payload = buildForwardPayload(message);
 
       const results = await Promise.all(
         recipientIds.map((id) => axiosInstance.post(`/messages/send/${id}`, payload))
@@ -599,6 +610,48 @@ export const useChatStore = create((set, get) => ({
       );
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to forward message");
+    }
+  },
+
+  /**
+   * Forward several messages at once (multi-select).
+   *
+   * Messages are sent one after another rather than all in parallel so they
+   * arrive in the order they were selected — fanning them out concurrently
+   * would let the server assign timestamps in an arbitrary order and scramble
+   * the transcript at the far end. Recipients within a single message still go
+   * out in parallel, since their ordering is independent.
+   */
+  forwardMessages: async (msgs, recipientIds) => {
+    if (!msgs?.length || !recipientIds?.length) return;
+    try {
+      const authUser = useAuthStore.getState().authUser;
+
+      for (const message of msgs) {
+        const payload = buildForwardPayload(message);
+        const results = await Promise.all(
+          recipientIds.map((id) => axiosInstance.post(`/messages/send/${id}`, payload))
+        );
+
+        results.forEach((res, idx) => {
+          const sentMsg = res.data;
+          const { selectedUser } = get();
+          set((state) => ({
+            latestMessages: { ...state.latestMessages, [recipientIds[idx]]: sentMsg },
+          }));
+          if (selectedUser && recipientIds[idx] === selectedUser._id) {
+            set((state) => ({ messages: [...state.messages, sentMsg] }));
+          }
+          if (authUser) cacheMessages(authUser._id, dmKey(recipientIds[idx]), [sentMsg]);
+        });
+      }
+
+      const chats = `${recipientIds.length} chat${recipientIds.length > 1 ? "s" : ""}`;
+      toast.success(
+        msgs.length > 1 ? `Forwarded ${msgs.length} messages to ${chats}` : `Forwarded to ${chats}`
+      );
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to forward messages");
     }
   },
 

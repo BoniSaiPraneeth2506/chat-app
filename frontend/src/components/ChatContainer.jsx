@@ -405,6 +405,8 @@ const ChatContainer = () => {
     viewOneViewMessage,
     forwardingMessage,
     setForwardingMessage,
+    forwardingMessages,
+    setForwardingMessages,
   } = useChatStore();
 
   const {
@@ -798,6 +800,13 @@ const ChatContainer = () => {
     if (!isSelectionMode) setMobileEmojiId(null);
   }, [isSelectionMode]);
 
+  // Once a second message is picked the gesture has become a multi-select, so
+  // the reaction row is dismissed for good — clearing the id (rather than only
+  // hiding it in render) stops it springing back if the count drops to one.
+  useEffect(() => {
+    if (selectedMessageIds.length >= 2) setMobileEmojiId(null);
+  }, [selectedMessageIds.length]);
+
   useEffect(() => {
     prevMessagesLengthRef.current = 0;
     lastMessageIdRef.current = null;
@@ -977,7 +986,7 @@ const ChatContainer = () => {
                   key={message.tempId || message._id}
                   className={`flex items-center gap-2 group relative transition-colors duration-150 -mx-4 px-6 lg:mx-0 lg:px-2 ${
                     isSelectionMode && selectedMessageIds.includes(message._id)
-                      ? "bg-primary/25 lg:bg-transparent"
+                      ? "bg-primary/30 lg:bg-transparent"
                       : ""
                   }`}
                 >
@@ -1060,10 +1069,14 @@ const ChatContainer = () => {
                   )}
 
                   {/* ── Mobile: emoji bar — long press (inline near message) ── */}
-                  {mobileEmojiId === message._id && (
+                  {mobileEmojiId === message._id && selectedMessageIds.length < 2 && (
                     <div 
                       onClick={(e) => e.stopPropagation()}
-                      className="mobile-action-bar absolute right-0 top-[-44px] lg:hidden animate-in zoom-in-95 duration-150 flex items-center bg-base-100 border border-base-300 rounded-full px-3 py-1.5 shadow-xl z-30 gap-2"
+                      className={`mobile-action-bar absolute top-[-40px] lg:hidden animate-in zoom-in-95 duration-150 flex items-center bg-base-100 rounded-full px-2 py-1 shadow-xl z-30 gap-0.5 ${
+                        (message.senderId?._id || message.senderId) === authUser._id
+                          ? "right-0"
+                          : "left-0"
+                      }`}
                     >
                       {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((emoji) => (
                         <button 
@@ -1074,7 +1087,7 @@ const ChatContainer = () => {
                             setMobileEmojiId(null);
                             if (isSelectionMode) setSelectionMode(false);
                           }}
-                          className="text-xl active:scale-125 transition-transform p-1"
+                          className="text-base active:scale-125 transition-transform px-1 py-0.5"
                         >
                           {emoji}
                         </button>
@@ -1420,6 +1433,16 @@ const ChatContainer = () => {
         <ForwardModal
           message={forwardingMessage}
           onClose={() => setForwardingMessage(null)}
+          users={users || []}
+          authUser={authUser}
+        />
+      )}
+
+      {/* Multi-select forward, opened from the selection header */}
+      {forwardingMessages.length > 0 && (
+        <ForwardModal
+          messages={forwardingMessages}
+          onClose={() => setForwardingMessages([])}
           users={users || []}
           authUser={authUser}
         />

@@ -75,9 +75,10 @@
 // };
 // export default ChatHeader;
 
-import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image, CheckSquare, Users, Info, Mic, MicOff, Maximize2, CornerUpLeft, Pin, Trash2, Forward, Pencil, Tag, Download } from "lucide-react";
+import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image, CheckSquare, Users, Info, Mic, MicOff, Maximize2, CornerUpLeft, Pin, Trash2, Forward, Pencil, Tag, Download, Copy } from "lucide-react";
 import { useNicknames, displayNameOf, hasNickname } from "../lib/contacts";
 import { saveTextFile } from "../lib/download";
+import { copyText, messagesToClipboardText } from "../lib/clipboard";
 import axiosInstance from "../lib/axios";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
@@ -131,6 +132,7 @@ const ChatHeader = () => {
     setReplyingToMessage,
     setEditingMessage,
     setForwardingMessage,
+    setForwardingMessages,
     togglePinMessage,
   } = useChatStore();
 
@@ -165,6 +167,26 @@ const ChatHeader = () => {
     && (Date.now() - new Date(soleSelected.createdAt).getTime() <= 15 * 60 * 1000);
 
   const exitSelection = () => setSelectionMode(false);
+
+  // Multi-select actions. These are rendered mobile-only (lg:hidden) so the
+  // desktop toolbar keeps exactly the buttons it had before.
+  const copyableCount = selectedMsgs.filter((m) => m.text && !m.isDeletedForEveryone).length;
+  const forwardableMsgs = selectedMsgs.filter((m) => !m.isDeletedForEveryone);
+
+  const handleCopySelected = async () => {
+    const text = messagesToClipboardText(selectedMsgs, {
+      authUserId: authUser?._id,
+      contactName,
+    });
+    if (!text) {
+      toast.error("Nothing to copy");
+      return;
+    }
+    const ok = await copyText(text);
+    if (ok) toast.success(copyableCount > 1 ? `${copyableCount} messages copied` : "Copied");
+    else toast.error("Couldn't copy");
+    exitSelection();
+  };
 
   if (isSelectionMode && !selectedGroup) {
     return (
@@ -220,6 +242,27 @@ const ChatHeader = () => {
                 )}
               </ul>
             </div>
+          )}
+          {/* Copy — mobile only, mirrors WhatsApp's multi-select toolbar */}
+          {copyableCount > 0 && (
+            <button
+              onClick={handleCopySelected}
+              className="lg:hidden p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+              title="Copy"
+            >
+              <Copy size={18} />
+            </button>
+          )}
+          {/* Forward for 2+ — the single-message case is handled below and
+              already shows on both breakpoints, so this only fills the gap. */}
+          {forwardableMsgs.length >= 2 && (
+            <button
+              onClick={() => { setForwardingMessages(forwardableMsgs); exitSelection(); }}
+              className="lg:hidden p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+              title={`Forward ${forwardableMsgs.length} messages`}
+            >
+              <Forward size={18} />
+            </button>
           )}
           {soleSelected && !soleSelected.isDeletedForEveryone && (
             <button

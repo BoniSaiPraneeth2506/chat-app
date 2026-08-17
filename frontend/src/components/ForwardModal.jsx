@@ -2,11 +2,16 @@ import { useState } from "react";
 import { useChatStore } from "../store/useChatStore";
 import { X, Search, Forward } from "lucide-react";
 
-const ForwardModal = ({ message, onClose, users, authUser }) => {
+// Accepts either a single `message` or a `messages` array (multi-select).
+// Normalising here keeps both call sites simple.
+const ForwardModal = ({ message, messages, onClose, users, authUser }) => {
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState([]);
   const [isSending, setIsSending] = useState(false);
-  const { forwardMessage } = useChatStore();
+  const { forwardMessage, forwardMessages } = useChatStore();
+
+  const items = messages?.length ? messages : message ? [message] : [];
+  const isBulk = items.length > 1;
 
   // Include self-chat (Personal Notes) + all other users
   const allContacts = [
@@ -25,21 +30,29 @@ const ForwardModal = ({ message, onClose, users, authUser }) => {
   };
 
   const handleForward = async () => {
-    if (selectedIds.length === 0) return;
+    if (selectedIds.length === 0 || items.length === 0) return;
     setIsSending(true);
-    await forwardMessage(message, selectedIds);
+    if (isBulk) await forwardMessages(items, selectedIds);
+    else await forwardMessage(items[0], selectedIds);
     setIsSending(false);
     onClose();
   };
 
   // Preview of the message being forwarded
-  const msgPreview = message.isDeletedForEveryone
-    ? "This message was deleted"
-    : message.image
-    ? "📷 Photo"
-    : message.voice
-    ? "🎙️ Voice message"
-    : message.text || "Message";
+  const previewOf = (m) =>
+    m.isDeletedForEveryone
+      ? "This message was deleted"
+      : m.image
+      ? "📷 Photo"
+      : m.voice
+      ? "🎙️ Voice message"
+      : m.text || "Message";
+
+  const msgPreview = isBulk
+    ? items.map(previewOf).join("  •  ")
+    : items.length
+    ? previewOf(items[0])
+    : "";
 
   return (
     <div
@@ -52,7 +65,9 @@ const ForwardModal = ({ message, onClose, users, authUser }) => {
         <div className="flex items-center justify-between px-5 py-4 border-b border-base-300 flex-shrink-0">
           <div className="flex items-center gap-2">
             <Forward size={17} className="text-primary" />
-            <h3 className="font-semibold text-base-content text-[15px]">Forward message</h3>
+  <h3 className="font-semibold text-base-content text-[15px]">
+            {isBulk ? `Forward ${items.length} messages` : "Forward message"}
+            </h3>
           </div>
           <button
             onClick={onClose}
@@ -65,7 +80,7 @@ const ForwardModal = ({ message, onClose, users, authUser }) => {
         {/* Message preview */}
         <div className="px-5 py-3 border-b border-base-300 bg-base-200/40 flex-shrink-0">
           <p className="text-[10px] text-base-content/40 uppercase tracking-wider font-semibold mb-1">
-            Forwarding
+            {isBulk ? `Forwarding ${items.length} messages` : "Forwarding"}
           </p>
           <p className="text-sm text-base-content/75 truncate">{msgPreview}</p>
         </div>

@@ -6,6 +6,7 @@ import { Capacitor } from "@capacitor/core";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
 import { buildChatLink } from "../lib/utils";
+import { copyText } from "../lib/clipboard";
 
 // The QR is rendered locally with `qrcode` instead of being fetched as an
 // <img> from a public QR web service. That keeps it working offline, removes
@@ -15,32 +16,6 @@ import { buildChatLink } from "../lib/utils";
 
 const PREVIEW_SIZE = 200;
 const EXPORT_SIZE = 720;
-
-/** Clipboard API needs a secure context; keep a legacy path for the rest. */
-const copyText = async (text) => {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // Permission/security failure — fall through to the textarea path.
-  }
-  try {
-    const textarea = document.createElement("textarea");
-    textarea.value = text;
-    textarea.setAttribute("readonly", "");
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
-    document.body.appendChild(textarea);
-    textarea.select();
-    const ok = document.execCommand("copy");
-    document.body.removeChild(textarea);
-    return ok;
-  } catch {
-    return false;
-  }
-};
 
 const ProfileQrCard = ({ user, onScanClick }) => {
   const canvasRef = useRef(null);
