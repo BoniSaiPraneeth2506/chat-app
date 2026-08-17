@@ -540,6 +540,7 @@ export const useGroupStore = create((set, get) => ({
     socket.off("newGroupMessage");
     socket.off("groupPollUpdated");
     socket.off("groupMessageDeleted");
+    socket.off("groupMessageEdited");
     socket.off("groupCreated");
     socket.off("groupUpdated");
     socket.off("groupTyping");
@@ -596,6 +597,20 @@ export const useGroupStore = create((set, get) => ({
         latestGroupMessages: state.latestGroupMessages[message.groupId]?._id === message._id
           ? { ...state.latestGroupMessages, [message.groupId]: message }
           : state.latestGroupMessages,
+      }));
+      const authUser = useAuthStore.getState().authUser;
+      if (authUser) updateCachedMessage(authUser._id, message._id, message);
+    });
+
+    // An edit made by another member. Without this the change only showed up
+    // after reopening the group.
+    socket.on("groupMessageEdited", (message) => {
+      set((state) => ({
+        groupMessages: state.groupMessages.map((m) => (m._id === message._id ? message : m)),
+        latestGroupMessages:
+          state.latestGroupMessages[message.groupId]?._id === message._id
+            ? { ...state.latestGroupMessages, [message.groupId]: message }
+            : state.latestGroupMessages,
       }));
       const authUser = useAuthStore.getState().authUser;
       if (authUser) updateCachedMessage(authUser._id, message._id, message);
@@ -737,7 +752,10 @@ export const useGroupStore = create((set, get) => ({
       socket.off("newGroupMessage");
       socket.off("groupPollUpdated");
       socket.off("groupMessageDeleted");
+      socket.off("groupMessageEdited");
+    socket.off("groupMessageEdited");
     socket.off("groupMessageDeleted");
+    socket.off("groupMessageEdited");
       socket.off("groupCreated");
       socket.off("groupUpdated");
       socket.off("groupTyping");

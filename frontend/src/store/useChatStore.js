@@ -161,6 +161,10 @@ export const useChatStore = create((set, get) => ({
   forwardingMessage: null,
   setForwardingMessage: (message) => set({ forwardingMessage: message }),
 
+  // Bumped when something (an edit) should pull the view back to the newest
+  // message. A counter rather than a boolean so repeated requests each fire.
+  scrollToBottomSignal: 0,
+
   // Multi-select forwarding keeps its own field rather than overloading
   // `forwardingMessage` with an array, so every existing single-message
   // caller and the modal's preview logic stay unchanged.
@@ -1273,8 +1277,12 @@ export const useChatStore = create((set, get) => ({
       set((state) => ({
         messages: state.messages.map((msg) =>
           msg._id === messageId ? updatedMessage : msg
-        )
+        ),
+        // Bring the conversation back to the newest message after an edit, so
+        // the view is not left parked at whatever older message was edited.
+        scrollToBottomSignal: state.scrollToBottomSignal + 1,
       }));
+      patchGroupMessageLocally(messageId, updatedMessage);
       const authUser = useAuthStore.getState().authUser;
       if (authUser) updateCachedMessage(authUser._id, messageId, updatedMessage);
       toast.success("Message edited");

@@ -286,16 +286,40 @@ export const updateMemberRole = async (req, res) => {
 export const getGroupMessages = async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { limit = 30, skip = 0 } = req.query;
+    const userId = req.user._id;
+    const limit = parseInt(req.query.limit) || 0;
+    const skip = parseInt(req.query.skip) || 0;
 
-    const messages = await Message.find({ groupId })
-      .populate("senderId", "fullName email profilePic")
-      .populate("replyTo")
-      .populate("poll.options.votes", "fullName profilePic")
-      .sort({ createdAt: 1 })
-      .skip(Number(skip))
-      .limit(Number(limit));
+    // Membership check. This endpoint previously required only a valid login,
+    // so any authenticated user could read any group's messages by id.
+    const group = await Group.findById(groupId).select("members.user");
+    if (!group) return res.status(404).json({ message: "Group not found" });
+    const isMember = group.members.some((m) => m.user?.toString() === userId.toString());
+    if (!isMember) return res.status(403).json({ message: "Not a member of this group" });
 
+    // Messages the caller deleted for themselves stay hidden. Without this,
+    // "delete for me" in a group looked like it worked and then came back on
+    // the next load, because only local state had dropped them.
+    const query = { groupId, deletedFor: { $ne: userId } };
+
+    const base = () =>
+      Message.find(query)
+        .populate("senderId", "fullName email profilePic")
+        .populate("replyTo")
+        .populate("poll.options.votes", "fullName profilePic");
+
+    // A page must be taken from the NEWEST end and then flipped back into
+    // chronological order — the same shape getMessages uses for DMs. Sorting
+    // ascending and then limiting returned the OLDEST N instead, so a group
+    // with more than the default page size showed only its opening messages
+    // and every recent one appeared to be missing. It also made the sidebar's
+    // `?limit=1` "latest message" preview show the group's first message.
+    if (limit > 0) {
+      const page = await base().sort({ createdAt: -1 }).skip(skip).limit(limit);
+      return res.status(200).json(page.reverse());
+    }
+
+    const messages = await base().sort({ createdAt: 1 });
     res.status(200).json(messages);
   } catch (error) {
     console.error("Error fetching group messages:", error);

@@ -858,10 +858,19 @@ const editMessage = async (req, res) => {
     message.isEdited = true;
     await message.save();
 
-    const receiverId = message.receiverId.toString();
-    const receiverSocketId = getReceiverSocketId(receiverId);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("messageEdited", message);
+    // Same shape of bug the delete paths had: a group message has no
+    // receiverId, so reading it unguarded threw and the edit came back 500.
+    if (message.groupId) {
+      const populated = await message.populate("senderId", "fullName profilePic");
+      io.to(`group_${message.groupId.toString()}`).emit("groupMessageEdited", populated);
+      return res.status(200).json(populated);
+    }
+
+    if (message.receiverId) {
+      const receiverSocketId = getReceiverSocketId(message.receiverId.toString());
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit("messageEdited", message);
+      }
     }
 
     res.status(200).json(message);

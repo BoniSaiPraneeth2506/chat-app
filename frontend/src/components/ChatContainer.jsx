@@ -408,6 +408,7 @@ const ChatContainer = () => {
     setForwardingMessage,
     forwardingMessages,
     setForwardingMessages,
+    scrollToBottomSignal,
   } = useChatStore();
 
   const {
@@ -785,6 +786,13 @@ const ChatContainer = () => {
       getMessages(selectedUser._id);
     }
   }, [selectedUser?._id, getMessages]);
+
+  // An edit leaves the list the same length, so the normal
+  // new-message autoscroll never fires. Follow the store's explicit request.
+  useEffect(() => {
+    if (!scrollToBottomSignal) return;
+    messageEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [scrollToBottomSignal]);
 
   // Selection mode can end from ChatHeader's toolbar (back button, or an
   // action that exits it) — drop the emoji row too so it doesn't linger.

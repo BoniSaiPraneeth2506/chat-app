@@ -82,6 +82,19 @@ const MessageInput = () => {
     if (editingMessage) {
       setText(editingMessage.text || "");
       if (replyingToMessage) setReplyingToMessage(null); // Cancel reply if editing
+      // Raise the keyboard, and put the caret after the existing text so the
+      // edit can be continued rather than overtyped.
+      requestAnimationFrame(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.focus();
+        const end = el.value?.length ?? 0;
+        try {
+          el.setSelectionRange(end, end);
+        } catch {
+          // Not all input types support selection ranges.
+        }
+      });
     }
   }, [editingMessage]);
 
@@ -297,7 +310,14 @@ const MessageInput = () => {
     setTimeout(() => setIsSendingAnimation(false), 250);
 
     try {
-      if (selectedGroup) {
+      if (currentEditing) {
+        // Checked ahead of selectedGroup: an edit is an edit in both DMs and
+        // groups. With the group branch first, submitting an edit in a group
+        // sent a brand new message instead, which is where the duplicates came
+        // from.
+        await editMessage(currentEditing._id, messageText);
+        setEditingMessage(null);
+      } else if (selectedGroup) {
         await sendGroupMessage({
           text: messageText,
           image: currentImages[0] || "",
@@ -309,9 +329,6 @@ const MessageInput = () => {
         setMentionIds([]);
         setScheduledAt("");
         if (replyingToMessage) setReplyingToMessage(null);
-      } else if (currentEditing) {
-        await editMessage(currentEditing._id, messageText);
-        setEditingMessage(null);
       } else {
         if (currentImages.length > 0) {
           // Use progress-enabled send for images so we can show upload progress and allow cancel
@@ -368,6 +385,11 @@ const MessageInput = () => {
       }
     } catch (error) {
       console.error("Failed to send message:", error);
+    } finally {
+      // Send moves focus to the button, which drops the keyboard on Android.
+      // Returning focus keeps it up until the user dismisses it themselves,
+      // matching how sending a normal message behaves.
+      inputRef.current?.focus();
     }
   };
 
