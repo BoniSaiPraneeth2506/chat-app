@@ -973,13 +973,27 @@ const ChatContainer = () => {
 
               return [
                 isNewDay && <DateSeparator key={`sep-${message.tempId || message._id}-d`} date={message.createdAt} />,
-                <div key={message.tempId || message._id} className="flex items-center gap-2 w-full group relative px-2">
+                <div
+                  key={message.tempId || message._id}
+                  className={`flex items-center gap-2 group relative transition-colors duration-150 -mx-4 px-6 lg:mx-0 lg:px-2 ${
+                    isSelectionMode && selectedMessageIds.includes(message._id)
+                      ? "bg-primary/25 lg:bg-transparent"
+                      : ""
+                  }`}
+                >
+                  {/* Mobile selection is shown by tinting the whole row (above),
+                      WhatsApp-style. The negative margin lets that tint bleed
+                      through the scroll container's p-4 so the band spans the
+                      full width; the matching px-6 keeps the bubble in exactly
+                      the same place as the old px-2 did, so nothing moves.
+                      Desktop keeps its checkbox unchanged — hence hidden lg:block
+                      here and lg:bg-transparent above. */}
                   {isSelectionMode && !message.isCallLog && (
-                    <input 
-                      type="checkbox" 
+                    <input
+                      type="checkbox"
                       checked={selectedMessageIds.includes(message._id)}
                       onChange={() => toggleMessageSelection(message._id)}
-                      className="checkbox checkbox-primary checkbox-sm border-base-content/30 select-none mr-2 cursor-pointer z-20"
+                      className="hidden lg:block checkbox checkbox-primary checkbox-sm border-base-content/30 select-none mr-2 cursor-pointer z-20"
                     />
                   )}
                   <div
@@ -1070,7 +1084,13 @@ const ChatContainer = () => {
 
                   {/* ── Desktop: full hover bar (emojis + actions) ── */}
                   {!isSelectionMode && (
-                    <div className="absolute right-0 top-[-30px] opacity-0 group-hover:opacity-100 transition-all duration-200 hidden lg:flex items-center bg-base-200 border border-base-300 rounded-full px-2 py-1 shadow-md z-10 gap-1.5 pointer-events-auto">
+                    <div
+                      className={`absolute top-[-30px] opacity-0 group-hover:opacity-100 transition-all duration-200 hidden lg:flex items-center bg-base-200 rounded-full px-2 py-1 shadow-lg z-10 gap-1.5 pointer-events-auto ${
+                        (message.senderId?._id || message.senderId) === authUser._id
+                          ? "right-0"
+                          : "left-0"
+                      }`}
+                    >
                       {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((emoji) => (
                         <button key={emoji} onClick={() => toggleReaction(message._id, emoji)} className="hover:scale-125 transition-transform duration-100 text-sm">
                           {emoji}
