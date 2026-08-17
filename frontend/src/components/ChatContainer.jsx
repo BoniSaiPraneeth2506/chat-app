@@ -986,7 +986,7 @@ const ChatContainer = () => {
                   key={message.tempId || message._id}
                   className={`flex items-center gap-2 group relative transition-colors duration-150 -mx-4 px-6 lg:mx-0 lg:px-2 ${
                     isSelectionMode && selectedMessageIds.includes(message._id)
-                      ? "bg-primary/30 lg:bg-transparent"
+                      ? "msg-selected"
                       : ""
                   }`}
                 >
