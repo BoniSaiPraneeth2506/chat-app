@@ -53,6 +53,7 @@ const ProfilePage = () => {
     bio: authUser?.bio || "",
     link: authUser?.link || "",
     onlinePrivacy: authUser?.onlinePrivacy !== false,
+    typingPrivacy: authUser?.typingPrivacy !== false,
     socialLinks: toSocialLinksForm(authUser),
   });
 
@@ -114,6 +115,7 @@ const ProfilePage = () => {
       bio: authUser?.bio || "",
       link: authUser?.link || "",
       onlinePrivacy: authUser?.onlinePrivacy !== false,
+    typingPrivacy: authUser?.typingPrivacy !== false,
       socialLinks: toSocialLinksForm(authUser),
     });
     setIsEditing(true);
@@ -137,6 +139,7 @@ const ProfilePage = () => {
         bio: formData.bio.trim(),
         link: formData.link.trim(),
         onlinePrivacy: formData.onlinePrivacy,
+        typingPrivacy: formData.typingPrivacy,
         socialLinks: Object.fromEntries(
           Object.entries(formData.socialLinks).map(([key, value]) => [key, value.trim()])
         ),
@@ -357,6 +360,21 @@ const ProfilePage = () => {
                   onChange={(e) => setFormData({ ...formData, onlinePrivacy: e.target.checked })}
                 />
               </label>
+
+              <label className={`${cardClass} flex items-center justify-between gap-4 px-4 py-3.5 cursor-pointer`}>
+                <span className="min-w-0">
+                  <span className="block text-[15px] text-base-content">Show typing status</span>
+                  <span className="block text-xs text-base-content/45 mt-0.5">
+                    Let others see when you&apos;re typing a reply
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  className="toggle toggle-primary toggle-sm flex-shrink-0"
+                  checked={formData.typingPrivacy}
+                  onChange={(e) => setFormData({ ...formData, typingPrivacy: e.target.checked })}
+                />
+              </label>
             </div>
 
             <div className="flex gap-3 pt-1">
@@ -440,6 +458,15 @@ const ProfilePage = () => {
                       : "Online status hidden — you always appear offline"}
                   </span>
                 </div>
+
+                {authUser?.typingPrivacy === false && (
+                  <div className="flex items-center gap-2 pt-1.5">
+                    <span className="size-1.5 rounded-full flex-shrink-0 bg-base-content/30" />
+                    <span className="text-xs text-base-content/45">
+                      Typing status hidden — nobody sees when you&apos;re typing
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 

@@ -56,6 +56,10 @@ export function getReceiverSocketId(userId) {
 
 const userSocketMap = {}; // { userId: socketId }
 const privateUsersSet = new Set(); // users who hide online status
+// Users who have turned off the typing indicator. Held in memory alongside the
+// online-status set so the `typing` handler stays a lookup rather than a query —
+// it fires on nearly every keystroke.
+const typingPrivateSet = new Set();
 
 // Simple socket-level rate limiter maps: per-user counters with reset windows
 const socketRateMap = new Map(); // userId -> { lastReset, counters: { key: count }}
@@ -115,6 +119,14 @@ const broadcastOnlineUsers = () => {
     io.emit("getOnlineUsers", visibleOnlineUsers);
 };
 
+export function updateTypingPrivacyState(userId, isPrivate) {
+    if (isPrivate) {
+        typingPrivateSet.add(userId.toString());
+    } else {
+        typingPrivateSet.delete(userId.toString());
+    }
+}
+
 export function updateUserPrivacyState(userId, isPrivate) {
     if (isPrivate) {
         privateUsersSet.add(userId.toString());
@@ -153,12 +165,17 @@ io.on("connection", async (socket) => {
     // dropped anything a client emitted immediately on connect — which is
     // exactly what the app does with markAsRead when it opens a chat.
     User.findById(userId)
-        .select("onlinePrivacy")
+        .select("onlinePrivacy typingPrivacy")
         .then((user) => {
             if (user && user.onlinePrivacy === false) {
                 privateUsersSet.add(userId.toString());
             } else {
                 privateUsersSet.delete(userId.toString());
+            }
+            if (user && user.typingPrivacy === false) {
+                typingPrivateSet.add(userId.toString());
+            } else {
+                typingPrivateSet.delete(userId.toString());
             }
         })
         .catch((err) => {
@@ -223,6 +240,10 @@ io.on("connection", async (socket) => {
     // ── Event: typing ───────────────────────────────────────────────────────
     socket.on("typing", async ({ receiverId, isTyping }) => {
         // Use verified socket.userId as senderId — never trust client
+        // Enforced here rather than in the composer: a client that predates the
+        // setting, or one that ignores it, must not be able to leak the
+        // indicator anyway.
+        if (typingPrivateSet.has(userId.toString())) return;
         const receiverSocketId = getReceiverSocketId(receiverId);
         if (!receiverSocketId) return;
         if (await isBlockedBetween(userId, receiverId)) return;
@@ -293,6 +314,7 @@ io.on("connection", async (socket) => {
     });
 
     socket.on("groupTyping", ({ groupId, isTyping }) => {
+        if (typingPrivateSet.has(userId.toString())) return;
         if (groupId) {
             socket.to(`group_${groupId}`).emit("groupTyping", { groupId, userId, isTyping });
         }

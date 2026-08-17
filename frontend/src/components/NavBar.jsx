@@ -3,7 +3,7 @@ import toast from "react-hot-toast";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
 import { useState, useEffect } from "react";
-import { MessageSquare, Settings, User, Laptop, ShieldOff, UserPlus, Check, X } from "lucide-react";
+import { MessageSquare, Settings, User, Laptop, ShieldOff, UserPlus, Check, X, Info } from "lucide-react";
 import { useGroupStore } from "../store/useGroupStore";
 
 const Navbar = () => {
@@ -75,6 +75,12 @@ const Navbar = () => {
                   <Link to="/linked-devices" onClick={() => document.activeElement.blur()} className="flex items-center gap-2 rounded-xl">
                     <Laptop size={16} />
                     Linked Devices
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/about" onClick={() => document.activeElement.blur()} className="flex items-center gap-2 rounded-xl">
+                    <Info size={16} />
+                    About
                   </Link>
                 </li>
 

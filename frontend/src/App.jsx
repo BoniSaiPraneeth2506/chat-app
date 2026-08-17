@@ -65,6 +65,7 @@ import { THEME_COLORS } from './constants'
 import CreateGroupModal from './components/CreateGroupModal'
 import GroupDetailsModal from './components/GroupDetailsModal'
 import GroupWelcomeSheet from './components/GroupWelcomeSheet'
+import AboutPage from './pages/AboutPage'
 import GroupCallModal from './components/GroupCallModal'
 import CallModal from './components/CallModal'
 import { useGroupStore } from './store/useGroupStore'
@@ -339,6 +340,7 @@ const App = () => {
         <Route path='/profile' element={authUser ? <ProfilePage /> : <Navigate to='/login' />} />
         <Route path='/linked-devices' element={authUser ? <LinkedDevicesPage /> : <Navigate to='/login' />} />
         <Route path='/blocked' element={authUser ? <BlockedUsersPage /> : <Navigate to='/login' />} />
+        <Route path='/about' element={<AboutPage />} />
         <Route path='/join/:code' element={authUser ? <JoinGroupPage /> : <Navigate to='/login' />} />
         <Route path='/chat-with/:userId' element={authUser ? <ChatRedirectHandler /> : <PendingChatRedirect />} />
         <Route path='*' element={<Navigate to='/' />} />

@@ -5,7 +5,7 @@ import { generateToken } from "../lib/utils.js";
 import User from "../models/user.model.js";
 import bcrypt from 'bcryptjs'
 import cloudinary from "../lib/cloudinary.js";
-import { updateUserPrivacyState, disconnectRevokedSessions } from "../lib/socket.js";
+import { updateUserPrivacyState, updateTypingPrivacyState, disconnectRevokedSessions } from "../lib/socket.js";
 import { sendPasswordResetOtp } from "../lib/mailer.js";
 import Message from "../models/message.model.js";
 import Group from "../models/group.model.js";
@@ -112,6 +112,7 @@ const sanitizeUser = (user) => ({
   // returned for the signed-in user — never for the contacts they list.
   contactNicknames: mapToObject(user.contactNicknames),
   onlinePrivacy: user.onlinePrivacy,
+  typingPrivacy: user.typingPrivacy !== false,
   blockedUsers: user.blockedUsers || [],
   favorites: user.favorites || [],
   archived: user.archived || [],
@@ -294,7 +295,7 @@ const logout = async (req, res) => {
 
 const updateProfile = async (req, res) => {
     try {
-        const { profilePic, bannerPic, fullName, email, bio, link, socialLinks, onlinePrivacy, messageTimer } = req.body;
+        const { profilePic, bannerPic, fullName, email, bio, link, socialLinks, onlinePrivacy, typingPrivacy, messageTimer } = req.body;
         const userId = req.user._id;
 
         const updateData = {};
@@ -314,6 +315,10 @@ const updateProfile = async (req, res) => {
 
         if (socialLinks !== undefined) updateData.socialLinks = sanitizeSocialLinks(socialLinks);
 
+        if (typingPrivacy !== undefined) {
+            updateData.typingPrivacy = Boolean(typingPrivacy);
+            updateTypingPrivacyState(userId, typingPrivacy === false);
+        }
         if (onlinePrivacy !== undefined) {
             updateData.onlinePrivacy = onlinePrivacy;
             updateUserPrivacyState(userId, onlinePrivacy === false);

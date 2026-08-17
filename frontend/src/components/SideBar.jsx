@@ -395,7 +395,8 @@ const SideBar = () => {
     lastReadTimestamps,
     clearChatHistory,
     setProfilePreviewUser,
-    toggleContactAction
+    toggleContactAction,
+    drafts
   } = useChatStore();
 
   const {
@@ -743,6 +744,17 @@ const SideBar = () => {
         {/* Row 2: Latest Message & Unread Badge */}
         <div className="flex items-center justify-between mt-0.5">
           <div className="text-sm text-base-content/60 truncate pr-2 flex-1 text-left flex items-center gap-1">
+            {/* An unsent draft takes precedence over the last message, the way
+                WhatsApp and Telegram show it — it is the thing you still have
+                to act on. Read ticks are suppressed here because the line is
+                describing your draft, not a sent message. */}
+            {drafts[user._id]?.trim() ? (
+              <span className="truncate">
+                <span className="text-primary font-medium">Draft: </span>
+                <span className="text-base-content/60">{drafts[user._id]}</span>
+              </span>
+            ) : (
+              <>
             {latestMessages[user._id] && latestMessages[user._id].senderId === authUser?._id && (
               renderTicks(latestMessages[user._id])
             )}
@@ -757,6 +769,8 @@ const SideBar = () => {
                 <span className="text-base-content/40 italic">No messages</span>
               )}
             </span>
+              </>
+            )}
           </div>
 
           {unreadCounts[user._id] > 0 && (

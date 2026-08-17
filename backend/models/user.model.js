@@ -106,6 +106,14 @@ const userSchema=new mongoose.Schema({
         type:Boolean,
         default:true
     },
+    // Whether this user broadcasts "typing…". Defaults to true so existing
+    // accounts keep behaving exactly as before. Enforced on the server rather
+    // than by the sender's client, so the indicator cannot be relayed by a
+    // stale build that predates the setting.
+    typingPrivacy:{
+        type:Boolean,
+        default:true
+    },
     disappearingTimers:{
         type:Map,
         of:String,
