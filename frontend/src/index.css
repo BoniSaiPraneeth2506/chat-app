@@ -112,6 +112,8 @@
 .ab-faint { color: var(--color-base-content); }
 .ab-sep   { border-top: 1px solid var(--color-base-300); }
 .ab-row   { transition: background-color 150ms ease; }
+/* A hairline edge so a white app icon still reads on a light theme. */
+.ab-ring  { box-shadow: 0 0 0 1px var(--color-base-300); }
 
 @supports (background-color: color-mix(in oklch, red 50%, transparent)) {
   .ab-panel { background-color: color-mix(in oklch, var(--color-base-200) 72%, var(--color-base-100)); }
@@ -122,6 +124,7 @@
   .ab-faint { color: color-mix(in oklch, var(--color-base-content) 33%, transparent); }
   .ab-sep   { border-top: 1px solid color-mix(in oklch, var(--color-base-content) 9%, transparent); }
   .ab-row:hover { background-color: color-mix(in oklch, var(--color-base-300) 48%, transparent); }
+  .ab-ring  { box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-base-content) 12%, transparent); }
 }
 
 /* Horizontal chip strip: scrollable without a visible scrollbar. */

@@ -77,9 +77,12 @@ const AboutPage = () => {
         <div
           className="absolute inset-0"
           style={{
+            // Derived from the theme rather than hard-coded: the icon is
+            // monochrome now, so a fixed violet wash would fight it, and this
+            // follows whichever of the 30+ themes is active.
             background:
-              "radial-gradient(120% 90% at 50% -10%, #8a52f6 0%, #6d3bee 38%, transparent 78%)",
-            opacity: 0.22,
+              "radial-gradient(120% 90% at 50% -10%, var(--color-primary) 0%, var(--color-secondary) 42%, transparent 78%)",
+            opacity: 0.16,
           }}
         />
         <div
@@ -94,7 +97,7 @@ const AboutPage = () => {
               alt={`${APP_NAME} icon`}
               width={88}
               height={88}
-              className="rounded-[22px] shadow-2xl"
+              className="rounded-[22px] ab-ring"
             />
           </div>
 
@@ -158,7 +161,10 @@ const AboutPage = () => {
               {/* Gradient ring, Instagram-style, around a monogram. */}
               <div
                 className="grid p-[2.5px] rounded-full shrink-0 place-items-center"
-                style={{ background: "linear-gradient(135deg, #8a52f6, #6d3bee 55%, #5226e6)" }}
+                style={{
+                  background:
+                    "linear-gradient(135deg, var(--color-primary), var(--color-secondary) 55%, var(--color-accent))",
+                }}
               >
                 <div className="grid rounded-full size-16 place-items-center bg-base-200 text-[19px] font-bold tracking-tight text-base-content">
                   SP
