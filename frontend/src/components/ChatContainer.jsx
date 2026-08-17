@@ -595,7 +595,8 @@ const ChatContainer = () => {
       const handleOpenViewOnce = () => {
         if (isViewed) return;
         playChime();
-        setLightboxImage(message.image);
+        // Screenshot-protected while open — see lib/secureScreen.js.
+        setLightboxImage(message.image, { secure: true });
         if (!isSender || selectedUser?._id === authUser?._id) {
           viewOneViewMessage(message._id);
         }

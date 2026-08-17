@@ -558,19 +558,216 @@ const SideBar = () => {
       })
     : [];
 
-  const sortedUsers = [...filteredUsers].sort((a, b) => {
-    const isPinnedA = Array.isArray(pinnedUserIds) && pinnedUserIds.includes(a._id);
-    const isPinnedB = Array.isArray(pinnedUserIds) && pinnedUserIds.includes(b._id);
+  // One list for DMs and groups, ordered by most recent activity.
+  //
+  // Groups used to render as their own block above every DM, so a group that
+  // had been silent for weeks still outranked a message from a minute ago.
+  // Real chat apps interleave them, with pinned chats held at the top.
+  //
+  // A group with no messages falls back to when it was created, so a brand new
+  // group appears near the top instead of sinking to the bottom.
+  const timeOf = (msg) =>
+    msg ? new Date(msg.scheduledAt || msg.createdAt).getTime() : 0;
 
-    if (isPinnedA && !isPinnedB) return -1;
-    if (!isPinnedA && isPinnedB) return 1;
+  const groupItems =
+    (filterMode === "all" || filterMode === "groups") && !showArchivedOnly
+      ? groups
+          .filter((g) => g.name.toLowerCase().includes(searchTerm.toLowerCase()))
+          .map((g) => ({
+            type: "group",
+            key: `g:${g._id}`,
+            group: g,
+            at: timeOf(latestGroupMessages[g._id]) || new Date(g.createdAt || 0).getTime(),
+            pinned: false,
+          }))
+      : [];
 
-    const msgA = latestMessages[a._id];
-    const msgB = latestMessages[b._id];
-    const timeA = msgA ? new Date(msgA.scheduledAt || msgA.createdAt).getTime() : 0;
-    const timeB = msgB ? new Date(msgB.scheduledAt || msgB.createdAt).getTime() : 0;
-    return timeB - timeA;
+  const dmItems =
+    filterMode === "groups"
+      ? []
+      : filteredUsers.map((u) => ({
+          type: "dm",
+          key: `u:${u._id}`,
+          user: u,
+          at: timeOf(latestMessages[u._id]),
+          pinned: pinnedUserIds.includes(u._id),
+        }));
+
+  const conversations = [...dmItems, ...groupItems].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    return b.at - a.at;
   });
+
+  const renderGroupRow = (group) => {
+    const isSelected = selectedGroup?._id === group._id;
+    const latestMsg = latestGroupMessages[group._id];
+    const unread = unreadGroupCounts[group._id] || 0;
+    const mentioned = Boolean(mentionedGroups?.[group._id]);
+
+    return (
+      <button
+        key={group._id}
+        onClick={() => setSelectedGroup(group)}
+        className={`w-full py-3.5 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors group select-none ${
+          isSelected ? "bg-base-200/80" : ""
+        }`}
+      >
+        <div className="relative flex-shrink-0">
+          {group.groupPic ? (
+            <img
+              src={group.groupPic}
+              alt={group.name}
+              className="object-cover rounded-full size-12"
+            />
+          ) : (
+            <div className="size-12 rounded-full bg-secondary/10 border border-secondary/20 flex items-center justify-center text-secondary">
+              <Users className="size-6" />
+            </div>
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1 text-left">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-base-content truncate flex items-center gap-1.5">
+              {group.name}
+              <span className="text-[10px] bg-base-300 px-1.5 py-0.5 rounded text-base-content/60 font-normal">
+                {group.members?.length || 0}
+              </span>
+            </span>
+            {latestMsg && (
+              <span className="text-xs text-base-content/50">
+                {formatMessageTime(latestMsg.createdAt)}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between mt-0.5">
+            <div className="text-sm text-base-content/60 truncate pr-2 flex-1 text-left">
+              {latestMsg ? (
+                <span>
+                  <strong className="font-medium text-base-content/80">
+                    {latestMsg.senderId?.fullName?.split(" ")[0]}:{" "}
+                  </strong>
+                  {latestMsg.poll ? `📊 ${latestMsg.poll.question}` : latestMsg.image ? "📷 Image" : latestMsg.text}
+                </span>
+              ) : (
+                <span className="text-base-content/40 italic">Group created</span>
+              )}
+            </div>
+            {mentioned && (
+              <span
+                title="You were mentioned"
+                className="flex items-center justify-center size-5 text-[11px] font-bold text-primary-content bg-primary rounded-full flex-shrink-0"
+              >
+                @
+              </span>
+            )}
+            {unread > 0 && (
+              <span className={`flex items-center justify-center min-w-5 h-5 px-1.5 text-[10px] font-bold rounded-full flex-shrink-0 ${
+                mentioned ? "bg-primary/25 text-primary" : "bg-primary text-white"
+              }`}>
+                {unread}
+              </span>
+            )}
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  const renderUserRow = (user) => (
+    <button
+      key={user._id}
+      onClick={() => {
+        setSelectedUser(user);
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setContextMenu({
+          x: e.clientX,
+          y: e.clientY,
+          userId: user._id
+        });
+      }}
+      onTouchStart={(e) => handleTouchStart(user._id, e)}
+      onTouchEnd={handleTouchEnd}
+      onTouchMove={handleTouchEnd}
+      className={`w-full py-3.5 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors group select-none
+        ${
+          selectedUser?._id === user._id
+            ? "bg-base-200/80"
+            : ""
+        }
+      `}
+    >
+      {/* Avatar and Online Indicator */}
+      <div 
+        className="relative flex-shrink-0 cursor-pointer"
+        onClick={(e) => {
+          e.stopPropagation();
+          setProfilePreviewUser(user);
+        }}
+      >
+        <img
+          src={user.profilePic || "/avatar.png"}
+          alt={displayNameOf(user, nicknames)}
+          className="object-cover rounded-full size-12 hover:opacity-90 active:scale-95 transition-all"
+        />
+        {onlineUsers.includes(user._id) && (
+          <span className="absolute bottom-0 right-0 bg-green-500 rounded-full size-3 ring-2 ring-zinc-900" />
+        )}
+      </div>
+
+      {/* User Details */}
+      <div className="min-w-0 flex-1">
+        {/* Row 1: Name & Time */}
+        <div className="flex items-center justify-between">
+          <div className="font-medium truncate text-base-content flex items-center gap-1.5 min-w-0">
+            <span className="truncate">{displayNameOf(user, nicknames)}</span>
+            {favoriteUsers.includes(user._id) && (
+              <Star className="size-3 text-yellow-500 fill-yellow-500 flex-shrink-0" />
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 ml-1.5 flex-shrink-0">
+            {pinnedUserIds.includes(user._id) && (
+              <Pin className="size-3 text-base-content/35 rotate-45" />
+            )}
+            {latestMessages[user._id] && (
+              <span className="text-xs text-base-content/50">
+                {formatMessageTime(latestMessages[user._id].scheduledAt || latestMessages[user._id].createdAt)}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Row 2: Latest Message & Unread Badge */}
+        <div className="flex items-center justify-between mt-0.5">
+          <div className="text-sm text-base-content/60 truncate pr-2 flex-1 text-left flex items-center gap-1">
+            {latestMessages[user._id] && latestMessages[user._id].senderId === authUser?._id && (
+              renderTicks(latestMessages[user._id])
+            )}
+            <span className="truncate">
+              {latestMessages[user._id] ? (
+                latestMessages[user._id].image ? (
+                  "📷 Image"
+                ) : (
+                  latestMessages[user._id].text
+                )
+              ) : (
+                <span className="text-base-content/40 italic">No messages</span>
+              )}
+            </span>
+          </div>
+
+          {unreadCounts[user._id] > 0 && (
+            <span className="flex items-center justify-center min-w-5 h-5 px-1.5 text-[10px] font-bold text-white bg-primary rounded-full flex-shrink-0">
+              {unreadCounts[user._id]}
+            </span>
+          )}
+        </div>
+      </div>
+    </button>
+  );
 
   const renderTicks = (msg) => {
     if (!msg || !authUser || msg.senderId !== authUser._id) return null;
@@ -734,188 +931,14 @@ const SideBar = () => {
               </button>
             )}
 
-            {/* Groups List Section */}
-            {(filterMode === "all" || filterMode === "groups") && !showArchivedOnly && (
-              <>
-                {groups
-                  .filter((g) => g.name.toLowerCase().includes(searchTerm.toLowerCase()))
-                  .map((group) => {
-                    const isSelected = selectedGroup?._id === group._id;
-                    const latestMsg = latestGroupMessages[group._id];
-                    const unread = unreadGroupCounts[group._id] || 0;
-                    const mentioned = Boolean(mentionedGroups?.[group._id]);
-
-                    return (
-                      <button
-                        key={group._id}
-                        onClick={() => setSelectedGroup(group)}
-                        className={`w-full py-3.5 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors group select-none ${
-                          isSelected ? "bg-base-200/80" : ""
-                        }`}
-                      >
-                        <div className="relative flex-shrink-0">
-                          {group.groupPic ? (
-                            <img
-                              src={group.groupPic}
-                              alt={group.name}
-                              className="object-cover rounded-full size-12"
-                            />
-                          ) : (
-                            <div className="size-12 rounded-full bg-secondary/10 border border-secondary/20 flex items-center justify-center text-secondary">
-                              <Users className="size-6" />
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="min-w-0 flex-1 text-left">
-                          <div className="flex items-center justify-between">
-                            <span className="font-semibold text-base-content truncate flex items-center gap-1.5">
-                              {group.name}
-                              <span className="text-[10px] bg-base-300 px-1.5 py-0.5 rounded text-base-content/60 font-normal">
-                                {group.members?.length || 0}
-                              </span>
-                            </span>
-                            {latestMsg && (
-                              <span className="text-xs text-base-content/50">
-                                {formatMessageTime(latestMsg.createdAt)}
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="flex items-center justify-between mt-0.5">
-                            <div className="text-sm text-base-content/60 truncate pr-2 flex-1 text-left">
-                              {latestMsg ? (
-                                <span>
-                                  <strong className="font-medium text-base-content/80">
-                                    {latestMsg.senderId?.fullName?.split(" ")[0]}:{" "}
-                                  </strong>
-                                  {latestMsg.poll ? `📊 ${latestMsg.poll.question}` : latestMsg.image ? "📷 Image" : latestMsg.text}
-                                </span>
-                              ) : (
-                                <span className="text-base-content/40 italic">Group created</span>
-                              )}
-                            </div>
-                            {mentioned && (
-                              <span
-                                title="You were mentioned"
-                                className="flex items-center justify-center size-5 text-[11px] font-bold text-primary-content bg-primary rounded-full flex-shrink-0"
-                              >
-                                @
-                              </span>
-                            )}
-                            {unread > 0 && (
-                              <span className={`flex items-center justify-center min-w-5 h-5 px-1.5 text-[10px] font-bold rounded-full flex-shrink-0 ${
-                                mentioned ? "bg-primary/25 text-primary" : "bg-primary text-white"
-                              }`}>
-                                {unread}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-              </>
+            {/* DMs and groups in one list, newest activity first */}
+            {conversations.map((c) =>
+              c.type === "group" ? renderGroupRow(c.group) : renderUserRow(c.user)
             )}
 
-            {/* Direct 1-on-1 User List */}
-            {filterMode !== "groups" && sortedUsers.map((user) => (
-              <button
-                key={user._id}
-                onClick={() => {
-                  setSelectedUser(user);
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setContextMenu({
-                    x: e.clientX,
-                    y: e.clientY,
-                    userId: user._id
-                  });
-                }}
-                onTouchStart={(e) => handleTouchStart(user._id, e)}
-                onTouchEnd={handleTouchEnd}
-                onTouchMove={handleTouchEnd}
-                className={`w-full py-3.5 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors group select-none
-                  ${
-                    selectedUser?._id === user._id
-                      ? "bg-base-200/80"
-                      : ""
-                  }
-                `}
-              >
-                {/* Avatar and Online Indicator */}
-                <div 
-                  className="relative flex-shrink-0 cursor-pointer"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setProfilePreviewUser(user);
-                  }}
-                >
-                  <img
-                    src={user.profilePic || "/avatar.png"}
-                    alt={displayNameOf(user, nicknames)}
-                    className="object-cover rounded-full size-12 hover:opacity-90 active:scale-95 transition-all"
-                  />
-                  {onlineUsers.includes(user._id) && (
-                    <span className="absolute bottom-0 right-0 bg-green-500 rounded-full size-3 ring-2 ring-zinc-900" />
-                  )}
-                </div>
-
-                {/* User Details */}
-                <div className="min-w-0 flex-1">
-                  {/* Row 1: Name & Time */}
-                  <div className="flex items-center justify-between">
-                    <div className="font-medium truncate text-base-content flex items-center gap-1.5 min-w-0">
-                      <span className="truncate">{displayNameOf(user, nicknames)}</span>
-                      {favoriteUsers.includes(user._id) && (
-                        <Star className="size-3 text-yellow-500 fill-yellow-500 flex-shrink-0" />
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 ml-1.5 flex-shrink-0">
-                      {pinnedUserIds.includes(user._id) && (
-                        <Pin className="size-3 text-base-content/35 rotate-45" />
-                      )}
-                      {latestMessages[user._id] && (
-                        <span className="text-xs text-base-content/50">
-                          {formatMessageTime(latestMessages[user._id].scheduledAt || latestMessages[user._id].createdAt)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Row 2: Latest Message & Unread Badge */}
-                  <div className="flex items-center justify-between mt-0.5">
-                    <div className="text-sm text-base-content/60 truncate pr-2 flex-1 text-left flex items-center gap-1">
-                      {latestMessages[user._id] && latestMessages[user._id].senderId === authUser?._id && (
-                        renderTicks(latestMessages[user._id])
-                      )}
-                      <span className="truncate">
-                        {latestMessages[user._id] ? (
-                          latestMessages[user._id].image ? (
-                            "📷 Image"
-                          ) : (
-                            latestMessages[user._id].text
-                          )
-                        ) : (
-                          <span className="text-base-content/40 italic">No messages</span>
-                        )}
-                      </span>
-                    </div>
-
-                    {unreadCounts[user._id] > 0 && (
-                      <span className="flex items-center justify-center min-w-5 h-5 px-1.5 text-[10px] font-bold text-white bg-primary rounded-full flex-shrink-0">
-                        {unreadCounts[user._id]}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </button>
-            ))}
-
-            {sortedUsers.length === 0 && (
+            {conversations.length === 0 && (
               <div className="py-4 text-center text-zinc-500">
-                No users found
+                No chats found
               </div>
             )}
           </>

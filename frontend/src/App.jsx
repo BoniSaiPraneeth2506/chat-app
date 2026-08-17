@@ -44,7 +44,7 @@
 
 
 
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import NavBar from './components/NavBar'
 import { Routes, Route, Navigate, useParams, useNavigate, useLocation } from 'react-router-dom'
 import HomePage from './pages/HomePage'
@@ -57,12 +57,14 @@ import BlockedUsersPage from './pages/BlockedUsersPage'
 import JoinGroupPage from './pages/JoinGroupPage'
 import useAuthStore from './store/useAuthStore'
 import { useChatStore } from './store/useChatStore'
+import { setScreenSecure } from './lib/secureScreen'
 import { Loader, X, MessageSquare, Phone, Info } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import { useThemeStore } from './store/useThemeStore'
 import { THEME_COLORS } from './constants'
 import CreateGroupModal from './components/CreateGroupModal'
 import GroupDetailsModal from './components/GroupDetailsModal'
+import GroupWelcomeSheet from './components/GroupWelcomeSheet'
 import GroupCallModal from './components/GroupCallModal'
 import CallModal from './components/CallModal'
 import { useGroupStore } from './store/useGroupStore'
@@ -155,13 +157,19 @@ const App = () => {
   const { authUser, checkAuth, isCheckingAuth, onlineUsers, socket, switchingTo,
           accountChooserOpen, closeAccountChooser, savedAccounts, switchAccount } = useAuthStore();
   const { theme } = useThemeStore()
-  const { getGroups, subscribeToGroupEvents, unsubscribeFromGroupEvents } = useGroupStore();
+  const { getGroups, subscribeToGroupEvents, unsubscribeFromGroupEvents, selectedGroup } = useGroupStore();
+
+  // Groups whose welcome sheet has been dismissed in this session. The server
+  // is the real record (welcomeSeenBy); this only stops the sheet reappearing in
+  // the instant before that write is reflected locally.
+  const [welcomeDismissed, setWelcomeDismissed] = useState([]);
   const { 
     subscribeToMessages, 
     unsubscribeFromMessages,
     profilePreviewUser,
     setProfilePreviewUser,
     lightboxImage,
+    lightboxSecure,
     setLightboxImage,
     setSelectedUser,
     startCall,
@@ -282,6 +290,29 @@ const App = () => {
   }, []);
 
   console.log(authUser);
+
+  // FLAG_SECURE is held only while view-once media is open, so ordinary
+  // screenshots keep working everywhere else. The cleanup matters: unmounting
+  // with the lightbox open would otherwise leave the flag on and silently break
+  // screenshots for the rest of the session.
+  useEffect(() => {
+    const secure = Boolean(lightboxImage && lightboxSecure);
+    setScreenSecure(secure);
+    return () => {
+      if (secure) setScreenSecure(false);
+    };
+  }, [lightboxImage, lightboxSecure]);
+
+  // A group qualifies when it has something to show and this member is not yet
+  // recorded as having seen it.
+  const welcomeGroup =
+    authUser &&
+    selectedGroup &&
+    (selectedGroup.welcomeMessage || selectedGroup.rules) &&
+    !(selectedGroup.welcomeSeenBy || []).some((id) => (id?._id || id) === authUser._id) &&
+    !welcomeDismissed.includes(selectedGroup._id)
+      ? selectedGroup
+      : null;
 
   if (isCheckingAuth && !authUser) {
     return (
@@ -501,6 +532,16 @@ const App = () => {
       <CallModal />
       <CreateGroupModal />
       <GroupDetailsModal />
+
+      {/* Welcome/rules, shown once per member per group. Rendered here rather
+          than inside the chat so it survives the chat remounting, and only when
+          the group actually has something to show. */}
+      {welcomeGroup && (
+        <GroupWelcomeSheet
+          group={welcomeGroup}
+          onClose={() => setWelcomeDismissed((prev) => [...prev, welcomeGroup._id])}
+        />
+      )}
       <GroupCallModal />
       <OfflineBanner />
     </div>

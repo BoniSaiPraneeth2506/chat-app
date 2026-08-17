@@ -67,6 +67,25 @@ const groupSchema = new mongoose.Schema(
     inviteCreatedAt: {
       type: Date,
     },
+    // Shown once to each member the first time they open the group after
+    // joining. Both optional: a group with neither set shows nothing, so
+    // existing groups are unaffected.
+    welcomeMessage: {
+      type: String,
+      default: "",
+    },
+    rules: {
+      type: String,
+      default: "",
+    },
+    // Who has already been shown the welcome. Held server-side rather than in
+    // the browser so it does not reappear on another device or after a
+    // reinstall, and so it is per account rather than per browser.
+    welcomeSeenBy: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: [],
+    }],
     activeCall: {
       isActive: { type: Boolean, default: false },
       type: { type: String, enum: ["voice", "video"] },

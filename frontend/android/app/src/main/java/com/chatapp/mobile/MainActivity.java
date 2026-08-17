@@ -12,6 +12,10 @@ import java.util.List;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // Must be registered before super.onCreate: the bridge is built there
+        // and only picks up plugins known at that point.
+        registerPlugin(SecureScreenPlugin.class);
+
         super.onCreate(savedInstanceState);
 
         String[] mediaPermissions = { Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA };

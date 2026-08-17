@@ -69,7 +69,7 @@ import Group from "../models/group.model.js";
 import Message from "../models/message.model.js";
 import User from "../models/user.model.js";
 import cloudinary from "../lib/cloudinary.js";
-import { getReceiverSocketId, io } from "../lib/socket.js";
+import { getReceiverSocketId, io, invalidateBlockCache } from "../lib/socket.js";
 import sanitizeHtml from "sanitize-html";
 import { destroyMessageAssets, assetUrlsOf, destroyAssets } from "../lib/mediaCleanup.js";
 import {
@@ -172,7 +172,32 @@ const attachUnreadCounts = async (users, me) => {
   ]);
 
   const countBySender = new Map(counts.map((c) => [c._id.toString(), c.count]));
-  return users.map((u) => ({ ...u, unreadCount: countBySender.get(u._id.toString()) || 0 }));
+
+  // When each contact last read MY messages, for the sender-side read ticks.
+  // The client used to keep this in localStorage, seeded only from a live
+  // socket event, so ticks reset on reinstall and were shared across every
+  // account signed in on the same browser.
+  //
+  // Only the single value for this viewer is returned. Sending a contact's
+  // whole lastReadAt map would expose who else they talk to, which is why
+  // SIDEBAR_USER_FIELDS strips the field and this is fetched separately.
+  const readRows = await User.find({ _id: { $in: users.map((u) => u._id) } })
+    .select("lastReadAt")
+    .lean();
+  const myId = me._id.toString();
+  const readMineAt = new Map(
+    readRows.map((r) => {
+      const map = r.lastReadAt || {};
+      const value = map instanceof Map ? map.get(myId) : map[myId];
+      return [r._id.toString(), value ? new Date(value).getTime() : 0];
+    })
+  );
+
+  return users.map((u) => ({
+    ...u,
+    unreadCount: countBySender.get(u._id.toString()) || 0,
+    readMyMessagesAt: readMineAt.get(u._id.toString()) || 0,
+  }));
 };
 
 const MAX_NICKNAME_LENGTH = 40;
@@ -900,7 +925,15 @@ const toggleBlockUser = async (req, res) => {
     }
 
     await user.save();
-    res.status(200).json({ user, isBlocked });
+
+    // The socket layer caches block lists to keep `typing` cheap; drop the
+    // entry so a new block takes effect immediately rather than after its TTL.
+    invalidateBlockCache(userId);
+
+    // Only the list is returned. This previously sent the whole Mongoose
+    // document — password hash, sessions and reset OTP — which the client
+    // assigned directly into authUser.
+    res.status(200).json({ blockedUsers: user.blockedUsers, isBlocked });
   } catch (error) {
     console.error("Error in toggleBlockUser:", error);
     res.status(500).json({ message: "Failed to update block state" });

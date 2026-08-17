@@ -68,6 +68,48 @@ function socketAllow(userId, key, limit, windowMs) {
 // Runtime tracking for active group calls: Map<groupId, { startedBy, type, startTime, participants: Set<socketId>, participantUserIds: Set<userId> }>
 const activeGroupCalls = new Map();
 
+// ── Blocking, enforced on relayed socket traffic ─────────────────────────────
+//
+// Sending a DM is already refused by the REST controller, but everything
+// relayed over the socket bypassed that: a blocked user could still make the
+// other person's "typing…" indicator appear, ring them with a call, and receive
+// read receipts. The block was effectively cosmetic for anything not going
+// through sendMessage.
+//
+// Results are cached briefly because `typing` fires on nearly every keystroke
+// and a database lookup per event would be unreasonable. The window is short,
+// and toggleBlockUser drops the entry immediately, so a fresh block takes
+// effect at once rather than after the TTL.
+const BLOCK_CACHE_TTL_MS = 30_000;
+const blockCache = new Map(); // userId -> { at, ids: Set<string> }
+
+export function invalidateBlockCache(userId) {
+    if (userId) blockCache.delete(userId.toString());
+}
+
+const blockedIdsFor = async (id) => {
+    const key = id.toString();
+    const hit = blockCache.get(key);
+    if (hit && Date.now() - hit.at < BLOCK_CACHE_TTL_MS) return hit.ids;
+    try {
+        const user = await User.findById(key).select("blockedUsers").lean();
+        const ids = new Set((user?.blockedUsers || []).map((b) => b.toString()));
+        blockCache.set(key, { at: Date.now(), ids });
+        return ids;
+    } catch (err) {
+        console.error("Error loading block list:", err.message);
+        // Fail open: a lookup failure must not silence a legitimate chat.
+        return hit?.ids || new Set();
+    }
+};
+
+/** True if either party has blocked the other — blocking cuts both ways. */
+const isBlockedBetween = async (a, b) => {
+    if (!a || !b) return false;
+    const [aBlocks, bBlocks] = await Promise.all([blockedIdsFor(a), blockedIdsFor(b)]);
+    return aBlocks.has(b.toString()) || bBlocks.has(a.toString());
+};
+
 const broadcastOnlineUsers = () => {
     const visibleOnlineUsers = Object.keys(userSocketMap).filter(id => !privateUsersSet.has(id));
     io.emit("getOnlineUsers", visibleOnlineUsers);
@@ -170,22 +212,25 @@ io.on("connection", async (socket) => {
         }
 
         const senderSocketId = getReceiverSocketId(senderId);
-        if (senderSocketId) {
-            io.to(senderSocketId).emit("messagesRead", { userId: receiverId });
+        if (senderSocketId && !(await isBlockedBetween(userId, senderId))) {
+            io.to(senderSocketId).emit("messagesRead", {
+                userId: receiverId,
+                readAt: Date.now(),
+            });
         }
     });
 
     // ── Event: typing ───────────────────────────────────────────────────────
-    socket.on("typing", ({ receiverId, isTyping }) => {
+    socket.on("typing", async ({ receiverId, isTyping }) => {
         // Use verified socket.userId as senderId — never trust client
         const receiverSocketId = getReceiverSocketId(receiverId);
-        if (receiverSocketId) {
-            io.to(receiverSocketId).emit("typing", { senderId: userId, isTyping });
-        }
+        if (!receiverSocketId) return;
+        if (await isBlockedBetween(userId, receiverId)) return;
+        io.to(receiverSocketId).emit("typing", { senderId: userId, isTyping });
     });
 
     // ── Event: callUser ─────────────────────────────────────────────────────
-    socket.on("callUser", ({ userToCall, signalData, from, type }) => {
+    socket.on("callUser", async ({ userToCall, signalData, from, type }) => {
         // Verify: 'from' must match authenticated user
         if (from !== userId) {
             console.warn(`[Security] User ${userId} tried to spoof call as ${from}`);
@@ -198,17 +243,22 @@ io.on("connection", async (socket) => {
         }
         console.log(`[Socket] User ${from} is calling User ${userToCall} (${type})`);
         const receiverSocketId = getReceiverSocketId(userToCall);
-        if (receiverSocketId) {
-            io.to(receiverSocketId).emit("callUser", { signal: signalData, from, type });
+        if (!receiverSocketId) return;
+        if (await isBlockedBetween(userId, userToCall)) {
+            // Reported as unreachable rather than "blocked", so the block is
+            // not disclosed to the caller.
+            socket.emit("callFailed", { reason: "unavailable" });
+            return;
         }
+        io.to(receiverSocketId).emit("callUser", { signal: signalData, from, type });
     });
 
     // ── Event: answerCall ───────────────────────────────────────────────────
-    socket.on("answerCall", ({ signal, to }) => {
+    socket.on("answerCall", async ({ signal, to }) => {
         const receiverSocketId = getReceiverSocketId(to);
-        if (receiverSocketId) {
-            io.to(receiverSocketId).emit("callAccepted", { signal });
-        }
+        if (!receiverSocketId) return;
+        if (await isBlockedBetween(userId, to)) return;
+        io.to(receiverSocketId).emit("callAccepted", { signal });
     });
 
     // ── Event: endCall ──────────────────────────────────────────────────────
@@ -220,11 +270,11 @@ io.on("connection", async (socket) => {
     });
 
     // ── Event: iceCandidate ─────────────────────────────────────────────────
-    socket.on("iceCandidate", ({ candidate, to }) => {
+    socket.on("iceCandidate", async ({ candidate, to }) => {
         const receiverSocketId = getReceiverSocketId(to);
-        if (receiverSocketId) {
-            io.to(receiverSocketId).emit("iceCandidate", { candidate });
-        }
+        if (!receiverSocketId) return;
+        if (await isBlockedBetween(userId, to)) return;
+        io.to(receiverSocketId).emit("iceCandidate", { candidate });
     });
 
     // ── Group Socket Events ──────────────────────────────────────────────────

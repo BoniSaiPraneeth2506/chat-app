@@ -17,6 +17,7 @@ import {
   revokeGroupInvite,
   previewGroupInvite,
   joinGroupByInvite,
+  markGroupWelcomeSeen,
 } from "../controllers/group.controller.js";
 
 const router = express.Router();
@@ -33,6 +34,7 @@ router.delete("/:groupId/invite", protectRoute, revokeGroupInvite);
 router.delete("/:groupId/members/:memberId", protectRoute, removeGroupMember);
 router.put("/:groupId/roles", protectRoute, updateMemberRole);
 router.get("/:groupId/messages", protectRoute, getGroupMessages);
+router.post("/:groupId/welcome-seen", protectRoute, markGroupWelcomeSeen);
 router.post("/:groupId/send", protectRoute, sendGroupMessage);
 router.post("/:groupId/polls", protectRoute, createGroupPoll);
 router.post("/:groupId/polls/:messageId/vote", protectRoute, voteGroupPoll);

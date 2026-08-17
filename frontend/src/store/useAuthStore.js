@@ -51,7 +51,10 @@ const resetPerAccountState=async()=>{
         import("./useChatStore"),
         import("./useGroupStore"),
     ]);
-    useChatStore.setState({messages:[],users:[],selectedUser:null,latestMessages:{},unreadCounts:{}});
+    // lastReadTimestamps is included because read ticks are now held in memory
+    // rather than localStorage; without clearing it, one account's read state
+    // would bleed into the next after a switch.
+    useChatStore.setState({messages:[],users:[],selectedUser:null,latestMessages:{},unreadCounts:{},lastReadTimestamps:{}});
     useGroupStore.setState({groups:[],selectedGroup:null,groupMessages:[],unreadGroupCounts:{},mentionedGroups:{}});
 };
 

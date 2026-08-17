@@ -114,10 +114,37 @@ export const getGroupDetails = async (req, res) => {
 };
 
 // 4. Update Group Details (Name, Description, Avatar, isReadOnly)
+const MAX_WELCOME_LENGTH = 500;
+const MAX_RULES_LENGTH = 2000;
+
+/**
+ * Records that this member has seen the group's welcome/rules.
+ *
+ * Server-side rather than a localStorage flag so it does not reappear on a
+ * second device, and so each account on a shared browser is tracked separately.
+ */
+export const markGroupWelcomeSeen = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user._id;
+
+    const group = await Group.findById(groupId).select("members.user welcomeSeenBy");
+    if (!group) return res.status(404).json({ message: "Group not found" });
+    const isMember = group.members.some((m) => m.user?.toString() === userId.toString());
+    if (!isMember) return res.status(403).json({ message: "Not a member of this group" });
+
+    await Group.updateOne({ _id: groupId }, { $addToSet: { welcomeSeenBy: userId } });
+    res.status(200).json({ ok: true });
+  } catch (error) {
+    console.error("Error marking group welcome seen:", error);
+    res.status(500).json({ message: "Failed to update" });
+  }
+};
+
 export const updateGroup = async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { name, description, groupPic, isReadOnly, permissions } = req.body;
+    const { name, description, groupPic, isReadOnly, permissions, welcomeMessage, rules } = req.body;
     const userId = req.user._id;
 
     const group = await Group.findById(groupId);
@@ -129,6 +156,19 @@ export const updateGroup = async (req, res) => {
 
     if (name !== undefined) group.name = name.trim();
     if (description !== undefined) group.description = description.trim();
+
+    // Editing the welcome text or rules resets who has seen them, so a change
+    // is actually shown to members who already dismissed the previous version.
+    if (welcomeMessage !== undefined) {
+      const next = String(welcomeMessage).slice(0, MAX_WELCOME_LENGTH).trim();
+      if (next !== group.welcomeMessage) group.welcomeSeenBy = [];
+      group.welcomeMessage = next;
+    }
+    if (rules !== undefined) {
+      const next = String(rules).slice(0, MAX_RULES_LENGTH).trim();
+      if (next !== group.rules) group.welcomeSeenBy = [];
+      group.rules = next;
+    }
     if (isReadOnly !== undefined) {
       group.isReadOnly = isReadOnly;
       // Keep the legacy flag and the new permission from contradicting.

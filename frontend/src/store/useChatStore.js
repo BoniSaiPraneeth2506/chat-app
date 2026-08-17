@@ -148,7 +148,9 @@ export const useChatStore = create((set, get) => ({
   isMessagesLoading: false,
   latestMessages: {},
   unreadCounts: {},
-  lastReadTimestamps: JSON.parse(localStorage.getItem("lastReadTimestamps") || "{}"),
+  // Populated from the server by getUsers and kept current by the messagesRead
+  // socket event. Deliberately not persisted locally — see the handler.
+  lastReadTimestamps: {},
   hasMoreMessages: true,
   isRecipientProfileOpen: false,
   setIsRecipientProfileOpen: (isOpen) => set({ isRecipientProfileOpen: isOpen }),
@@ -276,7 +278,13 @@ export const useChatStore = create((set, get) => ({
   setProfilePreviewUser: (profilePreviewUser) => set({ profilePreviewUser }),
 
   lightboxImage: null,
-  setLightboxImage: (lightboxImage) => set({ lightboxImage }),
+  // Marks the open image as view-once, so App can hold FLAG_SECURE while it is
+  // on screen and drop it again afterwards. Kept as a separate flag rather than
+  // inferred from the message, because the lightbox is also used for avatars
+  // and ordinary photos, which should stay screenshot-able.
+  lightboxSecure: false,
+  setLightboxImage: (lightboxImage, { secure = false } = {}) =>
+    set({ lightboxImage, lightboxSecure: Boolean(lightboxImage) && secure }),
 
   drafts: {},
   setDraft: (userId, text) => set((state) => ({
@@ -322,7 +330,22 @@ export const useChatStore = create((set, get) => ({
           }
           unreadCounts[user._id] = Math.max(user.unreadCount, unreadCounts[user._id] || 0);
         });
-        return { users, unreadCounts };
+
+        // Sender-side read ticks now come from the server. Previously this map
+        // was only ever filled by a live socket receipt and cached in
+        // localStorage, so ticks reverted to single after a reinstall and every
+        // account sharing a browser read the same global key. `Math.max` keeps
+        // a receipt that landed while this request was in flight.
+        const lastReadTimestamps = { ...state.lastReadTimestamps };
+        users.forEach((user) => {
+          if (typeof user.readMyMessagesAt !== "number" || !user.readMyMessagesAt) return;
+          lastReadTimestamps[user._id] = Math.max(
+            user.readMyMessagesAt,
+            lastReadTimestamps[user._id] || 0
+          );
+        });
+
+        return { users, unreadCounts, lastReadTimestamps };
       });
 
       // Fetch the last message for each user to populate latestMessages
@@ -790,14 +813,17 @@ export const useChatStore = create((set, get) => ({
     });
 
     // Handle read confirmation received from receiver
-    socket.on("messagesRead", ({ userId }) => {
+    socket.on("messagesRead", ({ userId, readAt }) => {
       console.log(`[Socket Client] Received messagesRead confirmation for user: ${userId}`);
-      const updated = {
-        ...get().lastReadTimestamps,
-        [userId]: Date.now()
-      };
-      localStorage.setItem("lastReadTimestamps", JSON.stringify(updated));
-      set({ lastReadTimestamps: updated });
+      // The server's clock, not this device's, and no longer mirrored into
+      // localStorage — that key was global to the browser, so switching
+      // accounts carried one account's read state into another.
+      set((state) => ({
+        lastReadTimestamps: {
+          ...state.lastReadTimestamps,
+          [userId]: readAt || Date.now(),
+        },
+      }));
     });
 
     // Handle disappearing timer changes from receiver
@@ -1340,8 +1366,12 @@ export const useChatStore = create((set, get) => ({
   toggleBlockUser: async (targetId) => {
     try {
       const res = await axiosInstance.post(`/messages/block/${targetId}`);
-      const { user, isBlocked } = res.data;
-      useAuthStore.setState({ authUser: user });
+      const { blockedUsers, isBlocked } = res.data;
+      // Merge just the list: the endpoint no longer returns (and must not
+      // return) the whole user document.
+      useAuthStore.setState((state) =>
+        state.authUser ? { authUser: { ...state.authUser, blockedUsers } } : state
+      );
       toast.success(isBlocked ? "User blocked" : "User unblocked");
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to change block status");

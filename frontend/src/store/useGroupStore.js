@@ -471,6 +471,33 @@ export const useGroupStore = create((set, get) => ({
     }
   },
 
+  /**
+   * Records that the signed-in member has seen this group's welcome/rules.
+   *
+   * The local copy is patched straight away so the sheet cannot flash back if
+   * the group object is refetched before the request lands.
+   */
+  markWelcomeSeen: async (groupId) => {
+    const authUser = useAuthStore.getState().authUser;
+    if (!authUser) return;
+
+    const seen = (g) =>
+      g._id === groupId
+        ? { ...g, welcomeSeenBy: [...(g.welcomeSeenBy || []), authUser._id] }
+        : g;
+    set((state) => ({
+      groups: state.groups.map(seen),
+      selectedGroup: state.selectedGroup ? seen(state.selectedGroup) : state.selectedGroup,
+    }));
+
+    try {
+      await axiosInstance.post(`/groups/${groupId}/welcome-seen`);
+    } catch (err) {
+      // Not worth a toast: the worst case is the sheet appearing once more.
+      console.warn("Could not record welcome as seen:", err?.message || err);
+    }
+  },
+
   // 7. Add Group Members
   addGroupMembers: async (groupId, newMembers) => {
     try {

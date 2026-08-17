@@ -43,6 +43,8 @@ const GroupDetailsModal = () => {
   const [name, setName] = useState(selectedGroup?.name || "");
   const [description, setDescription] = useState(selectedGroup?.description || "");
   const [groupPic, setGroupPic] = useState("");
+  const [welcomeMessage, setWelcomeMessage] = useState(selectedGroup?.welcomeMessage || "");
+  const [rules, setRules] = useState(selectedGroup?.rules || "");
   const [showAddMembers, setShowAddMembers] = useState(false);
   const [selectedNewMembers, setSelectedNewMembers] = useState([]);
   const [isUpdatingGroup, setIsUpdatingGroup] = useState(false);
@@ -67,6 +69,8 @@ const GroupDetailsModal = () => {
       name: name.trim(),
       description: description.trim(),
       groupPic,
+      welcomeMessage: welcomeMessage.trim(),
+      rules: rules.trim(),
     });
     setIsEditing(false);
   };
@@ -158,6 +162,8 @@ const GroupDetailsModal = () => {
                       onClick={() => {
                         setName(selectedGroup.name);
                         setDescription(selectedGroup.description || "");
+                        setWelcomeMessage(selectedGroup.welcomeMessage || "");
+                        setRules(selectedGroup.rules || "");
                         setIsEditing(true);
                       }}
                       className="p-1 text-base-content/50 hover:text-primary transition-colors"
@@ -191,6 +197,25 @@ const GroupDetailsModal = () => {
                   onChange={(e) => setDescription(e.target.value)}
                   className="w-full px-1 py-2 text-center text-[14px] bg-transparent border-0 border-b border-base-content/15 rounded-none resize-none outline-none transition-colors focus:border-primary focus:ring-0"
                   placeholder="Group Description"
+                />
+                {/* Shown to each member once, the first time they open the
+                    group. Editing either field clears who has seen it, so an
+                    update is shown again. */}
+                <textarea
+                  value={welcomeMessage}
+                  onChange={(e) => setWelcomeMessage(e.target.value)}
+                  maxLength={500}
+                  rows={2}
+                  className="w-full px-1 py-2 text-center text-[14px] bg-transparent border-0 border-b border-base-content/15 rounded-none resize-none outline-none transition-colors focus:border-primary focus:ring-0"
+                  placeholder="Welcome message (shown once on join)"
+                />
+                <textarea
+                  value={rules}
+                  onChange={(e) => setRules(e.target.value)}
+                  maxLength={2000}
+                  rows={3}
+                  className="w-full px-1 py-2 text-center text-[14px] bg-transparent border-0 border-b border-base-content/15 rounded-none resize-none outline-none transition-colors focus:border-primary focus:ring-0"
+                  placeholder="Group rules — one per line"
                 />
                 <div className="flex items-center justify-center gap-2">
                   <button
