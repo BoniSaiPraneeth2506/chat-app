@@ -2,9 +2,10 @@ import { useRef, useState, useEffect } from "react";
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
 import useAuthStore from "../store/useAuthStore";
-import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3 } from "lucide-react";
+import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3, Pencil } from "lucide-react";
 import toast from "react-hot-toast";
 import { haptic } from "../lib/haptics";
+import ImageEditorModal from "./ImageEditorModal";
 import CreatePollModal from "./CreatePollModal";
 import SchedulePicker from "./SchedulePicker";
 
@@ -15,6 +16,9 @@ const MessageInput = () => {
   const [mentionIds, setMentionIds] = useState([]);
   const [mentionQuery, setMentionQuery] = useState(null); // null = picker closed
   const [imagePreviews, setImagePreviews] = useState([]);
+  // Index of the preview being edited, or null. Held by index rather than by
+  // value so the edited result can be written straight back into place.
+  const [editingIndex, setEditingIndex] = useState(null);
   const [isOneView, setIsOneView] = useState(false);
   const [isSendingAnimation, setIsSendingAnimation] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -489,6 +493,18 @@ const MessageInput = () => {
 
   return (
     <div className="w-full px-4 py-3 bg-base-200/50 flex flex-col gap-2 relative border-t border-base-300 lg:border-t-0">
+      {editingIndex !== null && imagePreviews[editingIndex] && (
+        <ImageEditorModal
+          key={editingIndex}
+          src={imagePreviews[editingIndex]}
+          onCancel={() => setEditingIndex(null)}
+          onSave={(edited) => {
+            setImagePreviews((prev) => prev.map((v, i) => (i === editingIndex ? edited : v)));
+            setEditingIndex(null);
+          }}
+        />
+      )}
+
       {showPollModal && <CreatePollModal onClose={() => setShowPollModal(false)} />}
       {isDraggingFiles && (
         <div className="fixed inset-0 z-[130] flex items-center justify-center bg-base-100/80 backdrop-blur-sm pointer-events-none">
@@ -573,6 +589,16 @@ const MessageInput = () => {
                 >
                   <X className="size-3 text-base-content" />
                 </button>
+                {!isUploading && (
+                  <button
+                    onClick={() => { haptic("tap"); setEditingIndex(idx); }}
+                    className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-base-300 flex items-center justify-center shadow-md hover:bg-base-200"
+                    type="button"
+                    title="Edit photo"
+                  >
+                    <Pencil className="size-3 text-base-content" />
+                  </button>
+                )}
                 {imagePreviews.length === 1 && (
                   <button
                     onClick={() => setIsOneView(!isOneView)}
