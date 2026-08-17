@@ -5,6 +5,7 @@ import useAuthStore from "../store/useAuthStore";
 import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3 } from "lucide-react";
 import toast from "react-hot-toast";
 import CreatePollModal from "./CreatePollModal";
+import SchedulePicker from "./SchedulePicker";
 
 const MessageInput = () => {
   const [text, setText] = useState("");
@@ -32,8 +33,8 @@ const MessageInput = () => {
   const [showPollModal, setShowPollModal] = useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   // Scheduling states
-  const [showScheduler, setShowScheduler] = useState(false);
   const [scheduledAt, setScheduledAt] = useState(""); // format: yyyy-MM-ddTHH:mm (datetime-local)
+  const [isSchedulerOpen, setIsSchedulerOpen] = useState(false);
   
   const { 
     sendMessage, 
@@ -252,6 +253,18 @@ const MessageInput = () => {
     inputRef.current?.focus();
   };
 
+  // One tap opens the themed picker; tapping again closes it, or clears an
+  // armed schedule. The native datetime-local popup was dropped because it is
+  // drawn by the browser and cannot be styled to match the app.
+  const openSchedulePicker = () => {
+    if (scheduledAt) {
+      setScheduledAt("");
+      setIsSchedulerOpen(false);
+      return;
+    }
+    setIsSchedulerOpen((open) => !open);
+  };
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!text.trim() && imagePreviews.length === 0) return;
@@ -291,7 +304,6 @@ const MessageInput = () => {
           scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
         });
         setMentionIds([]);
-        setShowScheduler(false);
         setScheduledAt("");
         if (replyingToMessage) setReplyingToMessage(null);
       } else if (currentEditing) {
@@ -315,7 +327,6 @@ const MessageInput = () => {
               onProgress: (p) => setUploadProgress(p),
               signal: controller.signal
             });
-            setShowScheduler(false);
             setScheduledAt("");
           } catch (err) {
             if (err.message === 'aborted') {
@@ -340,7 +351,6 @@ const MessageInput = () => {
               isOneView: false, // Multi-image doesn't use View Once
               scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
             });
-            setShowScheduler(false);
             setScheduledAt("");
           } else {
             await sendMessage({
@@ -349,7 +359,6 @@ const MessageInput = () => {
               isOneView: messageOneView,
               scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
             });
-            setShowScheduler(false);
             setScheduledAt("");
           }
         }
@@ -580,6 +589,28 @@ const MessageInput = () => {
           </div>
         )}
 
+        {scheduledAt && (
+          <div className="flex items-center gap-2 px-3 pb-1">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-[11px] font-medium">
+              <Clock size={12} />
+              Sends {new Date(scheduledAt).toLocaleString([], {
+                day: "numeric",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+              <button
+                type="button"
+                onClick={() => setScheduledAt("")}
+                className="ml-0.5 hover:opacity-70"
+                aria-label="Cancel scheduled send"
+              >
+                <X size={11} />
+              </button>
+            </span>
+          </div>
+        )}
+
         <form onSubmit={handleSendMessage} className="flex items-center gap-3">
         <div className="flex-1 min-w-0 flex items-center gap-3 bg-base-100 rounded-full px-4 py-1.5 min-h-[42px] border border-base-300/30 shadow-sm">
           {isRecording ? (
@@ -643,22 +674,30 @@ const MessageInput = () => {
                 onKeyDown={handleKeyDown}
               />
               <div id="msg-help" className="sr-only">Press Ctrl+Enter to send on desktop. Use Arrow Up to edit your last message.</div>
-              {/* Scheduler toggle + picker */}
-              <div className="flex items-center gap-2 ml-2">
+              {/* Schedule send.
+                  The clock opens the native date/time picker directly. The
+                  input stays in the DOM because showPicker() has to be called
+                  on a real, rendered field — but it's visually collapsed, so
+                  the bare rectangle that used to appear beside the clock is
+                  gone. Tapping the clock again clears the schedule. */}
+              <div className="relative flex items-center ml-2">
                 <button
                   type="button"
-                  title={showScheduler ? "Hide scheduler" : "Schedule message"}
-                  onClick={() => setShowScheduler((s) => !s)}
-                  className={`p-1 rounded-full hover:bg-base-200 text-base-content/50`}
+                  title={scheduledAt ? "Clear scheduled time" : isSchedulerOpen ? "Close scheduler" : "Schedule message"}
+                  onClick={openSchedulePicker}
+                  className={`p-1 rounded-full transition-colors ${
+                    scheduledAt || isSchedulerOpen
+                      ? "text-primary bg-primary/10 hover:bg-primary/20"
+                      : "text-base-content/50 hover:bg-base-200"
+                  }`}
                 >
                   <Clock size={16} />
                 </button>
-                {showScheduler && (
-                  <input
-                    type="datetime-local"
+                {isSchedulerOpen && (
+                  <SchedulePicker
                     value={scheduledAt}
-                    onChange={(e) => setScheduledAt(e.target.value)}
-                    className="text-xs bg-base-100 border rounded px-2 py-1"
+                    onConfirm={(v) => { setScheduledAt(v); setIsSchedulerOpen(false); }}
+                    onClose={() => setIsSchedulerOpen(false)}
                   />
                 )}
               </div>
