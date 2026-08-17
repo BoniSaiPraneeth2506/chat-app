@@ -234,6 +234,13 @@ export const useGroupStore = create((set, get) => ({
     }
     set({ selectedGroup: group, groupMessages: [] });
 
+    // Persist the read mark for this group. Group reads were not recorded
+    // anywhere before, which is what "seen by" needs to report against.
+    if (group) {
+      const socket = useAuthStore.getState().socket;
+      socket?.emit("markGroupAsRead", { groupId: group._id });
+    }
+
     if (group) {
       set((state) => {
         const mentionedGroups = { ...state.mentionedGroups };
@@ -532,6 +539,7 @@ export const useGroupStore = create((set, get) => ({
 
     socket.off("newGroupMessage");
     socket.off("groupPollUpdated");
+    socket.off("groupMessageDeleted");
     socket.off("groupCreated");
     socket.off("groupUpdated");
     socket.off("groupTyping");
@@ -591,6 +599,20 @@ export const useGroupStore = create((set, get) => ({
       }));
       const authUser = useAuthStore.getState().authUser;
       if (authUser) updateCachedMessage(authUser._id, message._id, message);
+    });
+
+    // Deletion of a group message. There was no listener for this at all, so a
+    // delete by another member stayed on screen until the group was reopened.
+    socket.on("groupMessageDeleted", ({ messageId, isDeletedForEveryone }) => {
+      if (!isDeletedForEveryone) return;
+      const patch = { isDeletedForEveryone: true, text: "", image: "", images: [], reactions: [] };
+      set((state) => ({
+        groupMessages: state.groupMessages.map((m) =>
+          m._id === messageId ? { ...m, ...patch } : m
+        ),
+      }));
+      const authUser = useAuthStore.getState().authUser;
+      if (authUser) updateCachedMessage(authUser._id, messageId, patch);
     });
 
     // Group Created Notification
@@ -714,6 +736,8 @@ export const useGroupStore = create((set, get) => ({
     if (socket) {
       socket.off("newGroupMessage");
       socket.off("groupPollUpdated");
+      socket.off("groupMessageDeleted");
+    socket.off("groupMessageDeleted");
       socket.off("groupCreated");
       socket.off("groupUpdated");
       socket.off("groupTyping");

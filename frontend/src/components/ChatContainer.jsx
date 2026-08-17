@@ -16,6 +16,7 @@ import MessageInput from "./MessageInput";
 import MessageSkeleton from "./skeletons/MessageSkeleton";
 import useAuthStore from "../store/useAuthStore";
 import { formatMessageTime } from "../lib/utils";
+import { haptic } from "../lib/haptics";
 
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
 
@@ -443,14 +444,6 @@ const ChatContainer = () => {
 
   const SWIPE_REPLY_THRESHOLD = 60;
 
-  const buzz = (pattern) => {
-    try {
-      navigator.vibrate?.(pattern);
-    } catch {
-      // Haptics are best effort.
-    }
-  };
-
   const handleBubbleTouchStart = (message, e) => {
     if (isSelectionMode) return;
     if (e.target.closest(".mobile-action-bar")) return;
@@ -460,13 +453,12 @@ const ChatContainer = () => {
 
     longPressTimerRef.current = setTimeout(() => {
       setMobileEmojiId(message._id);
-      // Group message selection isn't wired to a backend action yet, so
-      // scope the WhatsApp-style header toolbar to DMs for now.
-      if (!selectedGroup) {
-        setSelectionMode(true);
-        toggleMessageSelection(message._id);
-      }
-      buzz(15);
+      // Groups get the same selection toolbar as DMs now that bulk delete
+      // handles group messages (it used to 500 on them: a group message has
+      // no receiverId and the controller dereferenced it unguarded).
+      setSelectionMode(true);
+      toggleMessageSelection(message._id);
+      haptic("longPress");
       longPressTimerRef.current = null;
     }, 450);
   };
@@ -511,7 +503,7 @@ const ChatContainer = () => {
       }
       setReplyingToMessage(message);
       suppressClickRef.current = Date.now();
-      buzz(25);
+      haptic("impact");
       return;
     }
     if (start?.swiping) return;
@@ -527,7 +519,7 @@ const ChatContainer = () => {
         suppressClickRef.current = now;
         setMobileEmojiId(null);
         toggleReaction(message._id, "❤️");
-        buzz([15, 40, 15]);
+        haptic("double");
         return;
       }
       lastTapRef.current = { id: message._id, time: now };
@@ -1014,6 +1006,7 @@ const ChatContainer = () => {
                     onClick={(e) => {
                       if (isSelectionMode) {
                         e.stopPropagation();
+                        haptic("tap");
                         toggleMessageSelection(message._id);
                       }
                     }}
@@ -1083,6 +1076,7 @@ const ChatContainer = () => {
                           key={emoji} 
                           onClick={(e) => {
                             e.stopPropagation();
+                            haptic("tap");
                             toggleReaction(message._id, emoji);
                             setMobileEmojiId(null);
                             if (isSelectionMode) setSelectionMode(false);
@@ -1119,7 +1113,7 @@ const ChatContainer = () => {
                           <div tabIndex={0} role="button" className="text-base-content/60 hover:text-red-500 transition-colors flex items-center p-0.5 cursor-pointer" title="Delete"><Trash2 size={13} /></div>
                           <ul tabIndex={0} className="dropdown-content z-50 menu p-1 shadow-xl bg-base-100 border border-base-300 rounded-box w-36 text-xs text-base-content mt-1">
                             <li><button onClick={() => deleteMessage(message._id, "me")} className="hover:bg-base-200 py-1.5 text-left font-medium">Delete for me</button></li>
-                            {message.senderId === authUser._id && (<li><button onClick={() => deleteMessage(message._id, "everyone")} className="hover:bg-red-500 hover:text-white py-1.5 text-left font-medium text-red-500">Delete for everyone</button></li>)}
+                            {(message.senderId?._id || message.senderId) === authUser._id && (<li><button onClick={() => deleteMessage(message._id, "everyone")} className="hover:bg-red-500 hover:text-white py-1.5 text-left font-medium text-red-500">Delete for everyone</button></li>)}
                           </ul>
                         </div>
                       )}

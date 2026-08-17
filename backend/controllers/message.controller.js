@@ -1,5 +1,6 @@
 // import Message from "../models/message.model.js";
 // import User from "../models/user.model.js";
+import Group from "../models/group.model.js";
 // import cloudinary from "../lib/cloudinary.js";
 
 // const getUsersForSidebar=async (req,res)=>{
@@ -300,9 +301,17 @@ const getUsersForSidebar = async (req, res) => {
       return res.status(200).json(await attachUnreadCounts(filteredUsers, req.user));
     }
 
-    // 1. Get IDs of users the logged-in user has chatted with (1-on-1 only, exclude group messages where groupId is set)
-    const chattedUserIds = await Message.distinct("receiverId", { senderId: loggedInUserId, groupId: null });
-    const chattedUserIds2 = await Message.distinct("senderId", { receiverId: loggedInUserId, groupId: null });
+    // 1. Users the logged-in user has chatted with (1-on-1 only; groupId is set
+    //    for group messages).
+    //
+    //    Messages this user has hidden are excluded. Clearing a chat only adds
+    //    the user to each message's `deletedFor`, so without this filter the
+    //    conversation still counted as "chatted with" and the contact stayed in
+    //    the sidebar after being deleted. Skipping them makes the row disappear
+    //    like WhatsApp, and reappear on the next message — which is not hidden.
+    const visibleToMe = { groupId: null, deletedFor: { $ne: loggedInUserId } };
+    const chattedUserIds = await Message.distinct("receiverId", { ...visibleToMe, senderId: loggedInUserId });
+    const chattedUserIds2 = await Message.distinct("senderId", { ...visibleToMe, receiverId: loggedInUserId });
 
     const chattedSet = new Set([
       ...chattedUserIds.filter(Boolean).map(id => id.toString()),
@@ -648,6 +657,8 @@ const toggleMessageReaction = async (req, res) => {
   }
 };
 
+const MAX_PINNED_CHATS = 2;
+
 const toggleContactAction = async (req, res) => {
   try {
     const { id: contactId } = req.params;
@@ -659,26 +670,41 @@ const toggleContactAction = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
+    const toggle = (list) => {
+      const idx = list.indexOf(contactId);
+      if (idx > -1) list.splice(idx, 1);
+      else list.push(contactId);
+    };
+
     if (action === "favorite") {
-      const idx = user.favorites.indexOf(contactId);
-      if (idx > -1) {
-        user.favorites.splice(idx, 1);
-      } else {
-        user.favorites.push(contactId);
-      }
+      toggle(user.favorites);
     } else if (action === "archive") {
-      const idx = user.archived.indexOf(contactId);
-      if (idx > -1) {
-        user.archived.splice(idx, 1);
-      } else {
-        user.archived.push(contactId);
+      toggle(user.archived);
+    } else if (action === "pin") {
+      // The cap is enforced here as well as in the UI: the client used to own
+      // this entirely via localStorage, so nothing stopped a stale or crafted
+      // client from pinning without limit.
+      const alreadyPinned = user.pinnedChats.some((id) => id.toString() === contactId);
+      if (!alreadyPinned && user.pinnedChats.length >= MAX_PINNED_CHATS) {
+        return res
+          .status(400)
+          .json({ message: `You can only pin up to ${MAX_PINNED_CHATS} chats` });
       }
+      toggle(user.pinnedChats);
     } else {
       return res.status(400).json({ message: "Invalid action" });
     }
 
     await user.save();
-    res.status(200).json(user);
+
+    // Only the three lists are returned. This previously sent the whole
+    // Mongoose document — password hash, session records and password-reset
+    // OTP included — and the client assigned it straight into authUser.
+    res.status(200).json({
+      favorites: user.favorites,
+      archived: user.archived,
+      pinnedChats: user.pinnedChats,
+    });
   } catch (error) {
     console.error("Error in toggleContactAction:", error);
     res.status(500).json({ message: "Failed to update action" });
@@ -734,14 +760,23 @@ const deleteMessage = async (req, res) => {
       message.reactions = []; // Clear reactions
       await message.save();
 
-      // Broadcast socket event to receiver
-      const receiverId = message.receiverId.toString();
-      const receiverSocketId = getReceiverSocketId(receiverId);
-      if (receiverSocketId) {
-        io.to(receiverSocketId).emit("messageDeleted", {
+      // Broadcast. A group message has no receiverId — reading it unguarded
+      // threw a TypeError here and surfaced as a 500, which is why group
+      // messages could not be deleted for everyone at all.
+      if (message.groupId) {
+        io.to(`group_${message.groupId.toString()}`).emit("groupMessageDeleted", {
           messageId: message._id.toString(),
+          groupId: message.groupId.toString(),
           isDeletedForEveryone: true
         });
+      } else if (message.receiverId) {
+        const receiverSocketId = getReceiverSocketId(message.receiverId.toString());
+        if (receiverSocketId) {
+          io.to(receiverSocketId).emit("messageDeleted", {
+            messageId: message._id.toString(),
+            isDeletedForEveryone: true
+          });
+        }
       }
     } else {
       return res.status(400).json({ message: "Invalid delete type" });
@@ -1055,6 +1090,84 @@ const viewOneViewMessage = async (req, res) => {
   }
 };
 
+/** Ids of every group the user belongs to — used to scope bulk operations. */
+const groupIdsForUser = async (userId) => {
+  const groups = await Group.find({ "members.user": userId }).select("_id");
+  return groups.map((g) => g._id);
+};
+
+/**
+ * Per-message read state ("Message info").
+ *
+ * There is no per-message read flag in the schema, and adding one would mean a
+ * write per recipient per message. Instead this derives seen state from the
+ * `lastReadAt` map already maintained for unread counts: a conversation read
+ * at or after a message was sent means that message was seen. The map is keyed
+ * by the other user's id for a DM and by the group's id for a group.
+ *
+ * Consequence worth knowing: the timestamp returned is when the reader last
+ * opened the conversation, not the instant this specific message was read. For
+ * the newest message those coincide; for older ones the real read time may be
+ * earlier. Delivery is not tracked at all, so it is not reported rather than
+ * being guessed at.
+ */
+const getMessageInfo = async (req, res) => {
+  try {
+    const { id: messageId } = req.params;
+    const userId = req.user._id.toString();
+
+    const message = await Message.findById(messageId);
+    if (!message) return res.status(404).json({ message: "Message not found" });
+    if (message.senderId.toString() !== userId) {
+      return res.status(403).json({ message: "You can only see info for your own messages" });
+    }
+
+    const sentAt = message.createdAt;
+    const seenBy = [];
+    const pending = [];
+
+    const place = (user, readAt) => {
+      const entry = {
+        _id: user._id,
+        fullName: user.fullName,
+        profilePic: user.profilePic,
+        readAt: readAt || null,
+      };
+      if (readAt && new Date(readAt) >= new Date(sentAt)) seenBy.push(entry);
+      else pending.push(entry);
+    };
+
+    if (message.groupId) {
+      const group = await Group.findById(message.groupId)
+        .populate("members.user", "fullName profilePic lastReadAt");
+      if (!group) return res.status(404).json({ message: "Group not found" });
+
+      const isMember = group.members.some((m) => m.user?._id?.toString() === userId);
+      if (!isMember) return res.status(403).json({ message: "Not a member of this group" });
+
+      const key = message.groupId.toString();
+      group.members
+        .filter((m) => m.user && m.user._id.toString() !== userId)
+        .forEach((m) => place(m.user, m.user.lastReadAt?.get?.(key)));
+    } else if (message.receiverId) {
+      const other = await User.findById(message.receiverId).select("fullName profilePic lastReadAt");
+      if (other) place(other, other.lastReadAt?.get?.(userId));
+    }
+
+    const byTime = (a, b) => new Date(b.readAt) - new Date(a.readAt);
+    res.status(200).json({
+      messageId: message._id,
+      sentAt,
+      isGroup: Boolean(message.groupId),
+      seenBy: seenBy.sort(byTime),
+      pending,
+    });
+  } catch (error) {
+    console.error("Error in getMessageInfo:", error);
+    res.status(500).json({ message: "Failed to load message info" });
+  }
+};
+
 const deleteMessagesBulk = async (req, res) => {
   try {
     const { messageIds, type } = req.body; // type: "me" or "everyone"
@@ -1065,16 +1178,35 @@ const deleteMessagesBulk = async (req, res) => {
     }
 
     if (type === "me") {
-      // Add user to deletedFor list in all selected messages
+      // Only hide messages the caller can actually see. Previously this
+      // updated every id passed in with no ownership check at all, so any
+      // authenticated user could write themselves into `deletedFor` on
+      // messages from conversations they have no part in.
+      const groupIds = await groupIdsForUser(userId);
+      const visible = await Message.find({
+        _id: { $in: messageIds },
+        $or: [
+          { senderId: userId },
+          { receiverId: userId },
+          { groupId: { $in: groupIds } },
+        ],
+      }).select("_id");
+
       await Message.updateMany(
-        { _id: { $in: messageIds } },
+        { _id: { $in: visible.map((m) => m._id) } },
         { $addToSet: { deletedFor: userId } }
       );
     } else {
-      // Delete for everyone: verify sender ownership and delete
-      // We will update isDeletedForEveryone to true and clear attachments
+      // Delete for everyone: only the sender's own messages qualify.
       const messages = await Message.find({ _id: { $in: messageIds }, senderId: userId });
       const validIds = messages.map((m) => m._id);
+
+      // Free the hosted assets before the URLs are blanked — afterwards there
+      // is no record of what to delete. The single-message path already did
+      // this; bulk did not, so bulk deletes leaked storage forever.
+      for (const msg of messages) {
+        await destroyMessageAssets(msg);
+      }
 
       await Message.updateMany(
         { _id: { $in: validIds } },
@@ -1083,20 +1215,32 @@ const deleteMessagesBulk = async (req, res) => {
             isDeletedForEveryone: true,
             text: "",
             image: "",
+            images: [],
             voice: "",
+            attachments: [],
             reactions: []
           }
         }
       );
 
-      // Emit socket event to update everyone
       messages.forEach((msg) => {
-        const receiverSocketId = getReceiverSocketId(msg.receiverId.toString());
+        const payload = { messageId: msg._id.toString(), isDeletedForEveryone: true };
+
+        if (msg.groupId) {
+          io.to(`group_${msg.groupId.toString()}`).emit("groupMessageDeleted", {
+            ...payload,
+            groupId: msg.groupId.toString(),
+          });
+          return;
+        }
+
+        // Guarded: a group message has no receiverId, and calling
+        // .toString() on it threw here, failing the whole request.
+        if (msg.receiverId) {
+          const receiverSocketId = getReceiverSocketId(msg.receiverId.toString());
+          if (receiverSocketId) io.to(receiverSocketId).emit("messageDeleted", payload);
+        }
         const senderSocketId = getReceiverSocketId(msg.senderId.toString());
-
-        const payload = { messageId: msg._id, isDeletedForEveryone: true };
-
-        if (receiverSocketId) io.to(receiverSocketId).emit("messageDeleted", payload);
         if (senderSocketId) io.to(senderSocketId).emit("messageDeleted", payload);
       });
     }
@@ -1141,7 +1285,8 @@ export {
   togglePinMessage,
   updateChatWallpaper,
   viewOneViewMessage,
-  deleteMessagesBulk
+  deleteMessagesBulk,
+  getMessageInfo
   ,cancelScheduledMessage
   ,setContactNickname
   ,getBlockedUsers

@@ -364,6 +364,10 @@ import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus } from "lucide-rea
 import { useNicknames, displayNameOf } from "../lib/contacts";
 import { formatMessageTime } from "../lib/utils";
 import toast from "react-hot-toast";
+import { haptic } from "../lib/haptics";
+
+// Mirrors MAX_PINNED_CHATS in backend/controllers/message.controller.js.
+const MAX_PINNED_CHATS = 2;
 
 const SingleCheck = ({ className }) => (
   <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
@@ -390,7 +394,8 @@ const SideBar = () => {
     unreadCounts, 
     lastReadTimestamps,
     clearChatHistory,
-    setProfilePreviewUser
+    setProfilePreviewUser,
+    toggleContactAction
   } = useChatStore();
 
   const {
@@ -409,30 +414,15 @@ const SideBar = () => {
   const { onlineUsers, authUser } = useAuthStore();
   const [searchTerm, setSearchTerm] = useState("");
   const [filterMode, setFilterMode] = useState("all");
-  const [favoriteUsers, setFavoriteUsers] = useState(() => {
-    try {
-      const parsed = JSON.parse(localStorage.getItem("favoriteUsers"));
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
-  const [archivedUsers, setArchivedUsers] = useState(() => {
-    try {
-      const parsed = JSON.parse(localStorage.getItem("archivedUsers"));
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
-  const [pinnedUserIds, setPinnedUserIds] = useState(() => {
-    try {
-      const parsed = JSON.parse(localStorage.getItem("pinnedUserIds"));
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
+  // Favourites, archive and pins are stored on the account, not in this
+  // browser. They used to live in localStorage, which meant they vanished on
+  // reinstall, never followed the user to another device, and — once multi
+  // account switching landed — were shared between every account signed in on
+  // the same browser, since all of them read one global key.
+  const asIds = (list) => (Array.isArray(list) ? list.map((v) => (v?._id ? v._id : v)) : []);
+  const favoriteUsers = asIds(authUser?.favorites);
+  const archivedUsers = asIds(authUser?.archived);
+  const pinnedUserIds = asIds(authUser?.pinnedChats);
   const [showArchivedOnly, setShowArchivedOnly] = useState(false);
   const [contextMenu, setContextMenu] = useState(null); // { x, y, userId }
   const pressTimerRef = useRef(null);
@@ -451,40 +441,65 @@ const SideBar = () => {
     return () => unsubscribeFromGroupEvents();
   }, [getGroups, subscribeToGroupEvents, unsubscribeFromGroupEvents]);
 
+  // One-time lift of the pre-server lists out of localStorage, so nobody
+  // silently loses the favourites and pins they already had. Runs once per
+  // account, and only pushes ids the server does not already know about.
+  useEffect(() => {
+    if (!authUser?._id) return;
+    const doneKey = `chatLists:migrated:${authUser._id}`;
+    if (localStorage.getItem(doneKey)) return;
+
+    const readLegacy = (key) => {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(key));
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    };
+
+    const jobs = [
+      ["favoriteUsers", "favorite", asIds(authUser.favorites)],
+      ["archivedUsers", "archive", asIds(authUser.archived)],
+      ["pinnedUserIds", "pin", asIds(authUser.pinnedChats)],
+    ];
+
+    (async () => {
+      for (const [key, action, alreadyOnServer] of jobs) {
+        for (const id of readLegacy(key)) {
+          if (!alreadyOnServer.includes(id)) {
+            await toggleContactAction(id, action, { silent: true });
+          }
+        }
+      }
+      localStorage.setItem(doneKey, "1");
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUser?._id]);
+
   const toggleFavorite = (e, userId) => {
     if (e && e.stopPropagation) e.stopPropagation();
-    const isFav = Array.isArray(favoriteUsers) && favoriteUsers.includes(userId);
-    const updated = isFav
-      ? favoriteUsers.filter((id) => id !== userId)
-      : [...(Array.isArray(favoriteUsers) ? favoriteUsers : []), userId];
-    setFavoriteUsers(updated);
-    localStorage.setItem("favoriteUsers", JSON.stringify(updated));
+    haptic("tap");
+    toggleContactAction(userId, "favorite");
   };
 
   const toggleArchive = (e, userId) => {
     if (e && e.stopPropagation) e.stopPropagation();
-    const isArchived = Array.isArray(archivedUsers) && archivedUsers.includes(userId);
-    const updated = isArchived
-      ? archivedUsers.filter((id) => id !== userId)
-      : [...(Array.isArray(archivedUsers) ? archivedUsers : []), userId];
-    setArchivedUsers(updated);
-    localStorage.setItem("archivedUsers", JSON.stringify(updated));
+    haptic("tap");
+    toggleContactAction(userId, "archive");
   };
 
   const togglePin = (userId) => {
-    const isPinned = Array.isArray(pinnedUserIds) && pinnedUserIds.includes(userId);
-    let updated;
-    if (isPinned) {
-      updated = pinnedUserIds.filter((id) => id !== userId);
-    } else {
-      if (Array.isArray(pinnedUserIds) && pinnedUserIds.length >= 2) {
-        toast.error("You can only pin up to 2 chats");
-        return;
-      }
-      updated = [...(Array.isArray(pinnedUserIds) ? pinnedUserIds : []), userId];
+    // The cap is enforced server-side too; this only avoids a pointless
+    // round-trip and gives immediate feedback.
+    const isPinned = pinnedUserIds.includes(userId);
+    if (!isPinned && pinnedUserIds.length >= MAX_PINNED_CHATS) {
+      haptic("reject");
+      toast.error(`You can only pin up to ${MAX_PINNED_CHATS} chats`);
+      return;
     }
-    setPinnedUserIds(updated);
-    localStorage.setItem("pinnedUserIds", JSON.stringify(updated));
+    haptic("success");
+    toggleContactAction(userId, "pin");
   };
 
   const handleTouchStart = (userId, e) => {

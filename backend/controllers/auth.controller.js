@@ -115,6 +115,7 @@ const sanitizeUser = (user) => ({
   blockedUsers: user.blockedUsers || [],
   favorites: user.favorites || [],
   archived: user.archived || [],
+  pinnedChats: user.pinnedChats || [],
   lastSeen: user.lastSeen,
   messageTimer: user.messageTimer,
   createdAt: user.createdAt,

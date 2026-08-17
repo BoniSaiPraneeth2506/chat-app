@@ -125,8 +125,8 @@ const userSchema=new mongoose.Schema({
         of:String,
         default:new Map()
     },
-    // When this user last read each 1-on-1 conversation, keyed by the other
-    // user's id. Unread counts were previously held only in browser memory,
+    // When this user last read each conversation: keyed by the other user's id
+    // for a DM, and by the group's id for a group. Unread counts were previously held only in browser memory,
     // so they were lost whenever the app was closed or the user logged out —
     // messages that arrived while away came back looking already read.
     // Persisting the read mark here makes the count survive restarts and
@@ -142,6 +142,15 @@ const userSchema=new mongoose.Schema({
         default:[]
     }],
     archived:[{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"User",
+        default:[]
+    }],
+    // Pinned conversations. Previously browser-only (localStorage), so a
+    // reinstall lost them and they never followed the user to another device —
+    // which multi-account switching made worse, since each account on a shared
+    // browser read the same single key.
+    pinnedChats:[{
         type:mongoose.Schema.Types.ObjectId,
         ref:"User",
         default:[]

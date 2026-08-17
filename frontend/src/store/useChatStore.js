@@ -74,6 +74,45 @@ import { isNetworkError } from "../lib/network";
 // "dm:<userId>" keeps a DM's cache distinct from a group's ("group:<id>").
 const dmKey = (userId) => `dm:${userId}`;
 
+// Group messages are held in useGroupStore, not here. These two reach across
+// so a delete initiated from the shared message UI updates whichever list the
+// message actually lives in. Written as functions rather than a module-level
+// import binding because the two stores import each other; resolving the state
+// at call time is what keeps that cycle harmless.
+const removeGroupMessageLocally = (messageId) => {
+  const gs = useGroupStore.getState();
+  if (!gs?.groupMessages?.length) return;
+  if (!gs.groupMessages.some((m) => m._id === messageId)) return;
+  useGroupStore.setState((state) => ({
+    groupMessages: state.groupMessages.filter((m) => m._id !== messageId),
+  }));
+};
+
+const patchGroupMessageLocally = (messageId, patch) => {
+  const gs = useGroupStore.getState();
+  if (!gs?.groupMessages?.length) return;
+  if (!gs.groupMessages.some((m) => m._id === messageId)) return;
+  useGroupStore.setState((state) => ({
+    groupMessages: state.groupMessages.map((m) =>
+      m._id === messageId ? { ...m, ...patch } : m
+    ),
+  }));
+};
+
+// Deleting a chat removes the contact from the sidebar list, so a later message
+// from them has no row to attach to. Refetching restores it — throttled because
+// a burst of messages from the same unknown sender would otherwise refetch once
+// per message.
+let lastSidebarRefetch = 0;
+const restoreSidebarRow = (getState, senderKey) => {
+  if (!senderKey) return;
+  const { users, getUsers } = getState();
+  if (users.some((u) => u._id === senderKey)) return;
+  if (Date.now() - lastSidebarRefetch < 3000) return;
+  lastSidebarRefetch = Date.now();
+  getUsers();
+};
+
 /** Content carried over when forwarding; a deleted message forwards empty. */
 const buildForwardPayload = (message) => {
   const payload = { isForwarded: true };
@@ -701,6 +740,10 @@ export const useChatStore = create((set, get) => ({
         }
       }));
 
+      // If this sender is not in the sidebar (their chat was deleted, or this
+      // is a first-ever message), bring the row back.
+      if (senderKey !== currentUser?._id) restoreSidebarRow(get, senderKey);
+
       // Write-through to the local cache regardless of which chat is open,
       // so reopening this conversation later (even offline) shows it.
       if (currentUser) {
@@ -1083,13 +1126,26 @@ export const useChatStore = create((set, get) => ({
     }
   },
 
-  toggleContactAction: async (contactId, action) => {
+  toggleContactAction: async (contactId, action, { silent = false } = {}) => {
     try {
       const res = await axiosInstance.post(`/messages/action/${contactId}`, { action });
-      useAuthStore.setState({ authUser: res.data });
-      toast.success(`${action === "favorite" ? "Favorites" : "Archived"} updated successfully`);
+      // Merge the three lists rather than replacing authUser: the response is
+      // deliberately narrow now, so overwriting would drop every other field.
+      const { favorites, archived, pinnedChats } = res.data || {};
+      useAuthStore.setState((state) =>
+        state.authUser
+          ? { authUser: { ...state.authUser, favorites, archived, pinnedChats } }
+          : state
+      );
+      if (!silent) {
+        const label =
+          action === "favorite" ? "Favorites" : action === "pin" ? "Pinned" : "Archived";
+        toast.success(`${label} updated`);
+      }
+      return true;
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to update action");
+      return false;
     }
   },
 
@@ -1101,6 +1157,9 @@ export const useChatStore = create((set, get) => ({
         set((state) => ({
           messages: state.messages.filter((msg) => msg._id !== messageId)
         }));
+        // Group messages live in useGroupStore, so patching only `messages`
+        // left a deleted group message on screen until the next reload.
+        removeGroupMessageLocally(messageId);
         if (authUser) deleteCachedMessage(authUser._id, messageId);
         toast.success("Message deleted for you");
       } else {
@@ -1110,6 +1169,7 @@ export const useChatStore = create((set, get) => ({
             msg._id === messageId ? { ...msg, ...patch } : msg
           )
         }));
+        patchGroupMessageLocally(messageId, patch);
         if (authUser) updateCachedMessage(authUser._id, messageId, patch);
         toast.success("Message deleted for everyone");
       }
@@ -1118,13 +1178,44 @@ export const useChatStore = create((set, get) => ({
     }
   },
 
+  /** Per-message read state for the "Message info" sheet. */
+  getMessageInfo: async (messageId) => {
+    try {
+      const res = await axiosInstance.get(`/messages/info/${messageId}`);
+      return res.data;
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to load message info");
+      return null;
+    }
+  },
+
   clearChatHistory: async (contactId) => {
     const authUser = useAuthStore.getState().authUser;
     try {
       await axiosInstance.delete(`/messages/clear/${contactId}`);
-      set({ messages: [] });
       if (authUser) clearCachedConversation(authUser._id, dmKey(contactId));
-      toast.success("Conversation cleared successfully");
+
+      // Drop the row from the sidebar as well, the way WhatsApp does — the
+      // conversation is gone, so leaving the contact listed with an empty
+      // preview looked like the delete had not worked. The server no longer
+      // counts hidden messages either, so a refetch agrees; this just avoids
+      // waiting for one. A new message re-adds the contact normally.
+      set((state) => {
+        const latestMessages = { ...state.latestMessages };
+        delete latestMessages[contactId];
+        const unreadCounts = { ...state.unreadCounts };
+        delete unreadCounts[contactId];
+        const isOpen = state.selectedUser?._id === contactId;
+        return {
+          messages: isOpen ? [] : state.messages,
+          users: state.users.filter((u) => u._id !== contactId),
+          latestMessages,
+          unreadCounts,
+          ...(isOpen ? { selectedUser: null } : {}),
+        };
+      });
+
+      toast.success("Chat deleted");
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to clear history");
     }
@@ -1153,6 +1244,7 @@ export const useChatStore = create((set, get) => ({
         set((state) => ({
           messages: state.messages.filter((msg) => !messageIds.includes(msg._id))
         }));
+        messageIds.forEach((id) => removeGroupMessageLocally(id));
         if (authUser) messageIds.forEach((id) => deleteCachedMessage(authUser._id, id));
         toast.success("Selected messages deleted for you");
       } else {
@@ -1164,6 +1256,7 @@ export const useChatStore = create((set, get) => ({
               : msg
           )
         }));
+        messageIds.forEach((id) => patchGroupMessageLocally(id, patch));
         if (authUser) messageIds.forEach((id) => updateCachedMessage(authUser._id, id, patch));
         toast.success("Selected messages deleted for everyone");
       }

@@ -79,6 +79,8 @@ import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, 
 import { useNicknames, displayNameOf, hasNickname } from "../lib/contacts";
 import { saveTextFile } from "../lib/download";
 import { copyText, messagesToClipboardText } from "../lib/clipboard";
+import { haptic } from "../lib/haptics";
+import MessageInfoSheet from "./MessageInfoSheet";
 import axiosInstance from "../lib/axios";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
@@ -141,6 +143,7 @@ const ChatHeader = () => {
     setSelectedGroup,
     setIsGroupDetailsModalOpen,
     startOrJoinGroupCall,
+    groupMessages,
   } = useGroupStore();
 
   const { onlineUsers, authUser } = useAuthStore();
@@ -152,18 +155,26 @@ const ChatHeader = () => {
   const contactName = displayNameOf(selectedUser, nicknames);
   const [pendingWallpaper, setPendingWallpaper] = useState(null);
   const [dimLevel, setDimLevel] = useState(35);
+  const [infoMessageId, setInfoMessageId] = useState(null);
 
   const isSelf = selectedUser?._id === authUser?._id;
   const isOnline = onlineUsers.includes(selectedUser?._id);
   const showLastSeen = selectedUser?.onlinePrivacy !== false;
   const isTyping = typingUsers?.[selectedUser?._id];
 
-  // DM-only: group message selection isn't wired to a backend action yet
-  // (see ChatContainer.jsx), so this toolbar only replaces the header there.
-  const selectedMsgs = selectedMessageIds.map((id) => messages.find((m) => m._id === id)).filter(Boolean);
+  // Serves both DMs and groups. Group messages arrive with senderId populated
+  // as an object while DM messages carry a bare id, so ownership has to be
+  // compared through senderOf — a direct `senderId === authUser._id` silently
+  // failed for every group message, which hid "delete for everyone" and edit.
+  const senderOf = (m) => m?.senderId?._id || m?.senderId;
+  const activeMessages = selectedGroup ? groupMessages : messages;
+  const selectedMsgs = selectedMessageIds
+    .map((id) => activeMessages.find((m) => m._id === id))
+    .filter(Boolean);
   const soleSelected = selectedMsgs.length === 1 ? selectedMsgs[0] : null;
-  const allOwnMessages = selectedMsgs.length > 0 && selectedMsgs.every((m) => m.senderId === authUser?._id);
-  const canEditSole = soleSelected && soleSelected.senderId === authUser?._id && !soleSelected.isDeletedForEveryone && soleSelected.text
+  const allOwnMessages = selectedMsgs.length > 0 && selectedMsgs.every((m) => senderOf(m) === authUser?._id);
+  const isSoleOwn = soleSelected && senderOf(soleSelected) === authUser?._id;
+  const canEditSole = isSoleOwn && !soleSelected.isDeletedForEveryone && soleSelected.text
     && (Date.now() - new Date(soleSelected.createdAt).getTime() <= 15 * 60 * 1000);
 
   const exitSelection = () => setSelectionMode(false);
@@ -183,12 +194,13 @@ const ChatHeader = () => {
       return;
     }
     const ok = await copyText(text);
+    haptic(ok ? "success" : "reject");
     if (ok) toast.success(copyableCount > 1 ? `${copyableCount} messages copied` : "Copied");
     else toast.error("Couldn't copy");
     exitSelection();
   };
 
-  if (isSelectionMode && !selectedGroup) {
+  if (isSelectionMode) {
     return (
       <div className="p-2.5 border-b border-base-300 min-h-[61px] flex items-center justify-between bg-base-100 relative z-30 animate-in fade-in duration-150">
         <div className="flex items-center gap-3">
@@ -224,7 +236,7 @@ const ChatHeader = () => {
               <ul tabIndex={0} className="dropdown-content z-50 menu p-1.5 shadow-xl bg-base-100 border border-base-300 rounded-box w-48 text-xs text-base-content mt-1">
                 <li>
                   <button
-                    onClick={() => { deleteMessagesBulk(selectedMessageIds, "me"); exitSelection(); document.activeElement.blur(); }}
+                    onClick={() => { haptic("success"); deleteMessagesBulk(selectedMessageIds, "me"); exitSelection(); document.activeElement.blur(); }}
                     className="hover:bg-base-200 py-2 text-left font-medium"
                   >
                     Delete for me
@@ -233,7 +245,7 @@ const ChatHeader = () => {
                 {allOwnMessages && (
                   <li>
                     <button
-                      onClick={() => { deleteMessagesBulk(selectedMessageIds, "everyone"); exitSelection(); document.activeElement.blur(); }}
+                      onClick={() => { haptic("success"); deleteMessagesBulk(selectedMessageIds, "everyone"); exitSelection(); document.activeElement.blur(); }}
                       className="hover:bg-red-500 hover:text-white py-2 text-left font-medium text-red-500"
                     >
                       Delete for everyone
@@ -257,7 +269,7 @@ const ChatHeader = () => {
               already shows on both breakpoints, so this only fills the gap. */}
           {forwardableMsgs.length >= 2 && (
             <button
-              onClick={() => { setForwardingMessages(forwardableMsgs); exitSelection(); }}
+              onClick={() => { haptic("tap"); setForwardingMessages(forwardableMsgs); exitSelection(); }}
               className="lg:hidden p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
               title={`Forward ${forwardableMsgs.length} messages`}
             >
@@ -282,7 +294,48 @@ const ChatHeader = () => {
               <Pencil size={18} />
             </button>
           )}
+
+          {/* Overflow menu. Info is only meaningful for a single message you
+              sent yourself — read state for someone else's message is not
+              yours to see, and the endpoint refuses it. */}
+          {isSoleOwn && !soleSelected.isDeletedForEveryone && (
+            <div className="dropdown dropdown-bottom dropdown-end">
+              <div
+                tabIndex={0}
+                role="button"
+                className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary cursor-pointer"
+                title="More"
+              >
+                <MoreVertical size={18} />
+              </div>
+              <ul tabIndex={0} className="dropdown-content z-50 menu p-1.5 shadow-xl bg-base-100 rounded-box w-44 text-xs text-base-content mt-1">
+                <li>
+                  <button
+                    onClick={() => {
+                      haptic("tap");
+                      setInfoMessageId(soleSelected._id);
+                      document.activeElement?.blur();
+                    }}
+                    className="hover:bg-base-200 py-2 text-left font-medium flex items-center gap-2"
+                  >
+                    <Info size={14} />
+                    Message info
+                  </button>
+                </li>
+              </ul>
+            </div>
+          )}
         </div>
+
+        {infoMessageId && (
+          <MessageInfoSheet
+            messageId={infoMessageId}
+            onClose={() => {
+              setInfoMessageId(null);
+              exitSelection();
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -492,8 +545,8 @@ const ChatHeader = () => {
               <Search size={18} />
             </button>
 
-            {/* Select Messages Toggle Button (DM only — see ChatContainer.jsx) */}
-            {!selectedGroup && (
+            {/* Select Messages toggle — groups included, same as DMs */}
+            {(
               <button
                 onClick={() => setSelectionMode(!isSelectionMode)}
                 className={`hidden sm:flex p-2 rounded-full transition-colors ${isSelectionMode ? "bg-primary text-primary-content" : "hover:bg-base-200 text-base-content/70 hover:text-primary"}`}
@@ -577,7 +630,7 @@ const ChatHeader = () => {
                 ))}
 
                 <div className="divider my-1"></div>
-                {!selectedGroup && (
+                {(
                   <li>
                     <button
                       onClick={() => {
@@ -594,7 +647,7 @@ const ChatHeader = () => {
                   </li>
                 )}
 
-                {!isSelf && (
+                {!isSelf && !selectedGroup && (
                   <>
                     <li>
                       <button

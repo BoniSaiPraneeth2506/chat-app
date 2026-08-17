@@ -128,6 +128,23 @@ io.on("connection", async (socket) => {
             broadcastOnlineUsers();
         });
 
+    // ── Event: markGroupAsRead ──────────────────────────────────────────────
+    // Group reads were never recorded anywhere. The same lastReadAt map is
+    // reused, keyed by group id instead of a user id, which is what lets
+    // "seen by" be derived for group messages without a per-recipient write
+    // for every message sent.
+    socket.on("markGroupAsRead", async ({ groupId }) => {
+        if (!groupId) return;
+        try {
+            await User.updateOne(
+                { _id: userId },
+                { $set: { [`lastReadAt.${groupId}`]: new Date() } }
+            );
+        } catch (err) {
+            console.error("Error persisting group lastReadAt:", err.message);
+        }
+    });
+
     // ── Event: markAsRead ───────────────────────────────────────────────────
     socket.on("markAsRead", async ({ senderId, receiverId }) => {
         // Validate: only the authenticated user can claim to be the receiver

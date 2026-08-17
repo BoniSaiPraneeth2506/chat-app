@@ -4,6 +4,7 @@ import { useGroupStore } from "../store/useGroupStore";
 import useAuthStore from "../store/useAuthStore";
 import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3 } from "lucide-react";
 import toast from "react-hot-toast";
+import { haptic } from "../lib/haptics";
 import CreatePollModal from "./CreatePollModal";
 import SchedulePicker from "./SchedulePicker";
 
@@ -268,6 +269,8 @@ const MessageInput = () => {
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!text.trim() && imagePreviews.length === 0) return;
+
+    haptic("tap");
 
     const messageText = text.trim();
     const currentImages = [...imagePreviews];
