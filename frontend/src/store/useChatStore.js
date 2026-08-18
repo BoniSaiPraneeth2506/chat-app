@@ -743,6 +743,7 @@ export const useChatStore = create((set, get) => ({
     socket.off("newMessage");
     socket.off("messagesRead");
     socket.off("messageTranscript");
+    socket.off("accountListsUpdated");
     socket.off("typing");
     socket.off("messageReaction");
     socket.off("messageDeleted");
@@ -824,6 +825,24 @@ export const useChatStore = create((set, get) => ({
             [senderKey]: (state.unreadCounts[senderKey] || 0) + 1
           }
         }));
+      }
+    });
+
+    // Account-level lists changed on another of this user's devices: pins,
+    // favourites, archive, or the locked set. Applying them here is what makes a
+    // pin on the phone show up on the laptop without a refresh.
+    //
+    // The lists are merged rather than replacing authUser, and the sidebar is
+    // refetched because a change to the locked set alters what the server is
+    // willing to send at all.
+    socket.on("accountListsUpdated", (lists) => {
+      if (!lists) return;
+      useAuthStore.setState((state) =>
+        state.authUser ? { authUser: { ...state.authUser, ...lists } } : state
+      );
+      if ("lockedChats" in lists || "lockedGroups" in lists) {
+        get().getUsers();
+        useGroupStore.getState().getGroups();
       }
     });
 
@@ -1074,6 +1093,8 @@ export const useChatStore = create((set, get) => ({
       socket.off("newMessage");
       socket.off("messagesRead");
       socket.off("messageTranscript");
+      socket.off("accountListsUpdated");
+    socket.off("accountListsUpdated");
       socket.off("disappearingTimerUpdate");
       socket.off("userOffline");
       socket.off("typing");

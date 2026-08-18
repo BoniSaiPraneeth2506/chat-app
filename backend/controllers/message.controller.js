@@ -71,7 +71,7 @@ import { transcribeAudioUrl, isTranscriptionConfigured } from "../lib/assemblyai
 import Message from "../models/message.model.js";
 import User from "../models/user.model.js";
 import cloudinary from "../lib/cloudinary.js";
-import { getReceiverSocketId, io, invalidateBlockCache } from "../lib/socket.js";
+import { getReceiverSocketId, io, invalidateBlockCache, emitAccountLists } from "../lib/socket.js";
 import sanitizeHtml from "sanitize-html";
 import { destroyMessageAssets, assetUrlsOf, destroyAssets } from "../lib/mediaCleanup.js";
 import {
@@ -744,14 +744,21 @@ const toggleContactAction = async (req, res) => {
     // Only the three lists are returned. This previously sent the whole
     // Mongoose document — password hash, session records and password-reset
     // OTP included — and the client assigned it straight into authUser.
-    res.status(200).json({
+    // Named for what it is, since `lists` above already means the field-name map.
+    const payload = {
       favorites: user.favorites,
       archived: user.archived,
       pinnedChats: user.pinnedChats,
       favoriteGroups: user.favoriteGroups,
       archivedGroups: user.archivedGroups,
       pinnedGroups: user.pinnedGroups,
-    });
+    };
+
+    // The device that made the change already has the response; this is for the
+    // user's other devices.
+    emitAccountLists(userId, payload);
+
+    res.status(200).json(payload);
   } catch (error) {
     console.error("Error in toggleContactAction:", error);
     res.status(500).json({ message: "Failed to update action" });

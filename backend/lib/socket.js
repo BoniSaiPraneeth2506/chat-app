@@ -50,11 +50,30 @@ io.use(async (socket, next) => {
     }
 });
 
+/**
+ * A target for io.to(...) that reaches every device this user has open.
+ *
+ * Returns the per-user room name rather than a socket id. Socket.IO treats both
+ * identically at the call site — each socket is itself a room — so every existing
+ * `io.to(getReceiverSocketId(id)).emit(...)` now fans out to all of that user's
+ * devices instead of only the most recent one, with no change at those call sites.
+ *
+ * Still falsy when the user has nothing connected, because callers use it as an
+ * "are they online" test as well as an address.
+ */
 export function getReceiverSocketId(userId) {
-    return userSocketMap[userId];
+    const sockets = userSocketMap.get(String(userId));
+    return sockets && sockets.size > 0 ? roomForUser(userId) : undefined;
 }
 
-const userSocketMap = {}; // { userId: socketId }
+export const roomForUser = (userId) => `user_${userId}`;
+
+// userId -> Set of that user's live socket ids. It was a single socket id, and a
+// second device replaced the first, so two devices could never be online at once
+// and nothing could be delivered to more than one of them.
+const userSocketMap = new Map();
+
+const onlineUserIds = () => [...userSocketMap.keys()].filter((id) => userSocketMap.get(id)?.size > 0);
 const privateUsersSet = new Set(); // users who hide online status
 // Users who have turned off the typing indicator. Held in memory alongside the
 // online-status set so the `typing` handler stays a lookup rather than a query —
@@ -115,9 +134,21 @@ const isBlockedBetween = async (a, b) => {
 };
 
 const broadcastOnlineUsers = () => {
-    const visibleOnlineUsers = Object.keys(userSocketMap).filter(id => !privateUsersSet.has(id));
+    const visibleOnlineUsers = onlineUserIds().filter(id => !privateUsersSet.has(id));
     io.emit("getOnlineUsers", visibleOnlineUsers);
 };
+
+/**
+ * Pushes account-level state to every device the user has open.
+ *
+ * Pins, favourites, archive and the locked set are per-account, so a change made
+ * on a phone should be visible on a laptop without a refresh — which is what
+ * every real messenger does. Now that a user can hold several sockets, the room
+ * reaches all of them.
+ */
+export function emitAccountLists(userId, lists) {
+    io.to(roomForUser(userId)).emit("accountListsUpdated", lists);
+}
 
 export function updateTypingPrivacyState(userId, isPrivate) {
     if (isPrivate) {
@@ -141,20 +172,23 @@ io.on("connection", async (socket) => {
     const userId = socket.userId;
     console.log("A user Connected:", socket.id, "UserID:", userId);
 
-    // Store the new socket (silently replace old one if exists)
-    const oldSocketId = userSocketMap[userId];
-    if (oldSocketId && oldSocketId !== socket.id) {
-        const oldSocket = io.sockets.sockets.get(oldSocketId);
-        if (oldSocket) {
-            oldSocket.disconnect();
-        }
-    }
-    userSocketMap[userId] = socket.id;
+    // Additive, not replacing. Disconnecting the previous socket is what made a
+    // second device kick the first one off, which in turn made per-account sync
+    // across devices impossible.
+    const key = String(userId);
+    if (!userSocketMap.has(key)) userSocketMap.set(key, new Set());
+    userSocketMap.get(key).add(socket.id);
 
-    if (oldSocketId) {
-        console.log(`User ${userId} reconnected. Old socket: ${oldSocketId}, New socket: ${socket.id}`);
+    // The room is how anything reaches every device at once.
+    socket.join(roomForUser(userId));
+
+    // More than one live socket now means more than one device, not a stale
+    // connection to be cleaned up.
+    const deviceCount = userSocketMap.get(key).size;
+    if (deviceCount > 1) {
+        console.log(`User ${userId} now on ${deviceCount} devices. New socket: ${socket.id}`);
     } else {
-        console.log(`User ${userId} connected. Current online users:`, Object.keys(userSocketMap));
+        console.log(`User ${userId} connected. Current online users:`, onlineUserIds());
     }
 
     // Deliberately NOT awaited here.
@@ -512,10 +546,13 @@ io.on("connection", async (socket) => {
     socket.on("disconnect", async () => {
         console.log("A user Disconnected:", socket.id, "UserID:", userId);
 
-        if (userId && userSocketMap[userId] === socket.id) {
-            delete userSocketMap[userId];
+        const set = userId ? userSocketMap.get(String(userId)) : null;
+        if (set) set.delete(socket.id);
+        // Only counts as going offline once the user's last device has gone.
+        if (set && set.size === 0) {
+            userSocketMap.delete(String(userId));
             privateUsersSet.delete(userId.toString());
-            console.log("User removed from online map. Current online users:", Object.keys(userSocketMap));
+            console.log("User removed from online map. Current online users:", onlineUserIds());
 
             try {
                 await User.findByIdAndUpdate(userId, { lastSeen: new Date() });

@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import User from "../models/user.model.js";
 import Group from "../models/group.model.js";
 import { SIDEBAR_USER_FIELDS, attachUnreadCounts } from "./message.controller.js";
+import { emitAccountLists } from "../lib/socket.js";
 
 // ── Chat lock ────────────────────────────────────────────────────────────────
 //
@@ -61,6 +62,7 @@ const setupChatLock = async (req, res) => {
     };
     const saved = await User.findByIdAndUpdate(user._id, { $set: { chatLock } }, { new: true });
 
+    emitAccountLists(user._id, lockStatus(saved));
     res.status(200).json(lockStatus(saved));
   } catch (error) {
     console.error("Error in setupChatLock:", error);
@@ -204,6 +206,7 @@ const disableChatLock = async (req, res) => {
       { new: true }
     );
 
+    emitAccountLists(user._id, lockStatus(saved));
     res.status(200).json(lockStatus(saved));
   } catch (error) {
     console.error("Error in disableChatLock:", error);
@@ -237,6 +240,7 @@ const toggleChatLocked = async (req, res) => {
       { new: true }
     );
 
+    emitAccountLists(user._id, lockStatus(saved));
     res.status(200).json({ ...lockStatus(saved), locked: !isLocked });
   } catch (error) {
     console.error("Error in toggleChatLocked:", error);

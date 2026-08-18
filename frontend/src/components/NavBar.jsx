@@ -29,31 +29,30 @@ const Navbar = () => {
       <div className="container h-16 px-4 mx-auto">
         <div className="flex items-center justify-between h-full">
           <div className="flex items-center gap-8">
-            <Link to="/" className="flex items-center gap-2.5 hover:opacity-80 transition-all">
+            {/* Double-tap the logo to open the locked chats. The handler sits on
+                the link that wraps both the icon and the wordmark, so either half
+                responds. Deliberately an unlabelled gesture: a visible control
+                reading "locked chats" announces that some exist. A single tap
+                still follows the link, so the header behaves exactly as before. */}
+            <Link
+              to="/"
+              className="flex items-center gap-2.5 hover:opacity-80 transition-all select-none"
+              onClick={(e) => {
+                const now = Date.now();
+                if (now - lastWordmarkTap.current < 400) {
+                  e.preventDefault();
+                  lastWordmarkTap.current = 0;
+                  haptic("longPress");
+                  openLockedChats();
+                  return;
+                }
+                lastWordmarkTap.current = now;
+              }}
+            >
               <div className="flex items-center justify-center rounded-lg size-9 bg-primary/10">
                 <MessageSquare className="w-5 h-5 text-primary" />
               </div>
-              {/* Double-tap opens the locked chats. Deliberately an unlabelled
-                  gesture on the wordmark rather than a visible button: a control
-                  reading "locked chats" announces that some exist. A single tap
-                  still follows the link, so the header behaves normally. */}
-              <h1
-                className="text-lg font-bold select-none"
-                onClick={(e) => {
-                  const now = Date.now();
-                  if (now - lastWordmarkTap.current < 400) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    lastWordmarkTap.current = 0;
-                    haptic("longPress");
-                    openLockedChats();
-                    return;
-                  }
-                  lastWordmarkTap.current = now;
-                }}
-              >
-                Chatty
-              </h1>
+              <h1 className="text-lg font-bold">Chatty</h1>
             </Link>
           </div>
 

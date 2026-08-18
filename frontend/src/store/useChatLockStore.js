@@ -126,6 +126,34 @@ export const useChatLockStore = create((set, get) => ({
     }
   },
 
+  /**
+   * Releases one conversation from inside the unlocked screen.
+   *
+   * Kept separate from toggleChat because the session stays open here: the user
+   * has already proved themselves to get this far, so asking again would be
+   * pointless, and dropping them back to the password prompt after every unlock
+   * would make releasing several chats needlessly painful.
+   *
+   * The row is removed locally rather than by refetching. The toggle response
+   * carries ids, not sidebar entries, and we already know which one left.
+   */
+  releaseChat: async (id, type = "user") => {
+    try {
+      const res = await axiosInstance.post(`/auth/chat-lock/toggle/${id}`, { type });
+      mergeLockState(res.data);
+      set((state) => ({
+        lockedUsers: state.lockedUsers.filter((u) => u._id !== id),
+        lockedGroups: state.lockedGroups.filter((g) => g._id !== id),
+      }));
+      await refreshLists();
+      toast.success("Moved back to your chats");
+      return true;
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Could not unlock that chat");
+      return false;
+    }
+  },
+
   /** Locks or unlocks one conversation, then refreshes the lists it moved between. */
   toggleChat: async (id, type = "user") => {
     try {
