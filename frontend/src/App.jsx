@@ -67,6 +67,7 @@ import CreateGroupModal from './components/CreateGroupModal'
 import GroupDetailsModal from './components/GroupDetailsModal'
 import GroupWelcomeSheet from './components/GroupWelcomeSheet'
 import LockedChatsModal from './components/LockedChatsModal'
+import { useChatLockStore } from './store/useChatLockStore'
 import AboutPage from './pages/AboutPage'
 import GroupCallModal from './components/GroupCallModal'
 import CallModal from './components/CallModal'
@@ -175,6 +176,7 @@ const App = () => {
     lightboxImage,
     lightboxSecure,
     setLightboxImage,
+    selectedUser,
     setSelectedUser,
     startCall,
     setIsRecipientProfileOpen
@@ -337,6 +339,19 @@ const App = () => {
     }
     setBadgeCount(totalUnread);
   }, [totalUnread, authUser]);
+
+  // Coming back out of a locked chat returns to the locked list, not the normal
+  // home. Watching the selection go empty catches every route out of the chat —
+  // the mobile back arrow, the close button, Escape — instead of each one having
+  // to remember where it came from.
+  const returnToLocked = useChatLockStore((s) => s.returnToLocked);
+  const resumeLockedList = useChatLockStore((s) => s.resumeLockedList);
+
+  useEffect(() => {
+    if (!returnToLocked) return;
+    if (selectedUser || selectedGroup) return;
+    resumeLockedList();
+  }, [returnToLocked, selectedUser, selectedGroup, resumeLockedList]);
 
   if (isCheckingAuth && !authUser) {
     return (

@@ -29,7 +29,7 @@ const LockedChatsModal = () => {
   const nicknames = useNicknames();
   const {
     isModalOpen, view, isBusy, error, lockedUsers, lockedGroups,
-    closeModal, setView, unlock, recover, releaseChat,
+    closeModal, setView, unlock, recover, releaseChat, enterLockedChat,
   } = useChatLockStore();
 
   const [password, setPassword] = useState("");
@@ -113,7 +113,9 @@ const LockedChatsModal = () => {
       setSelectedGroup(null);
       setSelectedUser(item);
     }
-    closeModal();
+    // Not closeModal: this records that Back should land on the locked list again
+    // rather than on the normal home.
+    enterLockedChat();
   };
 
   // Long-press, or right-click on a computer, offers to release the chat. No

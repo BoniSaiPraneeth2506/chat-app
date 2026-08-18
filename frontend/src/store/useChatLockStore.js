@@ -27,14 +27,51 @@ export const useChatLockStore = create((set, get) => ({
   lockedUsers: [],
   lockedGroups: [],
 
-  openModal: () => set({ isModalOpen: true, view: get().isUnlocked ? "open" : "locked", error: "" }),
+  // True while a locked chat is open, so backing out of it returns to the locked
+  // list instead of the normal home.
+  returnToLocked: false,
+
+  /**
+   * Entering the locked screen always asks for the password again.
+   *
+   * The session used to stay unlocked in memory, so leaving and double-tapping
+   * again walked straight in — which makes the lock decorative for anyone who
+   * picks the phone up next. Navigating back out of a locked chat is the one path
+   * that does not re-ask, because that is movement inside the flow rather than a
+   * fresh entry, and it goes through resumeLockedList instead.
+   */
+  openModal: () => {
+    get().relock();
+    set({ isModalOpen: true, view: "locked", error: "" });
+  },
 
   closeModal: () => set({ isModalOpen: false, error: "" }),
+
+  /** Opening a locked chat: keep the session so Back can come back here. */
+  enterLockedChat: () => set({ isModalOpen: false, returnToLocked: true, error: "" }),
+
+  /** Back out of that chat — straight to the list, no password. */
+  resumeLockedList: () => {
+    if (!get().isUnlocked) {
+      set({ returnToLocked: false });
+      return false;
+    }
+    set({ isModalOpen: true, view: "open", returnToLocked: false, error: "" });
+    return true;
+  },
 
   setView: (view) => set({ view, error: "" }),
 
   /** Forgets the unlocked session — on sign-out, or when the user locks up again. */
-  relock: () => set({ isUnlocked: false, view: "locked", lockedUsers: [], lockedGroups: [], error: "" }),
+  relock: () =>
+    set({
+      isUnlocked: false,
+      view: "locked",
+      lockedUsers: [],
+      lockedGroups: [],
+      returnToLocked: false,
+      error: "",
+    }),
 
   /**
    * Verifies the password and pulls the locked conversations.
