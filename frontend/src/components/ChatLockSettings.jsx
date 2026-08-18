@@ -139,8 +139,8 @@ const ChatLockSettings = () => {
 
   return (
     <div className="space-y-2.5">
-      <div className="flex items-start gap-2.5 p-3 rounded-xl s-chip">
-        <MousePointerClick size={14} className="mt-px text-primary shrink-0" />
+      <div className="flex items-center gap-2.5 p-3 rounded-xl s-chip">
+        <MousePointerClick size={15} className="text-primary shrink-0" />
         <p className="text-[11px] leading-relaxed t-muted">
           <span className="font-semibold text-base-content">Double-tap the Chatty logo</span> in
           the top bar to open your locked chats. There is no other entry point, so nothing on the
