@@ -51,9 +51,13 @@ const LinkedDevicesPage = () => {
     revokeOtherSessions,
   } = useAuthStore();
 
+  // Keyed on the id: authUser is replaced whenever anything about the account
+  // changes, and refetching the session list each time flashed its loading state
+  // for data that had not moved.
   useEffect(() => {
-    if (authUser) getSessions();
-  }, [authUser]);
+    if (authUser?._id) getSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUser?._id]);
 
   const otherSessions = sessions.filter((s) => !s.isCurrent);
 

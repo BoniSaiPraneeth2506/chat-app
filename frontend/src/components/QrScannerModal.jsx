@@ -23,6 +23,13 @@ const QrScannerModal = ({ open, onClose, onResult }) => {
   const [status, setStatus] = useState("starting"); // starting | scanning | error
   const [errorText, setErrorText] = useState("");
 
+  // The callback is held in a ref so the scanner's lifecycle does not depend on
+  // it. Callers pass an inline arrow, which is a new function on every one of
+  // their renders — and any of those (a message arriving, presence changing)
+  // would otherwise tear the camera down and reacquire it mid-scan.
+  const onResultRef = useRef(onResult);
+  onResultRef.current = onResult;
+
   useEffect(() => {
     if (!open) return;
 
@@ -123,7 +130,7 @@ const QrScannerModal = ({ open, onClose, onResult }) => {
       handledRef.current = true;
       navigator.vibrate?.(60);
       stop();
-      onResult(userId);
+      onResultRef.current(userId);
     };
 
     start();
@@ -132,7 +139,7 @@ const QrScannerModal = ({ open, onClose, onResult }) => {
       cancelled = true;
       stop();
     };
-  }, [open, onResult]);
+  }, [open]);
 
   if (!open) return null;
 
