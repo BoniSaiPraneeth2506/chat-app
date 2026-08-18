@@ -1162,9 +1162,11 @@ export const useChatStore = create((set, get) => ({
     const currentUser = useAuthStore.getState().authUser;
     if (!currentUser) return;
 
-    // Optimistic UI update
-    set((state) => ({
-      messages: state.messages.map((msg) => {
+    // Group messages live in useGroupStore, so patching only `messages` left a
+    // group reaction with nothing to update — the tap looked ignored even when the
+    // request succeeded.
+    const applyLocally = (list) =>
+      list.map((msg) => {
         if (msg._id === messageId) {
           const reactions = msg.reactions || [];
           const existingIndex = reactions.findIndex(
@@ -1180,19 +1182,24 @@ export const useChatStore = create((set, get) => ({
           } else {
             updatedReactions.push({ userId: currentUser._id, emoji });
           }
-          return { ...msg, reactions: updatedReactions };
+            return { ...msg, reactions: updatedReactions };
         }
         return msg;
-      })
-    }));
+      });
+
+    set((state) => ({ messages: applyLocally(state.messages) }));
+    if (useGroupStore.getState().groupMessages?.some((m) => m._id === messageId)) {
+      useGroupStore.setState((state) => ({ groupMessages: applyLocally(state.groupMessages) }));
+    }
 
     try {
       const res = await axiosInstance.post(`/messages/reaction/${messageId}`, { emoji });
       set((state) => ({
-        messages: state.messages.map((msg) =>
-          msg._id === messageId ? res.data : msg
-        )
+        messages: state.messages.map((msg) => (msg._id === messageId ? res.data : msg)),
       }));
+      // The server response is authoritative for the group copy too, otherwise a
+      // group reaction stayed optimistic and vanished on the next fetch.
+      patchGroupMessageLocally(messageId, { reactions: res.data?.reactions || [] });
       updateCachedMessage(currentUser._id, messageId, res.data);
     } catch (error) {
       console.error("Failed to toggle reaction:", error);

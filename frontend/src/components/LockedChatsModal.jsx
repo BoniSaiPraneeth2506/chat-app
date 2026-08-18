@@ -28,7 +28,7 @@ const LockedChatsModal = () => {
   const { setSelectedGroup } = useGroupStore();
   const nicknames = useNicknames();
   const {
-    isModalOpen, view, isBusy, error, lockedUsers, lockedGroups,
+    isModalOpen, view, isBusy, error, lockedUsers, lockedGroups, animateEntry,
     closeModal, setView, unlock, recover, releaseChat, enterLockedChat,
   } = useChatLockStore();
 
@@ -181,7 +181,9 @@ const LockedChatsModal = () => {
   );
 
   return (
-    <div className="fixed inset-0 z-[210] flex flex-col bg-base-100 cg-fade">
+    <div
+      className={`fixed inset-0 z-[210] flex flex-col bg-base-100 ${animateEntry ? "cg-fade" : ""}`}
+    >
       {/* Fixed header. The accent wash marks this out as its own place in the app
           rather than another settings panel. */}
       <div className="relative shrink-0">
@@ -227,12 +229,12 @@ const LockedChatsModal = () => {
       {/* Body fills the rest of the screen */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         {!enabled && (
-          <div className="px-8 pt-16 text-center">
-            <div className="grid mx-auto rounded-3xl size-16 place-items-center s-tile">
+          <div className="flex flex-col items-center justify-center min-h-full px-8 pb-12 text-center">
+            <div className="grid rounded-3xl size-16 place-items-center s-tile">
               <Lock size={26} className="text-primary" />
             </div>
             <h3 className="mt-5 text-[18px] font-semibold text-base-content">Chat lock is off</h3>
-            <p className="mt-2 text-[14px] leading-relaxed t-muted">
+            <p className="mt-2 max-w-[19rem] text-[13.5px] leading-relaxed t-muted">
               Turn it on in Settings to keep chosen conversations behind a password.
               They stay hidden from your chat list until you unlock them.
             </p>

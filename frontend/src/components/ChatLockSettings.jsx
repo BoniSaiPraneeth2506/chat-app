@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Fingerprint, Loader, ChevronRight } from "lucide-react";
+import { Fingerprint, Loader, ChevronRight, MousePointerClick } from "lucide-react";
 import useAuthStore from "../store/useAuthStore";
 import { useChatLockStore } from "../store/useChatLockStore";
 import LockPasswordPrompt from "./LockPasswordPrompt";
@@ -139,6 +139,15 @@ const ChatLockSettings = () => {
 
   return (
     <div className="space-y-2.5">
+      <div className="flex items-start gap-2.5 p-3 rounded-xl s-chip">
+        <MousePointerClick size={14} className="mt-px text-primary shrink-0" />
+        <p className="text-[11px] leading-relaxed t-muted">
+          <span className="font-semibold text-base-content">Double-tap the Chatty logo</span> in
+          the top bar to open your locked chats. There is no other entry point, so nothing on the
+          home screen hints that they exist.
+        </p>
+      </div>
+
       {/* Main switch */}
       <div className={row} style={rowStyle}>
         <div className="space-y-0.5 min-w-0">

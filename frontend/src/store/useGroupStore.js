@@ -600,6 +600,7 @@ export const useGroupStore = create((set, get) => ({
     socket.off("groupMessageDeleted");
     socket.off("groupMessageEdited");
     socket.off("groupMessageTranscript");
+    socket.off("groupMessageReaction");
     socket.off("groupCreated");
     socket.off("groupUpdated");
     socket.off("groupTyping");
@@ -680,6 +681,16 @@ export const useGroupStore = create((set, get) => ({
       }));
       const authUser = useAuthStore.getState().authUser;
       if (authUser) updateCachedMessage(authUser._id, message._id, message);
+    });
+
+    // Someone reacted to a group message. Without this a reaction only appeared
+    // for the person who tapped it, and only until the next fetch.
+    socket.on("groupMessageReaction", ({ messageId, reactions }) => {
+      set((state) => ({
+        groupMessages: state.groupMessages.map((m) =>
+          m._id === messageId ? { ...m, reactions: reactions || [] } : m
+        ),
+      }));
     });
 
     // Transcript progress for a group voice note, delivered to the group room.
@@ -832,11 +843,14 @@ export const useGroupStore = create((set, get) => ({
       socket.off("groupMessageDeleted");
       socket.off("groupMessageEdited");
     socket.off("groupMessageTranscript");
+    socket.off("groupMessageReaction");
     socket.off("groupMessageEdited");
     socket.off("groupMessageTranscript");
+    socket.off("groupMessageReaction");
     socket.off("groupMessageDeleted");
     socket.off("groupMessageEdited");
     socket.off("groupMessageTranscript");
+    socket.off("groupMessageReaction");
       socket.off("groupCreated");
       socket.off("groupUpdated");
       socket.off("groupTyping");

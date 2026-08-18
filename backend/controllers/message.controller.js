@@ -672,17 +672,28 @@ const toggleMessageReaction = async (req, res) => {
 
     await message.save();
 
-    // Broadcast update via socket
-    const receiverId = message.senderId.toString() === userId.toString()
-      ? message.receiverId.toString()
-      : message.senderId.toString();
-
-    const receiverSocketId = getReceiverSocketId(receiverId);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("messageReaction", {
+    // Same shape of bug the delete and edit paths had: a group message has no
+    // receiverId, so working out "the other party" threw a TypeError here and the
+    // whole request came back 500 — which is why reacting in a group did nothing.
+    if (message.groupId) {
+      io.to(`group_${message.groupId.toString()}`).emit("groupMessageReaction", {
         messageId: message._id.toString(),
-        reactions: message.reactions
+        groupId: message.groupId.toString(),
+        reactions: message.reactions,
       });
+    } else {
+      const otherParty =
+        message.senderId.toString() === userId.toString()
+          ? message.receiverId?.toString()
+          : message.senderId.toString();
+
+      const receiverSocketId = otherParty ? getReceiverSocketId(otherParty) : null;
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit("messageReaction", {
+          messageId: message._id.toString(),
+          reactions: message.reactions,
+        });
+      }
     }
 
     res.status(200).json(message);

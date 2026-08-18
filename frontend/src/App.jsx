@@ -44,7 +44,7 @@
 
 
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useState } from 'react'
 import NavBar from './components/NavBar'
 import { Routes, Route, Navigate, useParams, useNavigate, useLocation } from 'react-router-dom'
 import HomePage from './pages/HomePage'
@@ -344,10 +344,16 @@ const App = () => {
   // home. Watching the selection go empty catches every route out of the chat —
   // the mobile back arrow, the close button, Escape — instead of each one having
   // to remember where it came from.
+  //
+  // Deliberately a layout effect. As an ordinary effect it ran after the browser
+  // had already painted the frame where the chat was gone and the locked screen
+  // had not returned yet, so backing out flashed the normal home list for one
+  // frame. Running before paint means the locked screen is back in the DOM within
+  // the same commit and that in-between frame never reaches the screen.
   const returnToLocked = useChatLockStore((s) => s.returnToLocked);
   const resumeLockedList = useChatLockStore((s) => s.resumeLockedList);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!returnToLocked) return;
     if (selectedUser || selectedGroup) return;
     resumeLockedList();

@@ -18,6 +18,9 @@ import useAuthStore from "./useAuthStore";
 
 export const useChatLockStore = create((set, get) => ({
   isModalOpen: false,
+  // Whether the screen should play its entry fade. A fresh entry animates; coming
+  // back from a locked chat does not, because the screen was never really left.
+  animateEntry: true,
   // "locked" -> asking for the password, "open" -> showing the list,
   // "recover" -> answering the security question.
   view: "locked",
@@ -42,7 +45,7 @@ export const useChatLockStore = create((set, get) => ({
    */
   openModal: () => {
     get().relock();
-    set({ isModalOpen: true, view: "locked", error: "" });
+    set({ isModalOpen: true, view: "locked", error: "", animateEntry: true });
   },
 
   closeModal: () => set({ isModalOpen: false, error: "" }),
@@ -56,7 +59,7 @@ export const useChatLockStore = create((set, get) => ({
       set({ returnToLocked: false });
       return false;
     }
-    set({ isModalOpen: true, view: "open", returnToLocked: false, error: "" });
+    set({ isModalOpen: true, view: "open", returnToLocked: false, error: "", animateEntry: false });
     return true;
   },
 
