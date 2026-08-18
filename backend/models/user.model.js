@@ -161,6 +161,26 @@ const userSchema=new mongoose.Schema({
     // Private notes the signed-in user keeps about other people, keyed by their
     // id. Lives on the note-taker's document, exactly like contactNicknames, so
     // it is never visible to the person it describes.
+    // Group equivalents of favorites, archived and pinnedChats above. Those three
+    // are ref:"User", so a group could not be favourited, archived or pinned at
+    // all — the sidebar interleaves both kinds of conversation, which made that
+    // gap visible. Kept as separate arrays rather than a polymorphic one so the
+    // existing DM queries and their refs stay exactly as they were.
+    favoriteGroups:[{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"Group",
+        default:[]
+    }],
+    archivedGroups:[{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"Group",
+        default:[]
+    }],
+    pinnedGroups:[{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"Group",
+        default:[]
+    }],
     // Chat lock. A separate secret from the account password on purpose: the
     // point is to protect specific conversations from someone who already has
     // the unlocked phone, and reusing the login password would defeat that.

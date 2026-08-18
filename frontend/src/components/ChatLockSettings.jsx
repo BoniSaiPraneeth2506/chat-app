@@ -1,24 +1,25 @@
 import { useEffect, useState } from "react";
-import { Lock, Fingerprint, Loader, ShieldCheck } from "lucide-react";
+import { Fingerprint, Loader, ChevronRight } from "lucide-react";
 import useAuthStore from "../store/useAuthStore";
 import { useChatLockStore } from "../store/useChatLockStore";
+import LockPasswordPrompt from "./LockPasswordPrompt";
 import {
   isBiometryAvailable, hasStoredLockSecret, clearLockSecret, storeLockSecret, verifyBiometry,
 } from "../lib/biometrics";
 import { haptic } from "../lib/haptics";
 
-// Chat lock controls for the settings screen.
+// Chat lock controls, styled to sit beside the other privacy toggles.
 //
-// Kept as its own component rather than more markup inside SettingsPage: it holds
-// three separate forms and its own state, and folding that into a page that is
-// otherwise a list of toggles would bury it.
-//
-// The security question is required when turning the lock on, not offered
-// afterwards, because the moment it is needed is the moment the user cannot get
-// in to add one.
+// Both switches are real toggles rather than buttons, because that is what every
+// other row in this section is and a lone "Turn on" button read as a different
+// kind of control. Turning either one off is what needs confirming, so the
+// password is asked for then — not as a precondition for touching the switch.
 
 const field =
   "field-focus w-full h-11 px-3.5 text-sm rounded-xl bg-base-200 border-0 text-base-content ph-dim";
+
+const row = "flex items-center justify-between gap-3 p-3.5 rounded-xl border";
+const rowStyle = { borderColor: "var(--color-base-300)" };
 
 const ChatLockSettings = () => {
   const { authUser } = useAuthStore();
@@ -28,11 +29,13 @@ const ChatLockSettings = () => {
   const lockedCount =
     (authUser?.lockedChats?.length || 0) + (authUser?.lockedGroups?.length || 0);
 
-  const [mode, setMode] = useState(null); // null | "setup" | "change" | "disable"
+  const [expanded, setExpanded] = useState(false); // the setup form
   const [password, setPassword] = useState("");
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
-  const [currentPassword, setCurrentPassword] = useState("");
+  const [changing, setChanging] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [prompt, setPrompt] = useState(null); // { kind, title, description, confirmLabel }
   const [biometry, setBiometry] = useState({ available: false });
   const [bioOn, setBioOn] = useState(false);
 
@@ -41,12 +44,11 @@ const ChatLockSettings = () => {
     setBioOn(hasStoredLockSecret(authUser?._id));
   }, [authUser?._id]);
 
-  const reset = () => {
-    setMode(null);
+  const resetSetup = () => {
+    setExpanded(false);
     setPassword("");
     setQuestion("");
     setAnswer("");
-    setCurrentPassword("");
   };
 
   const onSetup = async (e) => {
@@ -54,85 +56,109 @@ const ChatLockSettings = () => {
     const ok = await setup({ password, securityQuestion: question, securityAnswer: answer });
     if (ok) {
       haptic("success");
-      reset();
+      resetSetup();
     }
   };
 
   const onChange = async (e) => {
     e.preventDefault();
-    const ok = await changePassword({ currentPassword, newPassword: password });
-    if (ok) {
-      haptic("success");
-      // A stored secret for biometric unlock is now the old password, so it has
-      // to be replaced or the fingerprint would silently stop working.
-      if (hasStoredLockSecret(authUser?._id)) storeLockSecret(authUser._id, password);
-      reset();
-    }
+    setPrompt({
+      kind: "change",
+      title: "Confirm your current password",
+      description: "Then your new password will be saved.",
+      confirmLabel: "Change",
+    });
   };
 
-  const onDisable = async (e) => {
-    e.preventDefault();
-    const ok = await disable(currentPassword);
-    if (ok) {
+  const handlePrompt = async (typed) => {
+    if (prompt.kind === "change") {
+      const ok = await changePassword({ currentPassword: typed, newPassword });
+      if (!ok) return;
+      // A stored secret for fingerprint unlock is the old password now, so it has
+      // to be rewritten or the fingerprint would quietly stop working.
+      if (hasStoredLockSecret(authUser?._id)) storeLockSecret(authUser._id, newPassword);
+      setChanging(false);
+      setNewPassword("");
+      setPrompt(null);
+      haptic("success");
+      return;
+    }
+
+    if (prompt.kind === "disable") {
+      const ok = await disable(typed);
+      if (!ok) return;
       clearLockSecret(authUser?._id);
       setBioOn(false);
-      reset();
+      setPrompt(null);
+      return;
+    }
+
+    if (prompt.kind === "biometric") {
+      // The password is stored so a fingerprint has something to release; it is
+      // verified against the server first so a typo cannot be saved as the secret.
+      const ok = await useChatLockStore.getState().unlock(typed);
+      if (!ok) return;
+      if (!(await verifyBiometry("Confirm to enable fingerprint unlock"))) {
+        setPrompt(null);
+        return;
+      }
+      storeLockSecret(authUser._id, typed);
+      setBioOn(true);
+      setPrompt(null);
+      haptic("success");
     }
   };
 
-  const toggleBiometric = async (wanted) => {
+  const toggleLock = (wanted) => {
+    if (wanted) {
+      setExpanded(true);
+      return;
+    }
+    setPrompt({
+      kind: "disable",
+      title: "Turn off chat lock",
+      description: "Every locked chat returns to your normal list. Nothing is deleted.",
+      confirmLabel: "Turn off",
+    });
+  };
+
+  const toggleBiometric = (wanted) => {
     if (!wanted) {
       clearLockSecret(authUser._id);
       setBioOn(false);
       return;
     }
-    // Enabling needs the password once, because a fingerprint cannot produce one —
-    // it only releases what is already stored on the device.
-    const typed = window.prompt("Enter your chat lock password to enable fingerprint unlock");
-    if (!typed?.trim()) return;
-    if (!(await verifyBiometry("Confirm to enable fingerprint unlock"))) return;
-    const ok = await useChatLockStore.getState().unlock(typed);
-    if (!ok) return;
-    storeLockSecret(authUser._id, typed);
-    setBioOn(true);
-    haptic("success");
+    setPrompt({
+      kind: "biometric",
+      title: "Enable fingerprint unlock",
+      description:
+        "Your lock password is kept on this device and released by your fingerprint. Turning this off erases it.",
+      confirmLabel: "Enable",
+    });
   };
 
   return (
     <div className="space-y-2.5">
-      <div
-        className="flex items-center justify-between p-3.5 rounded-xl border"
-        style={{ borderColor: "var(--color-base-300)" }}
-      >
+      {/* Main switch */}
+      <div className={row} style={rowStyle}>
         <div className="space-y-0.5 min-w-0">
-          <span className="flex items-center gap-1.5 text-xs font-semibold">
-            <Lock size={12} className="text-primary" />
-            Locked Chats
-          </span>
+          <span className="text-xs font-semibold">Locked Chats</span>
           <p className="text-[10px] opacity-70">
             {enabled
-              ? `On · ${lockedCount} ${lockedCount === 1 ? "chat" : "chats"} hidden from your list`
+              ? `${lockedCount} ${lockedCount === 1 ? "chat" : "chats"} hidden · double-tap the Chatty logo to open`
               : "Hide chosen chats behind a separate password"}
           </p>
         </div>
-        {enabled ? (
-          <span className="flex items-center gap-1 text-[10px] font-semibold text-primary shrink-0">
-            <ShieldCheck size={12} />
-            Active
-          </span>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setMode(mode === "setup" ? null : "setup")}
-            className="px-3 h-8 rounded-lg bg-primary text-primary-content text-[11px] font-semibold active:scale-95 transition-transform shrink-0"
-          >
-            {mode === "setup" ? "Cancel" : "Turn on"}
-          </button>
-        )}
+        <input
+          type="checkbox"
+          className="toggle toggle-primary toggle-sm shrink-0"
+          checked={enabled || expanded}
+          onChange={(e) => toggleLock(e.target.checked)}
+        />
       </div>
 
-      {/* Turning it on */}
-      {!enabled && mode === "setup" && (
+      {/* Setup, inline under the switch it belongs to */}
+      {!enabled && expanded && (
         <form onSubmit={onSetup} className="p-3.5 space-y-2.5 rounded-xl s-chip">
           <input
             type="password"
@@ -159,32 +185,37 @@ const ChatLockSettings = () => {
             required now. Answers ignore capitals and extra spaces.
           </p>
           {error && <p className="text-[11px] text-error">{error}</p>}
-          <button
-            type="submit"
-            disabled={isBusy || !password.trim() || !question.trim() || !answer.trim()}
-            className="flex items-center justify-center w-full h-10 gap-2 rounded-xl bg-primary text-primary-content text-[12.5px] font-semibold disabled:opacity-40"
-          >
-            {isBusy && <Loader size={13} className="animate-spin" />}
-            Turn on chat lock
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={resetSetup}
+              className="flex-1 h-10 rounded-xl bg-base-200 text-[12.5px] font-semibold text-base-content"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isBusy || !password.trim() || !question.trim() || !answer.trim()}
+              className="flex items-center justify-center flex-1 h-10 gap-2 rounded-xl bg-primary text-primary-content text-[12.5px] font-semibold disabled:opacity-40"
+            >
+              {isBusy && <Loader size={13} className="animate-spin" />}
+              Turn on
+            </button>
+          </div>
         </form>
       )}
 
-      {/* Managing it */}
       {enabled && (
         <>
           {biometry.available && (
-            <div
-              className="flex items-center justify-between p-3.5 rounded-xl border"
-              style={{ borderColor: "var(--color-base-300)" }}
-            >
+            <div className={row} style={rowStyle}>
               <div className="space-y-0.5 min-w-0">
                 <span className="flex items-center gap-1.5 text-xs font-semibold">
                   <Fingerprint size={12} className="text-primary" />
                   Unlock with fingerprint
                 </span>
                 <p className="text-[10px] opacity-70">
-                  Stores the lock password on this device, released by your fingerprint
+                  Keeps the lock password on this device, released by your fingerprint
                 </p>
               </div>
               <input
@@ -196,76 +227,56 @@ const ChatLockSettings = () => {
             </div>
           )}
 
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setMode(mode === "change" ? null : "change")}
-              className="flex-1 h-9 rounded-lg s-chip text-[11.5px] font-semibold text-base-content"
-            >
-              Change password
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode(mode === "disable" ? null : "disable")}
-              className="flex-1 h-9 rounded-lg s-chip text-[11.5px] font-semibold text-error"
-            >
-              Turn off
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setChanging((v) => !v)}
+            className={`${row} w-full text-left s-row`}
+            style={rowStyle}
+          >
+            <span className="space-y-0.5 min-w-0">
+              <span className="block text-xs font-semibold">Change lock password</span>
+              <span className="block text-[10px] opacity-70">
+                You will confirm the current one
+              </span>
+            </span>
+            <ChevronRight
+              size={15}
+              className={`t-dim shrink-0 transition-transform ${changing ? "rotate-90" : ""}`}
+            />
+          </button>
 
-          {mode === "change" && (
+          {changing && (
             <form onSubmit={onChange} className="p-3.5 space-y-2.5 rounded-xl s-chip">
               <input
                 type="password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                placeholder="Current lock password"
-                autoComplete="current-password"
-                className={field}
-              />
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="New lock password"
                 autoComplete="new-password"
                 className={field}
               />
-              {error && <p className="text-[11px] text-error">{error}</p>}
               <button
                 type="submit"
-                disabled={isBusy || !currentPassword.trim() || !password.trim()}
+                disabled={!newPassword.trim()}
                 className="w-full h-10 rounded-xl bg-primary text-primary-content text-[12.5px] font-semibold disabled:opacity-40"
               >
-                Save new password
-              </button>
-            </form>
-          )}
-
-          {mode === "disable" && (
-            <form onSubmit={onDisable} className="p-3.5 space-y-2.5 rounded-xl s-chip">
-              <p className="text-[11px] leading-relaxed t-muted">
-                Every locked chat returns to your normal list. Nothing is deleted.
-              </p>
-              <input
-                type="password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                placeholder="Lock password"
-                autoComplete="current-password"
-                className={field}
-              />
-              {error && <p className="text-[11px] text-error">{error}</p>}
-              <button
-                type="submit"
-                disabled={isBusy || !currentPassword.trim()}
-                className="w-full h-10 rounded-xl bg-error text-error-content text-[12.5px] font-semibold disabled:opacity-40"
-              >
-                Turn off chat lock
+                Continue
               </button>
             </form>
           )}
         </>
+      )}
+
+      {prompt && (
+        <LockPasswordPrompt
+          title={prompt.title}
+          description={prompt.description}
+          confirmLabel={prompt.confirmLabel}
+          error={error}
+          isBusy={isBusy}
+          onSubmit={handlePrompt}
+          onCancel={() => setPrompt(null)}
+        />
       )}
     </div>
   );

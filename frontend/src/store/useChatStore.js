@@ -1178,15 +1178,28 @@ export const useChatStore = create((set, get) => ({
     }
   },
 
-  toggleContactAction: async (contactId, action, { silent = false } = {}) => {
+  toggleContactAction: async (contactId, action, { silent = false, scope = "user" } = {}) => {
     try {
-      const res = await axiosInstance.post(`/messages/action/${contactId}`, { action });
+      // scope tells the server which set of lists to touch. Groups keep their own,
+      // because the DM arrays are ref:"User".
+      const res = await axiosInstance.post(`/messages/action/${contactId}`, { action, scope });
       // Merge the three lists rather than replacing authUser: the response is
       // deliberately narrow now, so overwriting would drop every other field.
-      const { favorites, archived, pinnedChats } = res.data || {};
+      const { favorites, archived, pinnedChats, favoriteGroups, archivedGroups, pinnedGroups } =
+        res.data || {};
       useAuthStore.setState((state) =>
         state.authUser
-          ? { authUser: { ...state.authUser, favorites, archived, pinnedChats } }
+          ? {
+              authUser: {
+                ...state.authUser,
+                favorites,
+                archived,
+                pinnedChats,
+                favoriteGroups,
+                archivedGroups,
+                pinnedGroups,
+              },
+            }
           : state
       );
       if (!silent) {

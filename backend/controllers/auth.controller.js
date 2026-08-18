@@ -119,6 +119,9 @@ const sanitizeUser = (user) => ({
   favorites: user.favorites || [],
   archived: user.archived || [],
   pinnedChats: user.pinnedChats || [],
+  favoriteGroups: user.favoriteGroups || [],
+  archivedGroups: user.archivedGroups || [],
+  pinnedGroups: user.pinnedGroups || [],
   // Status only. The password and answer hashes are never included, and the
   // question is the user's own, shown so they can answer it during recovery.
   chatLock: {

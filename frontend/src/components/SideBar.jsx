@@ -366,7 +366,8 @@ import { formatMessageTime } from "../lib/utils";
 import toast from "react-hot-toast";
 import { haptic } from "../lib/haptics";
 import { useChatLockStore } from "../store/useChatLockStore";
-import { confirmLockAccess } from "../lib/confirmLock";
+import LockPasswordPrompt from "./LockPasswordPrompt";
+import { isBiometryAvailable, verifyBiometry, hasStoredLockSecret, readLockSecret } from "../lib/biometrics";
 
 // Mirrors MAX_PINNED_CHATS in backend/controllers/message.controller.js.
 const MAX_PINNED_CHATS = 2;
@@ -432,8 +433,9 @@ const SideBar = () => {
   const archivedUsers = asIds(authUser?.archived);
   const pinnedUserIds = asIds(authUser?.pinnedChats);
   const [showArchivedOnly, setShowArchivedOnly] = useState(false);
-  const [contextMenu, setContextMenu] = useState(null); // { x, y, userId }
+  const [contextMenu, setContextMenu] = useState(null); // { x, y, id, kind }
   const [swipe, setSwipe] = useState({ id: null, dx: 0 });
+  const [lockPrompt, setLockPrompt] = useState(null); // { id, type }
   const swipeRef = useRef(null);
   const pressTimerRef = useRef(null);
 
@@ -499,23 +501,56 @@ const SideBar = () => {
     toggleContactAction(userId, "archive");
   };
 
-  // Locking asks for proof first — biometry where it exists, otherwise the lock
-  // password, checked by the server. A privacy control should not be one stray
-  // tap away in either direction.
-  const lockedChatIds = (authUser?.lockedChats || []).map(String);
+  // Groups keep their own lists, because the DM arrays are ref:"User". Both are
+  // read through the same helper so the row markup does not care which it is.
+  const favoriteGroupIds = asIds(authUser?.favoriteGroups);
+  const archivedGroupIds = asIds(authUser?.archivedGroups);
+  const pinnedGroupIds = asIds(authUser?.pinnedGroups);
+  const lockedChatIds = asIds(authUser?.lockedChats);
 
-  const lockChat = async (id, type) => {
+  const toggleGroupAction = (groupId, action) => {
+    haptic("tap");
+    toggleContactAction(groupId, action, { scope: "group" });
+  };
+
+  /**
+   * Locking asks for proof first — biometry where it is set up, otherwise the
+   * password, verified by the server rather than compared here.
+   *
+   * The request is parked in state and finished by the dialog, because the
+   * password now comes from an in-app sheet rather than window.prompt, which
+   * could be awaited inline.
+   */
+  const requestLock = async (id, type) => {
     if (!authUser?.chatLock?.enabled) {
       toast.error("Turn on chat lock in Settings first");
       return;
     }
-    const allowed = await confirmLockAccess({
-      userId: authUser._id,
-      verifyPassword: (password) => useChatLockStore.getState().unlock(password),
-    });
-    if (!allowed) return;
+
+    const biometry = await isBiometryAvailable();
+    if (biometry.available && hasStoredLockSecret(authUser._id)) {
+      if (await verifyBiometry("Confirm to change the lock on this chat")) {
+        const secret = readLockSecret(authUser._id);
+        if (secret && (await useChatLockStore.getState().unlock(secret))) {
+          haptic("success");
+          await useChatLockStore.getState().toggleChat(id, type);
+          return;
+        }
+      }
+      // A sensor that will not read must not make the action unreachable, so it
+      // falls through to the password.
+    }
+
+    setLockPrompt({ id, type });
+  };
+
+  const confirmLockPrompt = async (password) => {
+    const target = lockPrompt;
+    const ok = await useChatLockStore.getState().unlock(password);
+    if (!ok) return;
+    setLockPrompt(null);
     haptic("success");
-    await useChatLockStore.getState().toggleChat(id, type);
+    await useChatLockStore.getState().toggleChat(target.id, target.type);
   };
 
   const togglePin = (userId) => {
@@ -539,7 +574,7 @@ const SideBar = () => {
   // gesture shows how far it has to go. Only rightward movement counts, and the
   // long-press timer is cancelled as soon as a drag is recognised — otherwise the
   // context menu would open in the middle of a swipe.
-  const handleTouchStart = (userId, e) => {
+  const handleTouchStart = (userId, e, kind = "user") => {
     if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
 
     const touch = e.touches[0];
@@ -551,7 +586,8 @@ const SideBar = () => {
       setContextMenu({
         x: clientX,
         y: clientY,
-        userId: userId
+        userId,
+        kind: kind || "user",
       });
     }, 600);
   };
@@ -638,16 +674,28 @@ const SideBar = () => {
   const timeOf = (msg) =>
     msg ? new Date(msg.scheduledAt || msg.createdAt).getTime() : 0;
 
+  // Groups now honour the same three lists as DMs, so the merged ordering treats
+  // both kinds identically: pinned first, then most recent activity. Before this
+  // a pinned group was impossible and an archived one still showed.
   const groupItems =
-    (filterMode === "all" || filterMode === "groups") && !showArchivedOnly
+    filterMode === "groups" || filterMode === "all" || filterMode === "favorites"
       ? groups
-          .filter((g) => g.name.toLowerCase().includes(searchTerm.toLowerCase()))
+          .filter((g) => {
+            if (!g.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+
+            const isArchived = archivedGroupIds.includes(g._id);
+            if (showArchivedOnly ? !isArchived : isArchived) return false;
+
+            if (filterMode === "favorites") return favoriteGroupIds.includes(g._id);
+            if (filterMode === "unread") return (unreadGroupCounts[g._id] || 0) > 0;
+            return true;
+          })
           .map((g) => ({
             type: "group",
             key: `g:${g._id}`,
             group: g,
             at: timeOf(latestGroupMessages[g._id]) || new Date(g.createdAt || 0).getTime(),
-            pinned: false,
+            pinned: pinnedGroupIds.includes(g._id),
           }))
       : [];
 
@@ -677,6 +725,14 @@ const SideBar = () => {
       <button
         key={group._id}
         onClick={() => setSelectedGroup(group)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setContextMenu({ x: e.clientX, y: e.clientY, userId: group._id, kind: "group" });
+        }}
+        onTouchStart={(e) => handleTouchStart(group._id, e, "group")}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+        onTouchMove={handleTouchEnd}
         className={`w-full py-3.5 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors group select-none ${
           isSelected ? "bg-base-200/80" : ""
         }`}
@@ -699,6 +755,12 @@ const SideBar = () => {
           <div className="flex items-center justify-between">
             <span className="font-semibold text-base-content truncate flex items-center gap-1.5">
               {group.name}
+              {favoriteGroupIds.includes(group._id) && (
+                <Star className="size-3 text-yellow-500 fill-yellow-500 flex-shrink-0" />
+              )}
+              {pinnedGroupIds.includes(group._id) && (
+                <Pin className="size-3 t-dim rotate-45 flex-shrink-0" />
+              )}
               <span className="text-[10px] leading-none bg-base-300 px-1.5 py-1 rounded t-dim font-normal">
                 {group.members?.length || 0}
               </span>
@@ -774,7 +836,8 @@ const SideBar = () => {
         setContextMenu({
           x: e.clientX,
           y: e.clientY,
-          userId: user._id
+          userId: user._id,
+          kind: "user",
         });
       }}
       onTouchStart={(e) => handleTouchStart(user._id, e)}
@@ -1055,6 +1118,16 @@ const SideBar = () => {
         )}
       </div>
 
+      {lockPrompt && (
+        <LockPasswordPrompt
+          title="Confirm your lock password"
+          description="Needed to move a chat into or out of your locked chats."
+          confirmLabel="Confirm"
+          onSubmit={confirmLockPrompt}
+          onCancel={() => setLockPrompt(null)}
+        />
+      )}
+
       {contextMenu && (
         <>
           {/* Backdrop to close menu */}
@@ -1077,23 +1150,39 @@ const SideBar = () => {
           >
             <button
               onClick={() => {
-                togglePin(contextMenu.userId);
+                if (contextMenu.kind === "group") toggleGroupAction(contextMenu.userId, "pin");
+                else togglePin(contextMenu.userId);
                 setContextMenu(null);
               }}
               className="flex items-center gap-2 px-3 py-2 text-xs font-semibold hover:bg-base-200 rounded-md transition-colors text-left text-base-content"
             >
               <Pin className="size-3.5 text-neutral rotate-45" />
-              <span>{pinnedUserIds.includes(contextMenu.userId) ? "Unpin Chat" : "Pin Chat"}</span>
+              <span>
+                {(contextMenu.kind === "group" ? pinnedGroupIds : pinnedUserIds).includes(contextMenu.userId)
+                  ? "Unpin Chat"
+                  : "Pin Chat"}
+              </span>
             </button>
             <button
               onClick={(e) => {
-                toggleFavorite(e, contextMenu.userId);
+                if (contextMenu.kind === "group") toggleGroupAction(contextMenu.userId, "favorite");
+                else toggleFavorite(e, contextMenu.userId);
                 setContextMenu(null);
               }}
               className="flex items-center gap-2 px-3 py-2 text-xs font-semibold hover:bg-base-200 rounded-md transition-colors text-left text-base-content"
             >
-              <Star className={`size-3.5 ${favoriteUsers.includes(contextMenu.userId) ? "text-yellow-500 fill-yellow-500" : "text-neutral"}`} />
-              <span>{favoriteUsers.includes(contextMenu.userId) ? "Unstar Chat" : "Star Chat"}</span>
+              <Star
+                className={`size-3.5 ${
+                  (contextMenu.kind === "group" ? favoriteGroupIds : favoriteUsers).includes(contextMenu.userId)
+                    ? "text-yellow-500 fill-yellow-500"
+                    : "text-neutral"
+                }`}
+              />
+              <span>
+                {(contextMenu.kind === "group" ? favoriteGroupIds : favoriteUsers).includes(contextMenu.userId)
+                  ? "Unstar Chat"
+                  : "Star Chat"}
+              </span>
             </button>
             {/* Archive stays on desktop, where a right-click menu is the only way
                 to reach it. On a phone it is replaced by Lock, because archiving
@@ -1101,27 +1190,38 @@ const SideBar = () => {
                 menu would be clutter, and the menu is short by design. */}
             <button
               onClick={(e) => {
-                toggleArchive(e, contextMenu.userId);
+                if (contextMenu.kind === "group") toggleGroupAction(contextMenu.userId, "archive");
+                else toggleArchive(e, contextMenu.userId);
                 setContextMenu(null);
               }}
               className="hidden sm:flex items-center gap-2 px-3 py-2 text-xs font-semibold hover:bg-base-200 rounded-md transition-colors text-left text-base-content"
             >
               <Archive className="size-3.5 text-neutral" />
-              <span>{archivedUsers.includes(contextMenu.userId) ? "Unarchive" : "Archive"}</span>
+              <span>
+                {(contextMenu.kind === "group" ? archivedGroupIds : archivedUsers).includes(contextMenu.userId)
+                  ? "Unarchive"
+                  : "Archive"}
+              </span>
             </button>
 
             <button
               onClick={() => {
-                const id = contextMenu.userId;
+                const { userId: id, kind } = contextMenu;
                 setContextMenu(null);
-                lockChat(id, "user");
+                requestLock(id, kind === "group" ? "group" : "user");
               }}
               className="flex items-center gap-2 px-3 py-2 text-xs font-semibold hover:bg-base-200 rounded-md transition-colors text-left text-base-content"
             >
               <Lock className="size-3.5 text-primary" />
-              <span>{lockedChatIds.includes(contextMenu.userId) ? "Unlock Chat" : "Lock Chat"}</span>
+              <span>
+                {(contextMenu.kind === "group" ? asIds(authUser?.lockedGroups) : lockedChatIds).includes(
+                  contextMenu.userId
+                )
+                  ? "Unlock Chat"
+                  : "Lock Chat"}
+              </span>
             </button>
-            <div className="h-[1px] bg-base-300 my-1"></div>
+            {contextMenu.kind !== "group" && <div className="h-[1px] bg-base-300 my-1"></div>}
             <button
               onClick={() => {
                 if (window.confirm("Are you sure you want to delete this chat? This will clear all messages in this conversation.")) {

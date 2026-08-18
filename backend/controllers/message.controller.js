@@ -697,7 +697,10 @@ const MAX_PINNED_CHATS = 2;
 const toggleContactAction = async (req, res) => {
   try {
     const { id: contactId } = req.params;
-    const { action } = req.body; // "favorite" or "archive"
+    // scope decides which set of lists is touched. Groups keep their own arrays
+    // because the DM ones are ref:"User"; sharing them would break populate.
+    const { action, scope } = req.body; // action: favorite | archive | pin
+    const isGroup = scope === "group";
     const userId = req.user._id;
 
     const user = await User.findById(userId);
@@ -711,21 +714,27 @@ const toggleContactAction = async (req, res) => {
       else list.push(contactId);
     };
 
+    const lists = isGroup
+      ? { favorite: "favoriteGroups", archive: "archivedGroups", pin: "pinnedGroups" }
+      : { favorite: "favorites", archive: "archived", pin: "pinnedChats" };
+
     if (action === "favorite") {
-      toggle(user.favorites);
+      toggle(user[lists.favorite]);
     } else if (action === "archive") {
-      toggle(user.archived);
+      toggle(user[lists.archive]);
     } else if (action === "pin") {
       // The cap is enforced here as well as in the UI: the client used to own
       // this entirely via localStorage, so nothing stopped a stale or crafted
       // client from pinning without limit.
-      const alreadyPinned = user.pinnedChats.some((id) => id.toString() === contactId);
-      if (!alreadyPinned && user.pinnedChats.length >= MAX_PINNED_CHATS) {
+      const target = user[lists.pin];
+      const alreadyPinned = target.some((id) => id.toString() === contactId);
+      const pinnedTotal = (user.pinnedChats?.length || 0) + (user.pinnedGroups?.length || 0);
+      if (!alreadyPinned && pinnedTotal >= MAX_PINNED_CHATS) {
         return res
           .status(400)
           .json({ message: `You can only pin up to ${MAX_PINNED_CHATS} chats` });
       }
-      toggle(user.pinnedChats);
+      toggle(target);
     } else {
       return res.status(400).json({ message: "Invalid action" });
     }
@@ -739,6 +748,9 @@ const toggleContactAction = async (req, res) => {
       favorites: user.favorites,
       archived: user.archived,
       pinnedChats: user.pinnedChats,
+      favoriteGroups: user.favoriteGroups,
+      archivedGroups: user.archivedGroups,
+      pinnedGroups: user.pinnedGroups,
     });
   } catch (error) {
     console.error("Error in toggleContactAction:", error);

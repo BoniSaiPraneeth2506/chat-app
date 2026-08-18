@@ -115,10 +115,21 @@ const LockedChatsModal = () => {
       className="fixed inset-0 z-[210] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm cg-fade"
       onClick={(e) => e.target === e.currentTarget && closeModal()}
     >
-      <div className="bg-base-100 w-full max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col max-h-[88vh] cg-sheet sm:cg-dialog overflow-hidden">
+      <div className="relative bg-base-100 w-full max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col max-h-[88vh] cg-sheet sm:cg-dialog overflow-hidden">
+
+        {/* Accent header. The lock is a distinct place in the app, so it gets a
+            surface of its own rather than looking like another settings panel. */}
+        <div
+          className="absolute inset-x-0 top-0 h-28 pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(120% 100% at 50% 0%, var(--color-primary) 0%, transparent 72%)",
+            opacity: 0.14,
+          }}
+        />
 
         {/* Header */}
-        <div className="flex items-center gap-2 px-4 py-3.5">
+        <div className="relative flex items-center gap-2 px-4 py-3.5">
           {view !== "locked" && (
             <button
               type="button"
@@ -146,10 +157,10 @@ const LockedChatsModal = () => {
         {/* Not set up yet */}
         {!enabled && (
           <div className="px-6 pt-2 pb-8 text-center">
-            <div className="grid mx-auto rounded-2xl size-14 place-items-center s-tile">
-              <Lock size={24} className="text-primary" />
+            <div className="grid mx-auto rounded-3xl size-16 place-items-center s-tile">
+              <Lock size={26} className="text-primary" />
             </div>
-            <h4 className="mt-4 text-[16px] font-semibold text-base-content">Chat lock is off</h4>
+            <h4 className="mt-4 text-[17px] font-semibold text-base-content">Chat lock is off</h4>
             <p className="mt-2 text-[14px] leading-relaxed t-muted">
               Turn it on in Settings to keep chosen conversations behind a password.
               They are hidden from the chat list until you unlock them.
@@ -159,12 +170,15 @@ const LockedChatsModal = () => {
 
         {/* Password */}
         {enabled && view === "locked" && (
-          <form onSubmit={submitPassword} className="px-6 pt-2 pb-7">
-            <div className="grid mx-auto rounded-2xl size-14 place-items-center s-tile">
-              <Lock size={24} className="text-primary" />
+          <form onSubmit={submitPassword} className="relative px-6 pt-1 pb-7">
+            <div className="grid mx-auto rounded-3xl size-16 place-items-center s-tile">
+              <Lock size={26} className="text-primary" />
             </div>
-            <p className="mt-4 text-[14px] text-center t-muted">
-              Enter your chat lock password.
+            <h4 className="mt-4 text-[17px] font-semibold text-center text-base-content">
+              Enter your password
+            </h4>
+            <p className="mt-1 text-[13.5px] leading-relaxed text-center t-muted">
+              These chats stay hidden from your list until you unlock them.
             </p>
 
             <div className="relative mt-5">
@@ -296,7 +310,10 @@ const LockedChatsModal = () => {
                       <span className="block text-[15px] font-medium truncate text-base-content">
                         {displayNameOf(user, nicknames)}
                       </span>
-                      <span className="block text-[12.5px] t-dim">Locked chat</span>
+                      <span className="flex items-center gap-1 text-[12.5px] t-dim">
+                        <Lock size={10} />
+                        Locked chat
+                      </span>
                     </span>
                     {user.unreadCount > 0 && (
                       <span className="flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[9px] leading-none font-bold text-white bg-primary rounded-full">
