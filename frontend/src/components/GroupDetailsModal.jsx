@@ -1,4 +1,6 @@
 import { useState } from "react";
+import GroupMemberSheet from "./GroupMemberSheet";
+import { formatJoinDate, activityLabel, isOnlineNow, filterMembers, MEMBER_FILTERS } from "../lib/members";
 import { useGroupStore } from "../store/useGroupStore";
 import { useChatStore } from "../store/useChatStore";
 import useAuthStore from "../store/useAuthStore";
@@ -21,6 +23,9 @@ import {
   Unlock,
   Check,
   Camera,
+  Search,
+  CalendarDays,
+  EyeOff,
 } from "lucide-react";
 
 const GroupDetailsModal = () => {
@@ -37,7 +42,7 @@ const GroupDetailsModal = () => {
   } = useGroupStore();
 
   const { users } = useChatStore();
-  const { authUser } = useAuthStore();
+  const { authUser, onlineUsers } = useAuthStore();
 
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(selectedGroup?.name || "");
@@ -49,6 +54,9 @@ const GroupDetailsModal = () => {
   const [selectedNewMembers, setSelectedNewMembers] = useState([]);
   const [isUpdatingGroup, setIsUpdatingGroup] = useState(false);
   const [isInviteBusy, setIsInviteBusy] = useState(false);
+  const [memberQuery, setMemberQuery] = useState("");
+  const [memberFilter, setMemberFilter] = useState("all");
+  const [openMember, setOpenMember] = useState(null);
 
   if (!isGroupDetailsModalOpen || !selectedGroup) return null;
 
@@ -58,6 +66,11 @@ const GroupDetailsModal = () => {
   const currentUserRole = currentMemberObj ? currentMemberObj.role : "member";
   const isAdminOrMod = currentUserRole === "admin" || currentUserRole === "moderator";
   const isAdmin = currentUserRole === "admin";
+
+  const visibleMembers = filterMembers(selectedGroup.members, {
+    query: memberQuery,
+    filter: memberFilter,
+  });
 
   const nonMembers = users.filter(
     (u) => !selectedGroup.members.some((m) => m.user?._id?.toString() === u._id.toString())
@@ -301,9 +314,60 @@ const GroupDetailsModal = () => {
               </div>
             )}
 
+            {openMember && (
+              <GroupMemberSheet member={openMember} onClose={() => setOpenMember(null)} />
+            )}
+
+            {/* Search and filters. Both live here rather than in the store: they
+                describe this open panel, not the group. */}
+            {selectedGroup.members.length > 3 && (
+              <div className="space-y-2">
+                <div className="relative">
+                  <Search size={15} className="absolute -translate-y-1/2 left-3 top-1/2 t-dim pointer-events-none" />
+                  <input
+                    type="text"
+                    value={memberQuery}
+                    onChange={(e) => setMemberQuery(e.target.value)}
+                    placeholder="Search members"
+                    className="w-full h-10 pl-9 pr-9 text-sm rounded-xl bg-base-200 outline-none focus:ring-2 focus:ring-primary/30 text-base-content"
+                  />
+                  {memberQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setMemberQuery("")}
+                      className="absolute -translate-y-1/2 right-2 top-1/2 p-1 rounded-full t-dim hover:text-base-content"
+                      aria-label="Clear search"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex gap-1.5 overflow-x-auto cg-scroll-x">
+                  {MEMBER_FILTERS.map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setMemberFilter(f.id)}
+                      className={`px-3 py-1.5 text-[12px] font-medium rounded-full whitespace-nowrap transition-colors ${
+                        memberFilter === f.id
+                          ? "bg-primary text-primary-content"
+                          : "s-chip t-muted hover:text-base-content"
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Existing Member List */}
             <div className="rounded-2xl bg-base-200">
-              {selectedGroup.members.map((member, index) => {
+              {visibleMembers.length === 0 && (
+                <p className="px-4 py-6 text-sm text-center t-dim">No members match that.</p>
+              )}
+              {visibleMembers.map((member, index) => {
                 const u = member.user;
                 if (!u) return null;
                 const isSelf = u._id?.toString() === authUser?._id?.toString();
@@ -313,26 +377,48 @@ const GroupDetailsModal = () => {
                     key={u._id}
                     className="flex items-center justify-between p-3 text-sm hover:bg-base-300/40 transition-colors first:rounded-t-2xl last:rounded-b-2xl"
                   >
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={u.profilePic || "/avatar.png"}
-                        alt={u.fullName}
-                        className="w-9 h-9 rounded-full object-cover"
-                      />
-                      <div>
+                    <button
+                      type="button"
+                      onClick={() => setOpenMember(member)}
+                      className="flex items-center flex-1 min-w-0 gap-3 text-left"
+                      title="View member"
+                    >
+                      <div className="relative shrink-0">
+                        <img
+                          src={u.profilePic || "/avatar.png"}
+                          alt={u.fullName}
+                          className="object-cover rounded-full w-9 h-9"
+                        />
+                        {isOnlineNow(u, onlineUsers) && (
+                          <span className="absolute rounded-full -bottom-0.5 -right-0.5 size-2.5 bg-green-500 ring-2 ring-base-200" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold">{u.fullName}</span>
+                          <span className="font-semibold truncate">{u.fullName}</span>
                           {isSelf && (
-                            <span className="text-[10px] bg-base-300 px-1.5 py-0.5 rounded text-base-content/70">
+                            <span className="text-[10px] s-chip px-1.5 py-0.5 rounded t-muted shrink-0">
                               You
                             </span>
                           )}
+                          {authUser?.memberNotes?.[u._id] && (
+                            <span
+                              title="You have a private note about them"
+                              className="text-[10px] s-chip px-1.5 py-0.5 rounded t-dim shrink-0"
+                            >
+                              Note
+                            </span>
+                          )}
                         </div>
-                        <span className="text-xs text-base-content/50 block">
-                          {u.bio || u.email}
+                        {/* Activity first when it exists, since it is the more
+                            useful of the two; the join date always follows. */}
+                        <span className="block text-xs truncate t-dim">
+                          {[activityLabel(u, onlineUsers), formatJoinDate(member.joinedAt)]
+                            .filter(Boolean)
+                            .join(" · ") || u.bio || u.email}
                         </span>
                       </div>
-                    </div>
+                    </button>
 
                     {/* Role Badge & Controls */}
                     <div className="flex items-center gap-2">
@@ -355,7 +441,7 @@ const GroupDetailsModal = () => {
                       {isAdmin && !isSelf && (
                         <div
                           className={`dropdown dropdown-end ${
-                            index >= selectedGroup.members.length - 2 ? "dropdown-top" : ""
+                            index >= visibleMembers.length - 2 ? "dropdown-top" : ""
                           }`}
                         >
                           <label tabIndex={0} className="btn btn-ghost btn-xs btn-circle">
@@ -534,8 +620,33 @@ const GroupDetailsModal = () => {
                 );
               })}
 
+              {/* Anonymous questions. Sits with the permissions because it is the
+                  same kind of decision — who may do what — and is admin-only for
+                  the same reason. Off unless an admin turns it on, so no existing
+                  group changes behaviour. */}
+              <div className="flex items-center justify-between gap-3 pt-1 s-sep">
+                <div className="min-w-0 pt-3">
+                  <p className="flex items-center gap-1.5 text-xs font-medium truncate text-base-content">
+                    <EyeOff size={12} className="t-dim" />
+                    Anonymous questions
+                  </p>
+                  <p className="text-[10px] t-dim">
+                    Members can ask without their name attached
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  className="toggle toggle-primary toggle-sm flex-shrink-0 mt-3"
+                  disabled={!isAdmin || isUpdatingGroup}
+                  checked={Boolean(selectedGroup.allowAnonymousQuestions)}
+                  onChange={(e) =>
+                    updateGroup(selectedGroup._id, { allowAnonymousQuestions: e.target.checked })
+                  }
+                />
+              </div>
+
               {!isAdmin && (
-                <p className="text-[10px] text-base-content/45 pt-1">
+                <p className="text-[10px] t-dim pt-1">
                   Only admins can change these.
                 </p>
               )}

@@ -158,6 +158,14 @@ const userSchema=new mongoose.Schema({
     // reinstall lost them and they never followed the user to another device —
     // which multi-account switching made worse, since each account on a shared
     // browser read the same single key.
+    // Private notes the signed-in user keeps about other people, keyed by their
+    // id. Lives on the note-taker's document, exactly like contactNicknames, so
+    // it is never visible to the person it describes.
+    memberNotes:{
+        type:Map,
+        of:String,
+        default:new Map()
+    },
     pinnedChats:[{
         type:mongoose.Schema.Types.ObjectId,
         ref:"User",

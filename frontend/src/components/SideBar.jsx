@@ -647,7 +647,7 @@ const SideBar = () => {
               {latestMsg ? (
                 <span>
                   <strong className="font-medium text-base-content/80">
-                    {latestMsg.senderId?.fullName?.split(" ")[0]}:{" "}
+                    {latestMsg.isAnonymous ? "Anonymous" : latestMsg.senderId?.fullName?.split(" ")[0]}:{" "}
                   </strong>
                   {latestMsg.poll ? `📊 ${latestMsg.poll.question}` : latestMsg.image ? "📷 Image" : latestMsg.text}
                 </span>

@@ -171,6 +171,13 @@ const messageSchema = new Schema(
       type: Boolean,
       default: false
     },
+    // Anonymous group question. senderId is still recorded — anonymity is a
+    // presentation rule, not an absence of accountability — but the server never
+    // includes it in any response or socket payload for these messages.
+    isAnonymous: {
+      type: Boolean,
+      default: false
+    },
     isOneView: {
       type: Boolean,
       default: false

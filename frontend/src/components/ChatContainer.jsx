@@ -1,7 +1,7 @@
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
 import { useEffect, useRef, useLayoutEffect, useState } from "react";
-import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image, Link2 } from "lucide-react";
+import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image, Link2, EyeOff } from "lucide-react";
 import ForwardModal from "./ForwardModal";
 import SocialLinksRow from "./SocialLinksRow";
 import { useNicknames, displayNameOf } from "../lib/contacts";
@@ -1048,12 +1048,25 @@ const ChatContainer = () => {
                       <CornerUpLeft size={16} />
                     </span>
                   )}
-                  {/* Group Message Sender Name Label */}
-                  {selectedGroup && (message.senderId?._id || message.senderId) !== authUser._id && (
+                  {/* Group Message Sender Name Label.
+                      An anonymous question arrives with no author — the server
+                      strips it — so it always shows this label, including for the
+                      person who asked. anonymousIsMine is the only hint they get,
+                      and it is computed per viewer so it reveals nothing to
+                      anyone else. */}
+                  {selectedGroup && message.isAnonymous ? (
+                    <span className="flex items-center gap-1 text-[11px] font-bold text-primary mb-0.5 select-none">
+                      <EyeOff size={11} />
+                      Anonymous
+                      {message.anonymousIsMine && (
+                        <span className="font-medium t-dim">· you</span>
+                      )}
+                    </span>
+                  ) : selectedGroup && (message.senderId?._id || message.senderId) !== authUser._id ? (
                     <span className="text-[11px] font-bold text-primary block mb-0.5 select-none">
                       {message.senderId?.fullName || "Member"}
                     </span>
-                  )}
+                  ) : null}
 
                   {/* Reply Quote Display */}
                   {message.replyTo && (

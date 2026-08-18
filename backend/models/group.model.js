@@ -67,6 +67,12 @@ const groupSchema = new mongoose.Schema(
     inviteCreatedAt: {
       type: Date,
     },
+    // Off by default, so no existing group silently gains the ability. Only an
+    // admin can turn it on.
+    allowAnonymousQuestions: {
+      type: Boolean,
+      default: false,
+    },
     // Shown once to each member the first time they open the group after
     // joining. Both optional: a group with neither set shows nothing, so
     // existing groups are unaffected.

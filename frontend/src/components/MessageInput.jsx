@@ -2,7 +2,7 @@ import { useRef, useState, useEffect } from "react";
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
 import useAuthStore from "../store/useAuthStore";
-import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3, Pencil } from "lucide-react";
+import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3, Pencil, EyeOff } from "lucide-react";
 import toast from "react-hot-toast";
 import { haptic } from "../lib/haptics";
 import ImageEditorModal from "./ImageEditorModal";
@@ -19,6 +19,9 @@ const MessageInput = () => {
   // Index of the preview being edited, or null. Held by index rather than by
   // value so the edited result can be written straight back into place.
   const [editingIndex, setEditingIndex] = useState(null);
+  // Armed per message rather than sticky, so a member cannot forget it is on and
+  // post the rest of a conversation namelessly by accident.
+  const [askAnonymously, setAskAnonymously] = useState(false);
   const [isOneView, setIsOneView] = useState(false);
   const [isSendingAnimation, setIsSendingAnimation] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -81,6 +84,12 @@ const MessageInput = () => {
       setText("");
     }
   }, [selectedUser]);
+
+  // Never carries across groups: leaving with it armed and returning later would
+  // silently anonymise the next thing typed.
+  useEffect(() => {
+    setAskAnonymously(false);
+  }, [selectedGroup?._id]);
 
   useEffect(() => {
     if (editingMessage) {
@@ -329,7 +338,9 @@ const MessageInput = () => {
           replyTo: replyingToMessage?._id || null,
           mentions: mentionIds,
           scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
+          isAnonymous: askAnonymously && selectedGroup?.allowAnonymousQuestions === true,
         });
+        setAskAnonymously(false);
         setMentionIds([]);
         setScheduledAt("");
         if (replyingToMessage) setReplyingToMessage(null);
@@ -559,6 +570,23 @@ const MessageInput = () => {
           </div>
         )}
 
+        {askAnonymously && (
+          <div className="flex items-center gap-2 px-3 py-2 mb-1 rounded-xl s-tile">
+            <EyeOff size={14} className="text-primary shrink-0" />
+            <span className="flex-1 text-xs text-base-content">
+              Your name will not be shown on this message
+            </span>
+            <button
+              type="button"
+              onClick={() => setAskAnonymously(false)}
+              className="p-1 rounded-full t-dim hover:text-base-content"
+              aria-label="Cancel anonymous"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         {imagePreviews.length > 0 && (
           <div className="flex items-center gap-2 mb-1 overflow-x-auto pb-1 max-w-full animate-in slide-in-from-bottom duration-200">
             {imagePreviews.map((imgSrc, idx) => (
@@ -710,6 +738,23 @@ const MessageInput = () => {
                   className="p-1 hover:bg-base-200 rounded-full transition-colors flex items-center justify-center text-base-content/40 hover:text-base-content"
                 >
                   <BarChart3 size={18} />
+                </button>
+              )}
+
+              {/* Only appears where an admin has enabled it, so the control is
+                  never a dead end. */}
+              {selectedGroup?.allowAnonymousQuestions && (
+                <button
+                  type="button"
+                  onClick={() => { haptic("tap"); setAskAnonymously((v) => !v); }}
+                  title={askAnonymously ? "Sending anonymously — tap to turn off" : "Ask anonymously"}
+                  className={`p-1 rounded-full transition-colors flex items-center justify-center ${
+                    askAnonymously
+                      ? "bg-primary text-primary-content"
+                      : "hover:bg-base-200 t-dim hover:text-base-content"
+                  }`}
+                >
+                  <EyeOff size={18} />
                 </button>
               )}
 

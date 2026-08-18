@@ -127,6 +127,32 @@
   .ab-ring  { box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-base-content) 12%, transparent); }
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+   Working equivalents of text-base-content/NN, bg-base-300/NN and friends.
+
+   Those utilities compile to nothing in this project — tailwindcss@3 cannot
+   apply an opacity modifier to daisyui@5's colors — which is why muted text and
+   tinted surfaces read flat across the app. New UI uses these instead. Named
+   generically because the .ab-* set above is scoped to the About screen.
+
+   Solid fallback first, refined by color-mix, so an older WebView still gets a
+   usable hierarchy rather than nothing.
+   ────────────────────────────────────────────────────────────────────────── */
+.t-muted, .t-dim, .t-faint { color: var(--color-base-content); }
+.s-tile, .s-chip           { background-color: var(--color-base-300); }
+.s-sep                     { border-top: 1px solid var(--color-base-300); }
+.s-row                     { transition: background-color 150ms ease; }
+
+@supports (background-color: color-mix(in oklch, red 50%, transparent)) {
+  .t-muted { color: color-mix(in oklch, var(--color-base-content) 64%, transparent); }
+  .t-dim   { color: color-mix(in oklch, var(--color-base-content) 46%, transparent); }
+  .t-faint { color: color-mix(in oklch, var(--color-base-content) 32%, transparent); }
+  .s-tile  { background-color: color-mix(in oklch, var(--color-primary) 13%, transparent); }
+  .s-chip  { background-color: color-mix(in oklch, var(--color-base-300) 60%, transparent); }
+  .s-sep   { border-top: 1px solid color-mix(in oklch, var(--color-base-content) 9%, transparent); }
+  .s-row:hover { background-color: color-mix(in oklch, var(--color-base-300) 45%, transparent); }
+}
+
 /* Horizontal chip strip: scrollable without a visible scrollbar. */
 .cg-scroll-x {
   scrollbar-width: none;

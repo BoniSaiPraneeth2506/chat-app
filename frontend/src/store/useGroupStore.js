@@ -287,14 +287,22 @@ export const useGroupStore = create((set, get) => ({
     if (!selectedGroup || !authUser) return;
 
     const tempId = "temp-group-" + Date.now();
+    // An anonymous question is shown without its author from the moment it
+    // appears, matching exactly what the server will send back. Anything else
+    // would flash the sender's name and then swap it out.
+    const anonymous = Boolean(messageData.isAnonymous);
     const optimisticMsg = {
       _id: tempId,
       tempId,
-      senderId: {
-        _id: authUser._id,
-        fullName: authUser.fullName,
-        profilePic: authUser.profilePic,
-      },
+      isAnonymous: anonymous,
+      anonymousIsMine: anonymous,
+      senderId: anonymous
+        ? { _id: null, fullName: "Anonymous", profilePic: "" }
+        : {
+            _id: authUser._id,
+            fullName: authUser.fullName,
+            profilePic: authUser.profilePic,
+          },
       groupId: selectedGroup._id,
       text: messageData.text || "",
       image: messageData.image || "",
@@ -495,6 +503,29 @@ export const useGroupStore = create((set, get) => ({
     } catch (err) {
       // Not worth a toast: the worst case is the sheet appearing once more.
       console.warn("Could not record welcome as seen:", err?.message || err);
+    }
+  },
+
+  /**
+   * Saves a private note about a member.
+   *
+   * The note lives on the caller's own user document, so the response carries the
+   * whole notes map and it is merged into authUser rather than kept in component
+   * state — that way the sheet, and anywhere else that wants it later, reads one
+   * source instead of refetching.
+   */
+  setMemberNote: async (groupId, memberId, note) => {
+    try {
+      const res = await axiosInstance.post(`/groups/${groupId}/members/${memberId}/note`, { note });
+      const { memberNotes } = res.data || {};
+      useAuthStore.setState((state) =>
+        state.authUser ? { authUser: { ...state.authUser, memberNotes } } : state
+      );
+      toast.success(note?.trim() ? "Note saved" : "Note removed");
+      return true;
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to save note");
+      return false;
     }
   },
 

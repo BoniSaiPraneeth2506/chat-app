@@ -3,6 +3,17 @@ import Message from "../models/message.model.js";
 import User from "../models/user.model.js";
 import cloudinary from "../lib/cloudinary.js";
 import { io, getReceiverSocketId } from "../lib/socket.js";
+import { hideAnonymousAuthor } from "../lib/anonymity.js";
+
+// Fields returned for each group member. Wider than before so a member's
+// profile can be shown inside the group without a second request per person —
+// the previous projection stopped at bio, so there was nothing to show.
+// onlinePrivacy comes along because the client decides from it whether an
+// activity line may be displayed at all, the same way the DM header does.
+const MEMBER_FIELDS = "fullName email profilePic bannerPic bio link socialLinks lastSeen onlinePrivacy";
+
+const MAX_MEMBER_NOTE_LENGTH = 500;
+
 import crypto from "crypto";
 import { canDo, canManagePermissions, sanitizePermissions } from "../lib/groupPermissions.js";
 
@@ -83,7 +94,7 @@ export const getUserGroups = async (req, res) => {
   try {
     const userId = req.user._id;
     const groups = await Group.find({ "members.user": userId })
-      .populate("members.user", "fullName email profilePic bio lastSeen")
+      .populate("members.user", MEMBER_FIELDS)
       .sort({ updatedAt: -1 });
 
     res.status(200).json(groups);
@@ -97,10 +108,7 @@ export const getUserGroups = async (req, res) => {
 export const getGroupDetails = async (req, res) => {
   try {
     const { groupId } = req.params;
-    const group = await Group.findById(groupId).populate(
-      "members.user",
-      "fullName email profilePic bio lastSeen"
-    );
+    const group = await Group.findById(groupId).populate("members.user", MEMBER_FIELDS);
 
     if (!group) {
       return res.status(404).json({ message: "Group not found" });
@@ -123,6 +131,43 @@ const MAX_RULES_LENGTH = 2000;
  * Server-side rather than a localStorage flag so it does not reappear on a
  * second device, and so each account on a shared browser is tracked separately.
  */
+/**
+ * Saves or clears a private note about another member.
+ *
+ * Stored on the caller's own document, so the subject can never see it. Group
+ * membership is still checked on both sides — the note is only reachable from a
+ * group both people belong to, which keeps it from doubling as a way to annotate
+ * strangers.
+ */
+export const setMemberNote = async (req, res) => {
+  try {
+    const { groupId, memberId } = req.params;
+    const { note } = req.body;
+    const userId = req.user._id;
+
+    const group = await Group.findById(groupId).select("members.user");
+    if (!group) return res.status(404).json({ message: "Group not found" });
+
+    const isMemberOf = (id) => group.members.some((m) => m.user?.toString() === id.toString());
+    if (!isMemberOf(userId)) return res.status(403).json({ message: "Not a member of this group" });
+    if (!isMemberOf(memberId)) return res.status(404).json({ message: "That member is not in this group" });
+
+    const me = await User.findById(userId).select("memberNotes");
+    if (!me) return res.status(404).json({ message: "User not found" });
+    if (!me.memberNotes) me.memberNotes = new Map();
+
+    const trimmed = typeof note === "string" ? note.trim().slice(0, MAX_MEMBER_NOTE_LENGTH) : "";
+    if (trimmed) me.memberNotes.set(memberId.toString(), trimmed);
+    else me.memberNotes.delete(memberId.toString());
+    await me.save();
+
+    res.status(200).json({ memberNotes: Object.fromEntries(me.memberNotes) });
+  } catch (error) {
+    console.error("Error saving member note:", error);
+    res.status(500).json({ message: "Failed to save note" });
+  }
+};
+
 export const markGroupWelcomeSeen = async (req, res) => {
   try {
     const { groupId } = req.params;
@@ -144,7 +189,7 @@ export const markGroupWelcomeSeen = async (req, res) => {
 export const updateGroup = async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { name, description, groupPic, isReadOnly, permissions, welcomeMessage, rules } = req.body;
+    const { name, description, groupPic, isReadOnly, permissions, welcomeMessage, rules, allowAnonymousQuestions } = req.body;
     const userId = req.user._id;
 
     const group = await Group.findById(groupId);
@@ -173,6 +218,15 @@ export const updateGroup = async (req, res) => {
       group.isReadOnly = isReadOnly;
       // Keep the legacy flag and the new permission from contradicting.
       group.permissions = { ...(group.permissions || {}), sendMessages: isReadOnly ? "admins" : "everyone" };
+    }
+
+    // Who may post without a name is a policy decision, so it sits with admins
+    // rather than with whoever can edit the group's name.
+    if (allowAnonymousQuestions !== undefined) {
+      if (!canManagePermissions(group, userId)) {
+        return res.status(403).json({ message: "Only admins can change this setting" });
+      }
+      group.allowAnonymousQuestions = Boolean(allowAnonymousQuestions);
     }
 
     // Changing the rules themselves is an admin-only act, even where editing
@@ -356,11 +410,11 @@ export const getGroupMessages = async (req, res) => {
     // `?limit=1` "latest message" preview show the group's first message.
     if (limit > 0) {
       const page = await base().sort({ createdAt: -1 }).skip(skip).limit(limit);
-      return res.status(200).json(page.reverse());
+      return res.status(200).json(page.reverse().map((m) => hideAnonymousAuthor(m, userId)));
     }
 
     const messages = await base().sort({ createdAt: 1 });
-    res.status(200).json(messages);
+    res.status(200).json(messages.map((m) => hideAnonymousAuthor(m, userId)));
   } catch (error) {
     console.error("Error fetching group messages:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -523,7 +577,7 @@ export const closeGroupPoll = async (req, res) => {
 export const sendGroupMessage = async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { text, image, images, voice, replyTo, mentions, voiceTranscript } = req.body;
+    const { text, image, images, voice, replyTo, mentions, voiceTranscript, isAnonymous } = req.body;
     const senderId = req.user._id;
 
     const group = await Group.findById(groupId);
@@ -536,6 +590,13 @@ export const sendGroupMessage = async (req, res) => {
 
     if (!canDo(group, senderId, "sendMessages")) {
       return res.status(403).json({ message: "Only admins and moderators can send messages in this group" });
+    }
+
+    // Checked against the group, not taken on trust from the client: otherwise
+    // any member could post namelessly in a group that never enabled it.
+    const anonymous = Boolean(isAnonymous) && group.allowAnonymousQuestions === true;
+    if (isAnonymous && !anonymous) {
+      return res.status(403).json({ message: "Anonymous questions are not enabled in this group" });
     }
 
     // Only real members can be mentioned — otherwise a client could make any
@@ -586,6 +647,7 @@ export const sendGroupMessage = async (req, res) => {
       replyTo: replyTo || null,
       mentions: validMentions,
       voiceTranscript: typeof voiceTranscript === "string" ? voiceTranscript.slice(0, 2000) : "",
+      isAnonymous: anonymous,
     });
 
     await newMessage.save();
@@ -594,10 +656,12 @@ export const sendGroupMessage = async (req, res) => {
       .populate("senderId", "fullName email profilePic")
       .populate("replyTo");
 
-    // Emit socket event to the group room
-    io.to(`group_${groupId}`).emit("newGroupMessage", populatedMessage);
+    // The room gets a payload with no author at all. A per-viewer variant is
+    // impossible here — one emit serves everyone — so the sender learns it was
+    // theirs from the HTTP response below instead.
+    io.to(`group_${groupId}`).emit("newGroupMessage", hideAnonymousAuthor(populatedMessage));
 
-    res.status(201).json(populatedMessage);
+    res.status(201).json(hideAnonymousAuthor(populatedMessage, senderId));
   } catch (error) {
     console.error("Error sending group message:", error);
     res.status(500).json({ message: "Internal server error" });

@@ -1,5 +1,6 @@
 import Message from "../models/message.model.js";
 import { getReceiverSocketId, io } from "../lib/socket.js";
+import { hideAnonymousAuthor } from "../lib/anonymity.js";
 import { assetUrlsOf, destroyAssets } from "../lib/mediaCleanup.js";
 
 // Simple scheduler that polls for due scheduled messages every 10 seconds.
@@ -27,7 +28,10 @@ export function startScheduler() {
           if (msg.groupId) {
             msg.scheduledStatus = "sent";
             await msg.save();
-            io.to(`group_${msg.groupId.toString()}`).emit("newGroupMessage", msg);
+            // Group sends cannot be scheduled today, but this path would deliver
+            // one if they ever are — and an unsanitised emit here would unmask
+            // an anonymous question to the whole room.
+            io.to(`group_${msg.groupId.toString()}`).emit("newGroupMessage", hideAnonymousAuthor(msg));
           } else if (msg.receiverId) {
             msg.scheduledStatus = "sent";
             await msg.save();

@@ -111,6 +111,8 @@ const sanitizeUser = (user) => ({
   // Sent as a plain object so the client can index it directly. Only ever
   // returned for the signed-in user — never for the contacts they list.
   contactNicknames: mapToObject(user.contactNicknames),
+  // Private notes about other members; only ever sent to their author.
+  memberNotes: mapToObject(user.memberNotes),
   onlinePrivacy: user.onlinePrivacy,
   typingPrivacy: user.typingPrivacy !== false,
   blockedUsers: user.blockedUsers || [],
