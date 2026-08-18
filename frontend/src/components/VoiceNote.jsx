@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Play, Pause } from "lucide-react";
+import { Play, Pause, Mic } from "lucide-react";
 
 const BAR_COUNT = 34;
 const SPEEDS = [1, 1.5, 2];
@@ -37,7 +37,7 @@ const formatTime = (seconds) => {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 };
 
-const VoiceNote = ({ src }) => {
+const VoiceNote = ({ src, avatarUrl = "" }) => {
   const audioRef = useRef(null);
   const [bars, setBars] = useState(() => fallbackBars(src || ""));
   const [isPlaying, setIsPlaying] = useState(false);
@@ -121,50 +121,70 @@ const VoiceNote = ({ src }) => {
         className="hidden"
       />
 
+      {/* Sender's photo with a mic badge, as WhatsApp draws it. Omitted rather
+          than substituted when there is no avatar to show — an anonymous
+          question passes none, and a placeholder face would undo that. */}
+      {avatarUrl && (
+        <div className="relative shrink-0">
+          <img
+            src={avatarUrl}
+            alt=""
+            aria-hidden="true"
+            className="object-cover rounded-full size-9"
+          />
+          <span className="absolute grid rounded-full -bottom-0.5 -right-0.5 size-4 place-items-center vn-badge">
+            <Mic size={9} className="text-primary" />
+          </span>
+        </div>
+      )}
+
+      {/* A bare triangle rather than a filled circle — the reference has no
+          button chrome, and the icon alone is the affordance. */}
       <button
         type="button"
         onClick={togglePlay}
         aria-label={isPlaying ? "Pause voice note" : "Play voice note"}
-        className="shrink-0 w-8 h-8 rounded-full vn-btn text-primary flex items-center justify-center hover:opacity-80 transition-opacity"
+        className="shrink-0 grid size-7 place-items-center text-primary hover:opacity-70 active:scale-95 transition-all"
       >
-        {isPlaying ? <Pause size={15} /> : <Play size={15} className="ml-0.5" />}
+        {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
       </button>
 
       <div className="flex-1 min-w-0">
+        {/* The dot leads the waveform: played bars behind it, upcoming audio
+            ahead. Height is generous enough to drag on a phone without the row
+            growing, which is why the hit area is padded rather than taller. */}
         <div
           onClick={seek}
-          className="relative flex items-end gap-[2px] h-7 cursor-pointer"
+          className="relative flex items-center h-6 cursor-pointer"
           role="presentation"
         >
-          {bars.map((height, i) => (
-            <span
-              key={i}
-              style={{ height: `${Math.round(height * 100)}%` }}
-              className={`flex-1 rounded-full transition-colors ${
-                i < playedBars ? "vn-fill" : "vn-track"
-              } ${isPlaying && i === playedBars ? "animate-pulse" : ""}`}
-            />
-          ))}
+          <div className="flex items-center w-full gap-[2px] h-4">
+            {bars.map((height, i) => (
+              <span
+                key={i}
+                style={{ height: `${Math.max(18, Math.round(height * 100))}%` }}
+                className={`flex-1 rounded-full transition-colors ${
+                  i < playedBars ? "vn-fill" : "vn-track"
+                }`}
+              />
+            ))}
+          </div>
 
-          {/* Playhead. The filled bars alone read as progress only once you know
-              to look for the colour change; a dot riding the track is what makes
-              the position obvious at a glance, the way every messenger draws it. */}
           <span
             aria-hidden="true"
             style={{ left: `${Math.min(100, Math.max(0, progress * 100))}%` }}
-            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 size-2.5 rounded-full vn-head ring-2 ring-base-100 pointer-events-none transition-[left] duration-150"
+            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 size-3 rounded-full vn-head shadow-sm pointer-events-none transition-[left] duration-150"
           />
         </div>
-        <div className="flex items-center justify-between mt-0.5 text-[10px] vn-time">
+
+        <div className="flex items-center justify-between mt-1 text-[11px] vn-time">
           <span className="tabular-nums">
-            {isPlaying || currentTime
-              ? `${formatTime(currentTime)} / ${formatTime(duration)}`
-              : formatTime(duration)}
+            {isPlaying || currentTime ? formatTime(currentTime) : formatTime(duration)}
           </span>
           <button
             type="button"
             onClick={cycleSpeed}
-            className="px-1.5 py-[1px] rounded-full vn-chip hover:opacity-80 font-semibold transition-opacity"
+            className="px-1.5 py-[1px] rounded-full vn-chip hover:opacity-80 font-semibold transition-opacity tabular-nums"
             title="Playback speed"
           >
             {SPEEDS[speedIndex]}x

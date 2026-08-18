@@ -649,7 +649,7 @@ const SideBar = () => {
                   <strong className="font-medium text-base-content/80">
                     {latestMsg.isAnonymous ? "Anonymous" : latestMsg.senderId?.fullName?.split(" ")[0]}:{" "}
                   </strong>
-                  {latestMsg.poll ? `📊 ${latestMsg.poll.question}` : latestMsg.image ? "📷 Image" : latestMsg.text}
+                  {latestMsg.poll ? `📊 ${latestMsg.poll.question}` : latestMsg.voice ? "🎤 Voice message" : latestMsg.image ? "📷 Image" : latestMsg.text}
                 </span>
               ) : (
                 <span className="text-base-content/40 italic">Group created</span>
@@ -760,7 +760,9 @@ const SideBar = () => {
             )}
             <span className="truncate">
               {latestMessages[user._id] ? (
-                latestMessages[user._id].image ? (
+                latestMessages[user._id].voice ? (
+                  "🎤 Voice message"
+                ) : latestMessages[user._id].image ? (
                   "📷 Image"
                 ) : (
                   latestMessages[user._id].text

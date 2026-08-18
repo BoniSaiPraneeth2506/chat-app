@@ -659,7 +659,18 @@ const ChatContainer = () => {
         ) : null}
         {message.voice && (
           <>
-            <VoiceNote src={message.voice} />
+            <VoiceNote
+              src={message.voice}
+              avatarUrl={
+                message.isAnonymous
+                  ? ""
+                  : message.senderId?.profilePic ||
+                    ((message.senderId?._id || message.senderId) === authUser._id
+                      ? authUser.profilePic
+                      : selectedUser?.profilePic) ||
+                    ""
+              }
+            />
             {/* Below the player, not inside it, so playback and the waveform are
                 untouched. Only voice notes render this. */}
             <VoiceTranscript message={message} />
