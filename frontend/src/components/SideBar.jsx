@@ -636,7 +636,7 @@ const SideBar = () => {
               </span>
             </span>
             {latestMsg && (
-              <span className="text-xs text-base-content/50">
+              <span className="text-xs leading-none t-dim -mt-2 sm:-mt-1">
                 {formatMessageTime(latestMsg.createdAt)}
               </span>
             )}
@@ -729,7 +729,7 @@ const SideBar = () => {
               <Star className="size-3 text-yellow-500 fill-yellow-500 flex-shrink-0" />
             )}
           </div>
-          <div className="flex items-center gap-1.5 ml-1.5 flex-shrink-0">
+          <div className="flex items-center gap-1.5 ml-1.5 flex-shrink-0 -mt-2 sm:-mt-1">
             {pinnedUserIds.includes(user._id) && (
               <Pin className="size-3 text-base-content/35 rotate-45" />
             )}
