@@ -825,7 +825,7 @@ const SideBar = () => {
               placeholder="Search chats or groups..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full h-10 pl-11 pr-10 transition-all rounded-full border-0 border-transparent focus:border-transparent hover:border-transparent bg-base-200 text-sm text-base-content placeholder-base-content/40 focus:outline-none focus-visible:outline-none focus:ring-0 focus:ring-transparent focus:bg-base-200/60"
+              className="field-flat w-full h-10 pl-11 pr-10 transition-colors rounded-full border-0 bg-base-200 text-sm text-base-content ph-dim"
             />
             {searchTerm && (
               <button

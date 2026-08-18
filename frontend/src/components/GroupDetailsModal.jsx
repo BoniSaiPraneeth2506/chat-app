@@ -329,7 +329,7 @@ const GroupDetailsModal = () => {
                     value={memberQuery}
                     onChange={(e) => setMemberQuery(e.target.value)}
                     placeholder="Search members"
-                    className="w-full h-10 pl-9 pr-9 text-sm rounded-xl bg-base-200 outline-none focus:ring-2 focus:ring-primary/30 text-base-content"
+                    className="field-focus w-full h-10 pl-9 pr-9 text-sm rounded-xl bg-base-200 border-0 text-base-content ph-dim"
                   />
                   {memberQuery && (
                     <button

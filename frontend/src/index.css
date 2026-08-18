@@ -190,6 +190,44 @@
   .badge-mention { background-color: color-mix(in oklch, var(--color-primary) 26%, transparent); }
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+   Flat text field: no ring, no outline, no tap flash.
+
+   `focus:ring-0` looks like it removes a ring but actually pulls Tailwind's ring
+   custom properties onto the element, and the default --tw-ring-offset-color is
+   #fff — which is where the white edge on first focus came from. Stacking more
+   utilities could not win against that, since the colour was being supplied
+   rather than the ring being drawn.
+
+   !important is deliberate here: it has to beat both Tailwind's ring shadow and
+   whatever the WebView's own focus ring contributes.
+   ────────────────────────────────────────────────────────────────────────── */
+.field-flat:focus,
+.field-flat:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+.field-flat {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* A focus cue that does show, for fields that want one. Written as a box-shadow
+   because `ring-primary/NN` compiles to nothing here, which silently left
+   Tailwind's default blue as the ring colour. */
+.field-focus:focus,
+.field-focus:focus-visible {
+  outline: none !important;
+  box-shadow: 0 0 0 2px var(--color-base-300) !important;
+}
+
+@supports (box-shadow: 0 0 0 2px color-mix(in oklch, red 50%, transparent)) {
+  .field-focus:focus,
+  .field-focus:focus-visible {
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--color-primary) 32%, transparent) !important;
+  }
+}
+
 /* Horizontal chip strip: scrollable without a visible scrollbar. */
 .cg-scroll-x {
   scrollbar-width: none;
