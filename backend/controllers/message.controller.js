@@ -322,7 +322,7 @@ const getUsersForSidebar = async (req, res) => {
       // Escape special regex chars to prevent ReDoS / NoSQL injection
       const safeSearch = escapeRegex(search.trim().slice(0, 60));
       const filteredUsers = await User.find({
-        _id: { $ne: loggedInUserId },
+        _id: { $ne: loggedInUserId, $nin: req.user.lockedChats || [] },
         fullName: { $regex: safeSearch, $options: "i" }
       }).select(SIDEBAR_USER_FIELDS).lean();
       return res.status(200).json(await attachUnreadCounts(filteredUsers, req.user));
@@ -347,15 +347,23 @@ const getUsersForSidebar = async (req, res) => {
     chattedSet.delete(loggedInUserId.toString());
     const chattedIds = Array.from(chattedSet);
 
+    // Locked conversations are withheld here rather than hidden in the client.
+    // If they were sent and merely not rendered, the lock would be one edited
+    // state away from being bypassed.
+    const lockedIds = (req.user.lockedChats || []).map(String);
+
     // 2. Fetch the chatted users
     const chattedUsers = await User.find({
-      _id: { $in: chattedIds, $ne: loggedInUserId },
+      _id: { $in: chattedIds.filter((id) => !lockedIds.includes(id)), $ne: loggedInUserId },
       fullName: { $exists: true, $ne: "" }
     }).select(SIDEBAR_USER_FIELDS).lean();
 
     // 3. Fetch up to 4 dummy seeded users (excluding the logged-in user, and excluding already chatted users)
+    // The locked list has to be excluded here as well as from the chatted query.
+    // A locked contact with no message history is not in chattedIds, so it fell
+    // through this second query and appeared in the sidebar anyway.
     const dummyUsers = await User.find({
-      _id: { $ne: loggedInUserId, $nin: chattedIds },
+      _id: { $ne: loggedInUserId, $nin: [...chattedIds, ...lockedIds] },
       fullName: { $exists: true, $ne: "" },
       email: { $regex: "@example\\.com$" }
     })
@@ -1540,4 +1548,6 @@ export {
   ,getBlockedUsers
   ,exportChat
   ,requestTranscript
+  ,SIDEBAR_USER_FIELDS
+  ,attachUnreadCounts
 };

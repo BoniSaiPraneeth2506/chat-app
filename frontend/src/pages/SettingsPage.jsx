@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useThemeStore } from '../store/useThemeStore';
 import { useEffect, useState } from 'react';
 import useAuthStore from '../store/useAuthStore';
+import ChatLockSettings from '../components/ChatLockSettings';
 import { THEME_COLORS, THEMES } from "../constants";
 
 const PREVIEW_MESSAGES = [
@@ -218,6 +219,10 @@ const SettingsPage = () => {
                   onChange={(e) => setPrivacyReadReceipts(e.target.checked)}
                 />
               </div>
+
+              {/* Chat lock sits with the other privacy controls rather than in a
+                  section of its own, since that is where someone looks for it. */}
+              <ChatLockSettings />
             </div>
           </div>
         </div>

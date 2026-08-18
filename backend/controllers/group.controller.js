@@ -93,7 +93,13 @@ export const createGroup = async (req, res) => {
 export const getUserGroups = async (req, res) => {
   try {
     const userId = req.user._id;
-    const groups = await Group.find({ "members.user": userId })
+    // Locked groups are excluded from the listing for the same reason locked DMs
+    // are: withholding them server-side is what makes the lock hold, whereas
+    // filtering in the client would leave the data one edit away.
+    const groups = await Group.find({
+      "members.user": userId,
+      _id: { $nin: req.user.lockedGroups || [] },
+    })
       .populate("members.user", MEMBER_FIELDS)
       .sort({ updatedAt: -1 });
 

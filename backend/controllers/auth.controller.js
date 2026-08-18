@@ -119,6 +119,17 @@ const sanitizeUser = (user) => ({
   favorites: user.favorites || [],
   archived: user.archived || [],
   pinnedChats: user.pinnedChats || [],
+  // Status only. The password and answer hashes are never included, and the
+  // question is the user's own, shown so they can answer it during recovery.
+  chatLock: {
+    enabled: Boolean(user.chatLock?.enabled),
+    securityQuestion: user.chatLock?.securityQuestion || "",
+  },
+  // Ids, so the chat header can offer Lock or Unlock correctly. The protection
+  // is that the conversations are withheld from the listings, not that their
+  // ids are secret from their own owner.
+  lockedChats: user.lockedChats || [],
+  lockedGroups: user.lockedGroups || [],
   lastSeen: user.lastSeen,
   messageTimer: user.messageTimer,
   createdAt: user.createdAt,

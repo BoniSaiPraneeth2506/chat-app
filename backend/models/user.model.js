@@ -161,6 +161,32 @@ const userSchema=new mongoose.Schema({
     // Private notes the signed-in user keeps about other people, keyed by their
     // id. Lives on the note-taker's document, exactly like contactNicknames, so
     // it is never visible to the person it describes.
+    // Chat lock. A separate secret from the account password on purpose: the
+    // point is to protect specific conversations from someone who already has
+    // the unlocked phone, and reusing the login password would defeat that.
+    //
+    // Worth being clear about the boundary — this hides conversations from the
+    // interface and from the sidebar payload. It is not encryption: the messages
+    // are stored exactly as before, so anyone holding a valid session token could
+    // still reach them through the API. WhatsApp's chat lock works the same way.
+    chatLock:{
+        enabled:{ type:Boolean, default:false },
+        passwordHash:{ type:String, default:"" },
+        securityQuestion:{ type:String, default:"" },
+        securityAnswerHash:{ type:String, default:"" },
+        updatedAt:{ type:Date, default:null }
+    },
+    // Conversations kept behind that lock.
+    lockedChats:[{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"User",
+        default:[]
+    }],
+    lockedGroups:[{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"Group",
+        default:[]
+    }],
     // When each kind of mail last went out. The schedule is derived from these
     // rather than from a timer, so a restart cannot skip a send or duplicate one.
     lastDigestAt:{

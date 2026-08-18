@@ -66,6 +66,7 @@ import { THEME_COLORS } from './constants'
 import CreateGroupModal from './components/CreateGroupModal'
 import GroupDetailsModal from './components/GroupDetailsModal'
 import GroupWelcomeSheet from './components/GroupWelcomeSheet'
+import LockedChatsModal from './components/LockedChatsModal'
 import AboutPage from './pages/AboutPage'
 import GroupCallModal from './components/GroupCallModal'
 import CallModal from './components/CallModal'
@@ -560,6 +561,10 @@ const App = () => {
       <CallModal />
       <CreateGroupModal />
       <GroupDetailsModal />
+
+      {/* Rendered at the app root so the gesture works from anywhere and the
+          sheet is never clipped by a panel. It returns null unless opened. */}
+      <LockedChatsModal />
 
       {/* Welcome/rules, shown once per member per group. Rendered here rather
           than inside the chat so it survives the chat remounting, and only when

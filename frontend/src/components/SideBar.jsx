@@ -360,14 +360,21 @@ import { useChatStore } from "../store/useChatStore";
 import useAuthStore from "../store/useAuthStore";
 import { useGroupStore } from "../store/useGroupStore";
 import SidebarSkeleton from "./skeletons/SidebarSkeleton";
-import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus } from "lucide-react";
+import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus, Lock } from "lucide-react";
 import { useNicknames, displayNameOf } from "../lib/contacts";
 import { formatMessageTime } from "../lib/utils";
 import toast from "react-hot-toast";
 import { haptic } from "../lib/haptics";
+import { useChatLockStore } from "../store/useChatLockStore";
+import { confirmLockAccess } from "../lib/confirmLock";
 
 // Mirrors MAX_PINNED_CHATS in backend/controllers/message.controller.js.
 const MAX_PINNED_CHATS = 2;
+
+// How far a row must travel before releasing it archives, and how far it can be
+// dragged at all. The cap keeps the row from sliding clear of its own width.
+const SWIPE_ARCHIVE_THRESHOLD = 88;
+const SWIPE_MAX = 120;
 
 const SingleCheck = ({ className }) => (
   <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
@@ -426,6 +433,8 @@ const SideBar = () => {
   const pinnedUserIds = asIds(authUser?.pinnedChats);
   const [showArchivedOnly, setShowArchivedOnly] = useState(false);
   const [contextMenu, setContextMenu] = useState(null); // { x, y, userId }
+  const [swipe, setSwipe] = useState({ id: null, dx: 0 });
+  const swipeRef = useRef(null);
   const pressTimerRef = useRef(null);
 
   useEffect(() => {
@@ -490,6 +499,25 @@ const SideBar = () => {
     toggleContactAction(userId, "archive");
   };
 
+  // Locking asks for proof first — biometry where it exists, otherwise the lock
+  // password, checked by the server. A privacy control should not be one stray
+  // tap away in either direction.
+  const lockedChatIds = (authUser?.lockedChats || []).map(String);
+
+  const lockChat = async (id, type) => {
+    if (!authUser?.chatLock?.enabled) {
+      toast.error("Turn on chat lock in Settings first");
+      return;
+    }
+    const allowed = await confirmLockAccess({
+      userId: authUser._id,
+      verifyPassword: (password) => useChatLockStore.getState().unlock(password),
+    });
+    if (!allowed) return;
+    haptic("success");
+    await useChatLockStore.getState().toggleChat(id, type);
+  };
+
   const togglePin = (userId) => {
     // The cap is enforced server-side too; this only avoids a pointless
     // round-trip and gives immediate feedback.
@@ -503,12 +531,21 @@ const SideBar = () => {
     toggleContactAction(userId, "pin");
   };
 
+  // Swipe a row left-to-right to archive it, the way Telegram does. Mobile only:
+  // on desktop the same action lives in the right-click menu, which is why Lock
+  // takes the menu slot on a phone.
+  //
+  // The row is dragged with the finger rather than snapping at the end, so the
+  // gesture shows how far it has to go. Only rightward movement counts, and the
+  // long-press timer is cancelled as soon as a drag is recognised — otherwise the
+  // context menu would open in the middle of a swipe.
   const handleTouchStart = (userId, e) => {
     if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
-    
+
     const touch = e.touches[0];
     const clientX = touch.clientX;
     const clientY = touch.clientY;
+    swipeRef.current = { id: userId, x: clientX, y: clientY, active: false };
 
     pressTimerRef.current = setTimeout(() => {
       setContextMenu({
@@ -519,10 +556,41 @@ const SideBar = () => {
     }, 600);
   };
 
-  const handleTouchEnd = () => {
+  const handleTouchMove = (userId, e) => {
+    const start = swipeRef.current;
+    if (!start || start.id !== userId) return;
+
+    const touch = e.touches[0];
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+
+    // A mostly-vertical move is the list scrolling, so it is left alone.
+    if (!start.active && (Math.abs(dy) > Math.abs(dx) || dx < 8)) {
+      if (Math.abs(dy) > 8) handleTouchEnd();
+      return;
+    }
+
+    start.active = true;
     if (pressTimerRef.current) {
       clearTimeout(pressTimerRef.current);
       pressTimerRef.current = null;
+    }
+    setSwipe({ id: userId, dx: Math.min(dx, SWIPE_MAX) });
+  };
+
+  const handleTouchEnd = (userId) => {
+    if (pressTimerRef.current) {
+      clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+
+    const dx = swipe.id && swipe.id === userId ? swipe.dx : 0;
+    setSwipe({ id: null, dx: 0 });
+    swipeRef.current = null;
+
+    if (dx >= SWIPE_ARCHIVE_THRESHOLD && userId) {
+      haptic("success");
+      toggleArchive(null, userId);
     }
   };
 
@@ -677,8 +745,27 @@ const SideBar = () => {
   };
 
   const renderUserRow = (user) => (
+    // The wrapper exists to hold the affordance revealed underneath. The row
+    // itself is opaque and sits above it, so what shows is exactly the distance
+    // travelled.
+    <div key={user._id} className="relative overflow-hidden">
+      {swipe.id === user._id && swipe.dx > 0 && (
+        <div
+          className="absolute inset-y-0 left-0 flex items-center gap-2 px-4 s-tile"
+          style={{ width: `${Math.max(swipe.dx, 56)}px` }}
+        >
+          <Archive
+            size={18}
+            className={swipe.dx >= SWIPE_ARCHIVE_THRESHOLD ? "text-primary" : "t-dim"}
+          />
+          {swipe.dx >= SWIPE_ARCHIVE_THRESHOLD && (
+            <span className="text-[11px] font-semibold text-primary whitespace-nowrap">
+              {archivedUsers.includes(user._id) ? "Unarchive" : "Archive"}
+            </span>
+          )}
+        </div>
+      )}
     <button
-      key={user._id}
       onClick={() => {
         setSelectedUser(user);
       }}
@@ -691,9 +778,15 @@ const SideBar = () => {
         });
       }}
       onTouchStart={(e) => handleTouchStart(user._id, e)}
-      onTouchEnd={handleTouchEnd}
-      onTouchMove={handleTouchEnd}
-      className={`w-full py-3.5 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors group select-none
+      onTouchEnd={() => handleTouchEnd(user._id)}
+      onTouchCancel={() => handleTouchEnd(user._id)}
+      onTouchMove={(e) => handleTouchMove(user._id, e)}
+      style={
+        swipe.id === user._id
+          ? { transform: `translateX(${swipe.dx}px)`, transition: "none" }
+          : undefined
+      }
+      className={`relative z-10 w-full py-3.5 px-4 flex items-center gap-3 bg-base-100 hover:bg-base-200/60 transition-transform group select-none
         ${
           selectedUser?._id === user._id
             ? "bg-base-200/80"
@@ -783,6 +876,7 @@ const SideBar = () => {
         </div>
       </div>
     </button>
+    </div>
   );
 
   const renderTicks = (msg) => {
@@ -1001,15 +1095,31 @@ const SideBar = () => {
               <Star className={`size-3.5 ${favoriteUsers.includes(contextMenu.userId) ? "text-yellow-500 fill-yellow-500" : "text-neutral"}`} />
               <span>{favoriteUsers.includes(contextMenu.userId) ? "Unstar Chat" : "Star Chat"}</span>
             </button>
+            {/* Archive stays on desktop, where a right-click menu is the only way
+                to reach it. On a phone it is replaced by Lock, because archiving
+                there is the swipe gesture instead — two ways to archive in one
+                menu would be clutter, and the menu is short by design. */}
             <button
               onClick={(e) => {
                 toggleArchive(e, contextMenu.userId);
                 setContextMenu(null);
               }}
-              className="flex items-center gap-2 px-3 py-2 text-xs font-semibold hover:bg-base-200 rounded-md transition-colors text-left text-base-content"
+              className="hidden sm:flex items-center gap-2 px-3 py-2 text-xs font-semibold hover:bg-base-200 rounded-md transition-colors text-left text-base-content"
             >
               <Archive className="size-3.5 text-neutral" />
               <span>{archivedUsers.includes(contextMenu.userId) ? "Unarchive" : "Archive"}</span>
+            </button>
+
+            <button
+              onClick={() => {
+                const id = contextMenu.userId;
+                setContextMenu(null);
+                lockChat(id, "user");
+              }}
+              className="flex items-center gap-2 px-3 py-2 text-xs font-semibold hover:bg-base-200 rounded-md transition-colors text-left text-base-content"
+            >
+              <Lock className="size-3.5 text-primary" />
+              <span>{lockedChatIds.includes(contextMenu.userId) ? "Unlock Chat" : "Lock Chat"}</span>
             </button>
             <div className="h-[1px] bg-base-300 my-1"></div>
             <button

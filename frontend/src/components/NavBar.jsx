@@ -2,13 +2,17 @@ import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { MessageSquare, Settings, User, Laptop, ShieldOff, UserPlus, Check, X, Info } from "lucide-react";
 import { useGroupStore } from "../store/useGroupStore";
+import { useChatLockStore } from "../store/useChatLockStore";
+import { haptic } from "../lib/haptics";
 
 const Navbar = () => {
   const { authUser, savedAccounts, switchAccount, forgetSavedAccount, refreshSavedAccounts } = useAuthStore();
   const [isSwitching, setIsSwitching] = useState(false);
+  const lastWordmarkTap = useRef(0);
+  const openLockedChats = useChatLockStore((s) => s.openModal);
 
   // The list is written to localStorage by the auth store, so re-read it
   // whenever the signed-in user changes (login, switch, logout).
@@ -29,7 +33,27 @@ const Navbar = () => {
               <div className="flex items-center justify-center rounded-lg size-9 bg-primary/10">
                 <MessageSquare className="w-5 h-5 text-primary" />
               </div>
-              <h1 className="text-lg font-bold">Chatty</h1>
+              {/* Double-tap opens the locked chats. Deliberately an unlabelled
+                  gesture on the wordmark rather than a visible button: a control
+                  reading "locked chats" announces that some exist. A single tap
+                  still follows the link, so the header behaves normally. */}
+              <h1
+                className="text-lg font-bold select-none"
+                onClick={(e) => {
+                  const now = Date.now();
+                  if (now - lastWordmarkTap.current < 400) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    lastWordmarkTap.current = 0;
+                    haptic("longPress");
+                    openLockedChats();
+                    return;
+                  }
+                  lastWordmarkTap.current = now;
+                }}
+              >
+                Chatty
+              </h1>
             </Link>
           </div>
 
