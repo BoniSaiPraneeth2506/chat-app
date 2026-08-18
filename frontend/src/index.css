@@ -181,6 +181,15 @@
   .vn-chip  { background-color: color-mix(in oklch, var(--color-base-content) 12%, transparent); }
 }
 
+/* Unread badge for a group where you were mentioned. Was `bg-primary/25`, which
+   compiles to nothing, so a mentioned badge had no fill at all — only tinted
+   text — and read as a different component from the ordinary count. */
+.badge-mention { background-color: var(--color-base-300); color: var(--color-primary); }
+
+@supports (background-color: color-mix(in oklch, red 50%, transparent)) {
+  .badge-mention { background-color: color-mix(in oklch, var(--color-primary) 26%, transparent); }
+}
+
 /* Horizontal chip strip: scrollable without a visible scrollbar. */
 .cg-scroll-x {
   scrollbar-width: none;

@@ -631,7 +631,7 @@ const SideBar = () => {
           <div className="flex items-center justify-between">
             <span className="font-semibold text-base-content truncate flex items-center gap-1.5">
               {group.name}
-              <span className="text-[10px] bg-base-300 px-1.5 py-0.5 rounded text-base-content/60 font-normal">
+              <span className="text-[10px] leading-none bg-base-300 px-1.5 py-1 rounded t-dim font-normal">
                 {group.members?.length || 0}
               </span>
             </span>
@@ -664,8 +664,8 @@ const SideBar = () => {
               </span>
             )}
             {unread > 0 && (
-              <span className={`flex items-center justify-center min-w-5 h-5 px-1.5 text-[10px] font-bold rounded-full flex-shrink-0 ${
-                mentioned ? "bg-primary/25 text-primary" : "bg-primary text-white"
+              <span className={`flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[9px] leading-none font-bold rounded-full flex-shrink-0 ${
+                mentioned ? "badge-mention" : "bg-primary text-white"
               }`}>
                 {unread}
               </span>
@@ -734,7 +734,7 @@ const SideBar = () => {
               <Pin className="size-3 text-base-content/35 rotate-45" />
             )}
             {latestMessages[user._id] && (
-              <span className="text-xs text-base-content/50">
+              <span className="text-xs leading-none t-dim">
                 {formatMessageTime(latestMessages[user._id].scheduledAt || latestMessages[user._id].createdAt)}
               </span>
             )}
@@ -776,7 +776,7 @@ const SideBar = () => {
           </div>
 
           {unreadCounts[user._id] > 0 && (
-            <span className="flex items-center justify-center min-w-5 h-5 px-1.5 text-[10px] font-bold text-white bg-primary rounded-full flex-shrink-0">
+            <span className="flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[9px] leading-none font-bold text-white bg-primary rounded-full flex-shrink-0">
               {unreadCounts[user._id]}
             </span>
           )}
