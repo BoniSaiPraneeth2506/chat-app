@@ -155,26 +155,27 @@ const VoiceNote = ({ src, avatarUrl = "" }) => {
             growing, which is why the hit area is padded rather than taller. */}
         <div
           onClick={seek}
-          className="relative flex items-center h-6 cursor-pointer"
+          className="flex items-center h-6 cursor-pointer"
           role="presentation"
         >
-          <div className="flex items-center w-full gap-[2px] h-4">
+          {/* No playhead marker. A dot sitting on top of the bars read as
+              clutter, and the colour split between played and upcoming bars
+              already shows the position.
+
+              Uniform 2px bars rather than flex-1: stretching each bar to fill
+              made the spacing depend on the bar count, which is what looked
+              uneven inside the bubble. */}
+          <div className="flex items-center justify-between w-full h-4">
             {bars.map((height, i) => (
               <span
                 key={i}
-                style={{ height: `${Math.max(18, Math.round(height * 100))}%` }}
-                className={`flex-1 rounded-full transition-colors ${
+                style={{ height: `${Math.max(22, Math.round(height * 100))}%` }}
+                className={`w-[2px] shrink-0 rounded-full transition-colors ${
                   i < playedBars ? "vn-fill" : "vn-track"
                 }`}
               />
             ))}
           </div>
-
-          <span
-            aria-hidden="true"
-            style={{ left: `${Math.min(100, Math.max(0, progress * 100))}%` }}
-            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 size-3 rounded-full vn-head shadow-sm pointer-events-none transition-[left] duration-150"
-          />
         </div>
 
         <div className="flex items-center justify-between mt-1 text-[11px] vn-time">

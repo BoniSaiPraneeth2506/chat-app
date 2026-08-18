@@ -165,7 +165,6 @@
 .vn-btn   { background-color: var(--color-base-300); }
 .vn-track { background-color: var(--color-base-300); }
 .vn-fill  { background-color: var(--color-primary); }
-.vn-head  { background-color: var(--color-primary); }
 .vn-time  { color: var(--color-base-content); }
 .vn-chip  { background-color: var(--color-base-300); }
 /* Mic badge on the sender photo; sits on the bubble, so it needs its own fill. */
