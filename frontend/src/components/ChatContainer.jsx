@@ -1123,7 +1123,7 @@ const ChatContainer = () => {
                     style={swipe.id === message._id ? {
                       transform: `translateX(${swipeDxRef.current}px)`,
                     } : undefined}
-                    className={`flex flex-col py-2 px-2.5 chat-bubble relative min-w-[72px] pr-12 transition-colors duration-300 select-none cursor-default pb-3 ${isSelectionMode ? "cursor-pointer" : ""} ${swipe.id === message._id ? "" : "transition-transform"}`}
+                    className={`flex flex-col py-2 px-2.5 chat-bubble relative min-w-[72px] pr-12 transition-colors duration-300 select-none cursor-default pb-3 ${(message.senderId?._id || message.senderId) === authUser._id ? "bubble-mine" : ""} ${isSelectionMode ? "cursor-pointer" : ""} ${swipe.id === message._id ? "" : "transition-transform"}`}
                   >
                   {swipe.id === message._id && swipe.stage >= 1 && (
                     <span

@@ -252,3 +252,22 @@
    around it.
    ────────────────────────────────────────────────────────────────────────── */
 .field-hair { border-color: rgba(229, 231, 235, 0.72); }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Whose message is whose.
+
+   DaisyUI paints every chat-bubble with base-300, so both sides of a
+   conversation arrived in the same colour and the only thing telling them apart
+   was which edge they sat against. Outgoing messages take a navy of their own —
+   the app's own family, a step off the surface behind them rather than a
+   contrast against it.
+
+   The text colour is set here too rather than inherited. base-content follows
+   the theme, and on a light theme it is nearly black, which on navy would be
+   unreadable. Qualified with .chat-bubble so it outranks the component rule
+   regardless of where that ends up in the stylesheet.
+   ────────────────────────────────────────────────────────────────────────── */
+.chat-bubble.bubble-mine {
+  background-color: #1b3a6b;
+  color: #e8eefc;
+}
