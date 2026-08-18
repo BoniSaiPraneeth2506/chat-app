@@ -556,7 +556,7 @@ const MessageInput = () => {
 
   if (isBlocked) {
     return (
-      <div className="w-full px-4 py-4 bg-base-200/50 flex items-center justify-center text-sm text-base-content/60 font-medium border-t border-base-300">
+      <div className="w-full px-4 py-4 flex items-center justify-center text-sm font-medium border-t border-base-300">
         <span>You have blocked this user. Unblock to send messages.</span>
       </div>
     );
@@ -564,7 +564,7 @@ const MessageInput = () => {
 
   if (isReadOnlyRestricted) {
     return (
-      <div className="w-full px-4 py-4 bg-base-200/50 flex items-center justify-center text-sm text-amber-500 font-medium border-t border-base-300 gap-2 select-none">
+      <div className="w-full px-4 py-4 flex items-center justify-center text-sm text-amber-500 font-medium border-t border-base-300 gap-2 select-none">
         <Lock size={16} />
         <span>Only Admins and Moderators can send messages in this group.</span>
       </div>
@@ -572,7 +572,7 @@ const MessageInput = () => {
   }
 
   return (
-    <div className="w-full px-4 py-3 bg-base-200/50 flex flex-col gap-2 relative border-t border-base-300 lg:border-t-0">
+    <div className="w-full px-4 py-3 flex flex-col gap-2 relative border-t border-base-300 lg:border-t-0">
       {editingIndex !== null && imagePreviews[editingIndex] && (
         <ImageEditorModal
           key={editingIndex}
@@ -587,30 +587,30 @@ const MessageInput = () => {
 
       {showPollModal && <CreatePollModal onClose={() => setShowPollModal(false)} />}
       {isDraggingFiles && (
-        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-base-100/80 backdrop-blur-sm pointer-events-none">
+        <div className="fixed inset-0 z-[130] flex items-center justify-center backdrop-blur-sm pointer-events-none">
           <div className="flex flex-col items-center gap-2 px-8 py-6 border-2 border-dashed border-primary rounded-2xl bg-base-100 shadow-xl">
             <Image size={28} className="text-primary" />
             <span className="text-sm font-semibold">Drop images to attach</span>
-            <span className="text-xs text-base-content/60">Up to 5 images per message</span>
+            <span className="text-xs">Up to 5 images per message</span>
           </div>
         </div>
       )}
       {/* Quoted Reply Banner */}
         {replyingToMessage && (
-          <div className="flex items-center justify-between bg-base-200/90 px-4 py-2 border-l-4 border-primary rounded-r-lg mb-1 relative text-left">
+          <div className="flex items-center justify-between px-4 py-2 border-l-4 border-primary rounded-r-lg mb-1 relative text-left">
             <div className="text-xs">
               <span className="text-primary font-semibold select-none flex items-center gap-1">
                 <CornerDownLeft size={10} />
                 Replying to {replyingToMessage.senderId === authUser?._id ? "yourself" : selectedUser?.fullName}
               </span>
-              <p className="text-base-content/75 truncate max-w-[200px] sm:max-w-[400px] mt-0.5">
+              <p className="truncate max-w-[200px] sm:max-w-[400px] mt-0.5">
                 {replyingToMessage.text || (replyingToMessage.image ? "📷 Photo" : replyingToMessage.voice ? "🎙️ Voice Message" : "Message")}
               </p>
             </div>
             <button
               type="button"
               onClick={() => setReplyingToMessage(null)}
-              className="p-1 hover:bg-base-300 rounded-full transition-colors text-base-content/50"
+              className="p-1 hover:bg-base-300 rounded-full transition-colors"
               title="Cancel reply"
             >
               <X size={14} />
@@ -619,19 +619,19 @@ const MessageInput = () => {
         )}
         {/* Editing Message Banner */}
         {editingMessage && (
-          <div className="flex items-center justify-between bg-base-200/90 px-4 py-2 border-l-4 border-warning rounded-r-lg mb-1 relative text-left">
+          <div className="flex items-center justify-between px-4 py-2 border-l-4 border-warning rounded-r-lg mb-1 relative text-left">
             <div className="text-xs">
               <span className="text-warning font-semibold select-none flex items-center gap-1">
                 Editing Message
               </span>
-              <p className="text-base-content/75 truncate max-w-[200px] sm:max-w-[400px] mt-0.5">
+              <p className="truncate max-w-[200px] sm:max-w-[400px] mt-0.5">
                 {editingMessage.text}
               </p>
             </div>
             <button
               type="button"
               onClick={() => setEditingMessage(null)}
-              className="p-1 hover:bg-base-300 rounded-full transition-colors text-base-content/50"
+              className="p-1 hover:bg-base-300 rounded-full transition-colors"
               title="Cancel edit"
             >
               <X size={14} />
@@ -740,7 +740,7 @@ const MessageInput = () => {
 
         {scheduledAt && (
           <div className="flex items-center gap-2 px-3 pb-1">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-[11px] font-medium">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-primary text-[11px] font-medium">
               <Clock size={12} />
               Sends {new Date(scheduledAt).toLocaleString([], {
                 day: "numeric",
@@ -761,7 +761,7 @@ const MessageInput = () => {
         )}
 
         <form onSubmit={handleSendMessage} className="flex items-end gap-3">
-        <div className="flex-1 min-w-0 flex items-end gap-3 bg-base-100 rounded-3xl px-4 py-1.5 min-h-[42px] border border-base-300/30 shadow-sm">
+        <div className="flex-1 min-w-0 flex items-end gap-3 bg-base-100 rounded-3xl px-4 py-1.5 min-h-[42px] border field-hair shadow-sm">
           {isRecording ? (
             <div className="flex items-center justify-between w-full px-2">
               <div className="flex items-center gap-2">
@@ -782,7 +782,7 @@ const MessageInput = () => {
               <button
                 type="button"
                 className={`p-1 hover:bg-base-200 rounded-full transition-colors flex items-center justify-center ${
-                  imagePreviews.length > 0 ? "text-emerald-500" : "text-base-content/40 hover:text-base-content"
+                  imagePreviews.length > 0 ? "text-emerald-500" : "hover:text-base-content"
                 }`}
                 onClick={() => fileInputRef.current?.click()}
                 title="Attach images (up to 5)"
@@ -804,7 +804,7 @@ const MessageInput = () => {
                   type="button"
                   onClick={() => setShowPollModal(true)}
                   title="Create a poll"
-                  className="p-1 hover:bg-base-200 rounded-full transition-colors flex items-center justify-center text-base-content/40 hover:text-base-content"
+                  className="p-1 hover:bg-base-200 rounded-full transition-colors flex items-center justify-center hover:text-base-content"
                 >
                   <BarChart3 size={18} />
                 </button>
@@ -858,8 +858,8 @@ const MessageInput = () => {
                   onClick={openSchedulePicker}
                   className={`p-1 rounded-full transition-colors ${
                     scheduledAt || isSchedulerOpen
-                      ? "text-primary bg-primary/10 hover:bg-primary/20"
-                      : "text-base-content/50 hover:bg-base-200"
+                      ? "text-primary"
+                      : "hover:bg-base-200"
                   }`}
                 >
                   <Clock size={16} />
@@ -892,7 +892,7 @@ const MessageInput = () => {
               ${
                 text.trim() || imagePreviews.length > 0 || isSendingAnimation
                   ? "bg-primary text-primary-content hover:scale-105 active:scale-95"
-                  : "bg-base-100 text-base-content/40 border border-base-300/30 hover:bg-base-200"
+                  : "bg-base-100 border hover:bg-base-200"
               }
             `}
             onMouseDown={(e) => e.preventDefault()}

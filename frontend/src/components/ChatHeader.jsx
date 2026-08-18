@@ -213,7 +213,7 @@ const ChatHeader = () => {
           {soleSelected && (
             <button
               onClick={() => { setReplyingToMessage(soleSelected); exitSelection(); }}
-              className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+              className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary"
               title="Reply"
             >
               <CornerUpLeft size={18} />
@@ -222,7 +222,7 @@ const ChatHeader = () => {
           {soleSelected && !soleSelected.isDeletedForEveryone && (
             <button
               onClick={() => { togglePinMessage(soleSelected._id); exitSelection(); }}
-              className={`p-2 hover:bg-base-200 rounded-full transition-colors ${soleSelected.isPinned ? "text-amber-500" : "text-base-content/70 hover:text-primary"}`}
+              className={`p-2 hover:bg-base-200 rounded-full transition-colors ${soleSelected.isPinned ? "text-amber-500" : "hover:text-primary"}`}
               title={soleSelected.isPinned ? "Unpin" : "Pin"}
             >
               <Pin size={18} />
@@ -230,7 +230,7 @@ const ChatHeader = () => {
           )}
           {selectedMessageIds.length > 0 && (
             <div className="dropdown dropdown-bottom dropdown-end">
-              <div tabIndex={0} role="button" className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-red-500 cursor-pointer" title="Delete">
+              <div tabIndex={0} role="button" className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-red-500 cursor-pointer" title="Delete">
                 <Trash2 size={18} />
               </div>
               <ul tabIndex={0} className="dropdown-content z-50 menu p-1.5 shadow-xl bg-base-100 border border-base-300 rounded-box w-48 text-xs text-base-content mt-1">
@@ -259,7 +259,7 @@ const ChatHeader = () => {
           {copyableCount > 0 && (
             <button
               onClick={handleCopySelected}
-              className="lg:hidden p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+              className="lg:hidden p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary"
               title="Copy"
             >
               <Copy size={18} />
@@ -270,7 +270,7 @@ const ChatHeader = () => {
           {forwardableMsgs.length >= 2 && (
             <button
               onClick={() => { haptic("tap"); setForwardingMessages(forwardableMsgs); exitSelection(); }}
-              className="lg:hidden p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+              className="lg:hidden p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary"
               title={`Forward ${forwardableMsgs.length} messages`}
             >
               <Forward size={18} />
@@ -279,7 +279,7 @@ const ChatHeader = () => {
           {soleSelected && !soleSelected.isDeletedForEveryone && (
             <button
               onClick={() => { setForwardingMessage(soleSelected); exitSelection(); }}
-              className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+              className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary"
               title="Forward"
             >
               <Forward size={18} />
@@ -288,7 +288,7 @@ const ChatHeader = () => {
           {canEditSole && (
             <button
               onClick={() => { setEditingMessage(soleSelected); exitSelection(); }}
-              className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+              className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary"
               title="Edit"
             >
               <Pencil size={18} />
@@ -303,7 +303,7 @@ const ChatHeader = () => {
               <div
                 tabIndex={0}
                 role="button"
-                className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary cursor-pointer"
+                className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary cursor-pointer"
                 title="More"
               >
                 <MoreVertical size={18} />
@@ -344,12 +344,12 @@ const ChatHeader = () => {
     <div className="p-2.5 border-b border-base-300 min-h-[64px] flex items-center bg-base-100 relative z-30">
       {isSearchOpen ? (
         /* Full-width Search Bar mode */
-        <div className="flex items-center gap-3 w-full bg-base-200/60 px-3 py-1.5 rounded-lg border border-base-300 animate-in fade-in duration-200">
-          <Search size={16} className="text-base-content/50" />
+        <div className="flex items-center gap-3 w-full px-3 py-1.5 rounded-lg border border-base-300 animate-in fade-in duration-200">
+          <Search size={16} className="" />
           <input
             type="text"
             placeholder="Search messages in this chat..."
-            className="flex-1 bg-transparent text-xs outline-none text-base-content placeholder-base-content/40"
+            className="flex-1 bg-transparent text-xs outline-none text-base-content"
             value={messageSearchQuery}
             onChange={(e) => setMessageSearchQuery(e.target.value)}
             autoFocus
@@ -359,7 +359,7 @@ const ChatHeader = () => {
               setIsSearchOpen(false);
               setMessageSearchQuery("");
             }} 
-            className="p-1 hover:bg-base-300 rounded-full transition-colors text-base-content/70 hover:text-red-500"
+            className="p-1 hover:bg-base-300 rounded-full transition-colors hover:text-red-500"
             title="Close search"
           >
             <X size={16} />
@@ -390,7 +390,7 @@ const ChatHeader = () => {
                 className="flex items-center min-w-0 gap-3 cursor-pointer select-none group"
               >
                 <div className="avatar hover:opacity-80 transition-opacity shrink-0">
-                  <div className="relative rounded-full size-10 bg-secondary/10 border border-secondary/20 flex items-center justify-center text-secondary overflow-hidden">
+                  <div className="relative rounded-full size-10 border flex items-center justify-center text-secondary overflow-hidden">
                     {selectedGroup.groupPic ? (
                       <img src={selectedGroup.groupPic} alt={selectedGroup.name} className="w-full h-full object-cover" />
                     ) : (
@@ -402,7 +402,7 @@ const ChatHeader = () => {
                   <h3 className="font-medium group-hover:text-primary transition-colors flex items-center gap-1.5 text-sm sm:text-base min-w-0">
                     <span className="truncate">{selectedGroup.name}</span>
                   </h3>
-                  <p className="text-xs text-base-content/60 truncate">
+                  <p className="text-xs truncate">
                     {selectedGroup.members?.length || 0} members {selectedGroup.isReadOnly ? "• Read Only" : ""}
                   </p>
                 </div>
@@ -410,12 +410,12 @@ const ChatHeader = () => {
             ) : isSelf ? (
               /* Personal Notes self-chat header details */
               <div className="flex items-center gap-3 select-none">
-                <div className="size-10 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
+                <div className="size-10 rounded-full border flex items-center justify-center text-primary shrink-0">
                   <Bookmark className="size-5" />
                 </div>
                 <div className="text-left">
                   <h3 className="font-medium text-base-content text-sm sm:text-base">Personal Notes</h3>
-                  <p className="text-xs text-base-content/60">Organize drafts, links, and ideas</p>
+                  <p className="text-xs">Organize drafts, links, and ideas</p>
                 </div>
               </div>
             ) : (
@@ -460,7 +460,7 @@ const ChatHeader = () => {
                       )}
                     </div>
                   ) : (
-                    <p className="flex items-center gap-1 text-sm text-base-content/70 truncate">
+                    <p className="flex items-center gap-1 text-sm truncate">
                       {isOnline && (
                         <span className="size-[8px] rounded-full mt-[2.3px] bg-green-500"></span>
                       )}
@@ -478,21 +478,21 @@ const ChatHeader = () => {
               <>
                 <button 
                   onClick={() => startOrJoinGroupCall(selectedGroup._id, "video")} 
-                  className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+                  className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary"
                   title="Group Video Call"
                 >
                   <Video size={18} />
                 </button>
                 <button 
                   onClick={() => startOrJoinGroupCall(selectedGroup._id, "voice")} 
-                  className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+                  className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary"
                   title="Group Voice Call"
                 >
                   <Phone size={18} />
                 </button>
                 <button 
                   onClick={() => setIsGroupDetailsModalOpen(true)} 
-                  className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+                  className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary"
                   title="Group Info & Members"
                 >
                   <Info size={18} />
@@ -502,14 +502,14 @@ const ChatHeader = () => {
               <>
                 <button 
                   onClick={() => startCall("video")} 
-                  className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+                  className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary"
                   title="Video Call"
                 >
                   <Video size={18} />
                 </button>
                 <button 
                   onClick={() => startCall("voice")} 
-                  className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+                  className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary"
                   title="Voice Call"
                 >
                   <Phone size={18} />
@@ -519,14 +519,14 @@ const ChatHeader = () => {
                   <>
                     <button
                       onClick={() => toggleLocalMute()}
-                      className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+                      className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary"
                       title="Toggle mute"
                     >
                       {(localStream && localStream.getAudioTracks().every(t => !t.enabled)) ? <MicOff size={16} /> : <Mic size={16} />}
                     </button>
                     <button
                       onClick={() => toggleScreenShare()}
-                      className={`p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 ${isScreenSharing ? 'bg-primary/10 text-primary' : ''}`}
+                      className={`p-2 hover:bg-base-200 rounded-full transition-colors ${isScreenSharing ? 'text-primary' : ''}`}
                       title={isScreenSharing ? "Stop screen share" : "Share screen"}
                     >
                       <Maximize2 size={16} />
@@ -539,7 +539,7 @@ const ChatHeader = () => {
             {/* Search Icon (Left of Three Dots) */}
             <button 
               onClick={() => setIsSearchOpen(true)} 
-              className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary"
+              className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary"
               title="Search chat"
             >
               <Search size={18} />
@@ -549,7 +549,7 @@ const ChatHeader = () => {
             {(
               <button
                 onClick={() => setSelectionMode(!isSelectionMode)}
-                className={`hidden sm:flex p-2 rounded-full transition-colors ${isSelectionMode ? "bg-primary text-primary-content" : "hover:bg-base-200 text-base-content/70 hover:text-primary"}`}
+                className={`hidden sm:flex p-2 rounded-full transition-colors ${isSelectionMode ? "bg-primary text-primary-content" : "hover:bg-base-200 hover:text-primary"}`}
                 title="Select Messages"
               >
                 <CheckSquare size={18} />
@@ -561,7 +561,7 @@ const ChatHeader = () => {
               <div
                 tabIndex={0}
                 role="button"
-                className="p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-primary cursor-pointer"
+                className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary cursor-pointer"
                 title="More options"
               >
                 <MoreVertical size={18} />
@@ -570,12 +570,12 @@ const ChatHeader = () => {
                 tabIndex={0}
                 className="dropdown-content z-50 menu p-2 shadow-2xl bg-base-100 border border-base-300 rounded-2xl w-56 text-xs text-base-content mt-1 space-y-1"
               >
-                <li className="menu-title text-[10px] uppercase tracking-wider text-base-content/50 font-bold px-2 py-1 select-none flex items-center gap-1">
+                <li className="menu-title text-[10px] uppercase tracking-wider font-bold px-2 py-1 select-none flex items-center gap-1">
                   <Palette size={12} />
                   Chat Theme
                 </li>
                 <li>
-                  <label className="flex items-center justify-between py-2 px-3 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary text-xs font-semibold cursor-pointer transition-colors mb-1">
+                  <label className="flex items-center justify-between py-2 px-3 rounded-xl text-primary text-xs font-semibold cursor-pointer transition-colors mb-1">
                     <div className="flex items-center gap-2">
                       <Image size={14} />
                       <span>Upload from Gallery</span>
@@ -619,7 +619,7 @@ const ChatHeader = () => {
                       className="flex items-center justify-between py-1.5 px-3 rounded-lg hover:bg-base-200 text-xs transition-colors"
                     >
                       <div className="flex items-center gap-2">
-                        <span className={`size-3 rounded-full ${wp.color} border border-base-content/10`} />
+                        <span className={`size-3 rounded-full ${wp.color} border`} />
                         <span>{wp.name}</span>
                       </div>
                       {((authUser?.chatWallpapers?.[selectedUser?._id] || selectedUser?.chatWallpapers?.[authUser?._id]) === wp.id) && (
@@ -639,7 +639,7 @@ const ChatHeader = () => {
                       }}
                       className="flex items-center gap-2 py-1.5 px-3 rounded-lg text-xs hover:bg-base-200 transition-colors text-base-content"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="size-3.5 text-base-content/75" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                       </svg>
                       <span>{isSelectionMode ? "Cancel Selection" : "Select Messages"}</span>
@@ -726,7 +726,7 @@ const ChatHeader = () => {
             {/* Close Button - hidden on mobile since we have back arrow */}
             <button 
               onClick={() => setSelectedUser(null)} 
-              className="hidden lg:block p-2 hover:bg-base-200 rounded-full transition-colors text-base-content/70 hover:text-red-500"
+              className="hidden lg:block p-2 hover:bg-base-200 rounded-full transition-colors hover:text-red-500"
               title="Close chat"
             >
               <X size={18} />
@@ -747,7 +747,7 @@ const ChatHeader = () => {
             className="w-full max-w-sm p-6 bg-base-100 rounded-2xl shadow-2xl text-left"
           >
             <h3 className="text-lg font-semibold text-base-content">Nickname</h3>
-            <p className="mt-1 mb-5 text-sm text-base-content/55">
+            <p className="mt-1 mb-5 text-sm">
               Only you see this. {selectedUser?.fullName} keeps their real name everywhere else,
               and is never told.
             </p>
@@ -765,7 +765,7 @@ const ChatHeader = () => {
                 }
               }}
               placeholder={selectedUser?.fullName || "Nickname"}
-              className="w-full h-12 px-1 text-[15px] bg-transparent border-0 border-b border-base-content/15 rounded-none text-base-content placeholder:text-base-content/30 outline-none transition-colors focus:border-primary focus:ring-0"
+              className="w-full h-12 px-1 text-[15px] bg-transparent border-0 border-b rounded-none text-base-content outline-none transition-colors focus:border-primary focus:ring-0"
             />
 
             <div className="flex items-center justify-between gap-3 mt-6">
@@ -784,7 +784,7 @@ const ChatHeader = () => {
                 <button
                   type="button"
                   onClick={() => setNicknameDraft(null)}
-                  className="h-10 px-4 rounded-xl bg-base-300/70 hover:bg-base-300 text-[13px] font-medium text-base-content transition-colors"
+                  className="h-10 px-4 rounded-xl hover:bg-base-300 text-[13px] font-medium text-base-content transition-colors"
                 >
                   Cancel
                 </button>
@@ -809,7 +809,7 @@ const ChatHeader = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[1.5px] animate-in fade-in duration-200">
           <div className="bg-base-100 p-6 rounded-2xl border border-base-300 shadow-2xl max-w-sm w-full mx-4 animate-in zoom-in-95 duration-200 text-left">
             <h3 className="font-bold text-lg text-base-content mb-2">Block {contactName}?</h3>
-            <p className="text-sm text-base-content/70 mb-6">Are you sure you want to block this user? You will not be able to send or receive messages from them.</p>
+            <p className="text-sm mb-6">Are you sure you want to block this user? You will not be able to send or receive messages from them.</p>
             <div className="flex justify-end gap-3">
               <button 
                 onClick={() => setShowBlockConfirm(false)} 
@@ -839,7 +839,7 @@ const ChatHeader = () => {
               <h3 className="font-bold text-lg text-base-content">
                 Adjust Wallpaper Dimness
               </h3>
-              <p className="text-xs text-base-content/60 mt-0.5">
+              <p className="text-xs mt-0.5">
                 Set background brightness for optimal message contrast
               </p>
             </div>
@@ -855,7 +855,7 @@ const ChatHeader = () => {
             >
               {/* Sample Message Bubbles for Live Preview */}
               <div className="space-y-2 w-full select-none">
-                <div className="bg-base-200/90 text-base-content px-3 py-1.5 rounded-2xl text-[11px] w-fit max-w-[80%] shadow-sm">
+                <div className="text-base-content px-3 py-1.5 rounded-2xl text-[11px] w-fit max-w-[80%] shadow-sm">
                   Hey! How does this look?
                 </div>
                 <div className="bg-primary text-primary-content px-3 py-1.5 rounded-2xl text-[11px] w-fit max-w-[80%] ml-auto shadow-sm">
@@ -866,7 +866,7 @@ const ChatHeader = () => {
 
             {/* Dimness Slider Controls */}
             <div className="w-full space-y-2">
-              <div className="flex justify-between items-center text-xs font-semibold text-base-content/80">
+              <div className="flex justify-between items-center text-xs font-semibold">
                 <span>Wallpaper Dim Level</span>
                 <span className="text-primary font-bold">{dimLevel}%</span>
               </div>
@@ -878,7 +878,7 @@ const ChatHeader = () => {
                 onChange={(e) => setDimLevel(Number(e.target.value))}
                 className="range range-primary range-xs w-full cursor-pointer"
               />
-              <div className="flex justify-between text-[10px] text-base-content/50 font-medium">
+              <div className="flex justify-between text-[10px] font-medium">
                 <span>Original (0%)</span>
                 <span>Dark (80%)</span>
               </div>

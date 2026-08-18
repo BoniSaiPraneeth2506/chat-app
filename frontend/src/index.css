@@ -242,3 +242,13 @@
     animation-delay: 0ms;
   }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   The composer's outline.
+
+   A bare `border` takes Tailwind's default colour, a fixed light grey, which
+   against the dark theme reads as a bright white hairline. Same colour, carried
+   at less than full strength so it settles into the surface instead of ringing
+   around it.
+   ────────────────────────────────────────────────────────────────────────── */
+.field-hair { border-color: rgba(229, 231, 235, 0.72); }

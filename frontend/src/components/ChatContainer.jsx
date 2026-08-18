@@ -66,7 +66,7 @@ const LinkPreviewCard = ({ url }) => {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2.5 mt-2 p-2.5 bg-base-200/70 border border-base-300/50 rounded-xl animate-pulse w-full max-w-[280px] select-none">
+      <div className="flex items-center gap-2.5 mt-2 p-2.5 border rounded-xl animate-pulse w-full max-w-[280px] select-none">
         <div className="w-10 h-10 bg-base-300 rounded-lg shrink-0" />
         <div className="flex-1 space-y-1.5 min-w-0">
           <div className="h-3 bg-base-300 rounded w-3/4" />
@@ -84,7 +84,7 @@ const LinkPreviewCard = ({ url }) => {
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-2 mt-2 p-2 bg-base-200/60 hover:bg-base-200 border border-base-300 rounded-lg transition-colors text-left w-full max-w-[280px] text-xs"
+          className="flex items-center gap-2 mt-2 p-2 hover:bg-base-200 border border-base-300 rounded-lg transition-colors text-left w-full max-w-[280px] text-xs"
         >
           <Globe size={16} className="text-primary shrink-0" />
           <span className="truncate font-medium text-primary underline">{parsedUrl.hostname}</span>
@@ -108,7 +108,7 @@ const LinkPreviewCard = ({ url }) => {
       href={url} 
       target="_blank" 
       rel="noopener noreferrer" 
-      className="flex flex-col mt-2 bg-base-200/80 hover:bg-base-200 border border-base-300 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all text-left w-full max-w-[280px] group block"
+      className="flex flex-col mt-2 hover:bg-base-200 border border-base-300 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all text-left w-full max-w-[280px] group block"
     >
       {image?.url && (
         <div className="relative w-full h-32 overflow-hidden bg-base-300">
@@ -130,7 +130,7 @@ const LinkPreviewCard = ({ url }) => {
           ) : (
             <Globe size={12} className="text-primary" />
           )}
-          <span className="text-[10px] text-base-content/60 font-semibold truncate uppercase tracking-wider">
+          <span className="text-[10px] font-semibold truncate uppercase tracking-wider">
             {hostname}
           </span>
         </div>
@@ -140,7 +140,7 @@ const LinkPreviewCard = ({ url }) => {
           </h4>
         )}
         {description && (
-          <p className="text-[11px] text-base-content/70 leading-snug line-clamp-2">
+          <p className="text-[11px] leading-snug line-clamp-2">
             {description}
           </p>
         )}
@@ -208,7 +208,7 @@ const MessageCalendar = ({ messages, scrollToMessage }) => {
           <Calendar size={12} className="text-primary" />
           Chat Calendar
         </span>
-        <span className="text-xs text-base-content/50 font-medium">
+        <span className="text-xs font-medium">
           {isOpen ? "Hide" : "Show"}
         </span>
       </div>
@@ -218,17 +218,17 @@ const MessageCalendar = ({ messages, scrollToMessage }) => {
           <div className="flex items-center justify-between">
             <button 
               onClick={prevMonth} 
-              className="p-1 hover:bg-base-200 rounded text-base-content/60"
+              className="p-1 hover:bg-base-200 rounded"
               type="button"
             >
               &lt;
             </button>
-            <span className="text-[10px] font-bold text-base-content/85 min-w-[70px] text-center select-none">
+            <span className="text-[10px] font-bold min-w-[70px] text-center select-none">
               {monthNames[month]} {year}
             </span>
             <button 
               onClick={nextMonth} 
-              className="p-1 hover:bg-base-200 rounded text-base-content/60"
+              className="p-1 hover:bg-base-200 rounded"
               type="button"
             >
               &gt;
@@ -237,7 +237,7 @@ const MessageCalendar = ({ messages, scrollToMessage }) => {
 
           <div className="grid grid-cols-7 gap-1 text-center text-[10px]">
             {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
-              <div key={i} className="font-bold text-base-content/40 py-0.5 select-none">{d}</div>
+              <div key={i} className="font-bold py-0.5 select-none">{d}</div>
             ))}
             {days.map((day, i) => {
               if (day === null) return <div key={i} />;
@@ -254,8 +254,8 @@ const MessageCalendar = ({ messages, scrollToMessage }) => {
                   onClick={() => targetMsgId && scrollToMessage(targetMsgId)}
                   className={`py-1 rounded-md transition-all font-semibold
                     ${hasMessage 
-                      ? "bg-primary/20 text-primary hover:bg-primary/30 hover:scale-105 cursor-pointer font-bold border border-primary/20" 
-                      : "text-base-content/30 disabled:opacity-50 pointer-events-none"
+                      ? "text-primary hover:scale-105 cursor-pointer font-bold border" 
+                      : "disabled:opacity-50 pointer-events-none"
                     }
                   `}
                   title={hasMessage ? "Click to view chat history from this day" : ""}
@@ -571,9 +571,9 @@ const ChatContainer = () => {
     if (element) {
       element.scrollIntoView({ behavior: "smooth", block: "center" });
       
-      element.classList.add("bg-primary/20", "rounded-lg");
+      element.classList.add("", "rounded-lg");
       setTimeout(() => {
-        element.classList.remove("bg-primary/20", "rounded-lg");
+        element.classList.remove("", "rounded-lg");
       }, 1500);
     }
   };
@@ -641,7 +641,7 @@ const ChatContainer = () => {
 
       if (isViewed) {
         return (
-          <div className="flex items-center gap-2 px-3 py-2 bg-base-200/50 text-base-content/40 border border-base-300/30 rounded-lg max-w-[140px] select-none text-left">
+          <div className="flex items-center gap-2 px-3 py-2 border rounded-lg max-w-[140px] select-none text-left">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="size-4 shrink-0">
               <circle cx="12" cy="12" r="10" strokeDasharray="3 3" />
               <text x="12" y="15" textAnchor="middle" fontSize="9" fontWeight="bold" fill="currentColor" stroke="none">1</text>
@@ -824,7 +824,7 @@ const ChatContainer = () => {
           // and now discoverable rather than hidden in a tooltip.
           setReactionsSheet(message);
         }}
-        className={`absolute bottom-[-8px] right-[-4px] flex items-center gap-1 bg-base-200 rounded-full px-1.5 py-0.5 shadow-sm text-[10px] select-none z-10 text-base-content font-medium cursor-pointer hover:bg-base-300 transition-colors ${myReaction ? "ring-1 ring-primary/50" : ""}`}
+        className={`absolute bottom-[-8px] right-[-4px] flex items-center gap-1 bg-base-200 rounded-full px-1.5 py-0.5 shadow-sm text-[10px] select-none z-10 text-base-content font-medium cursor-pointer hover:bg-base-300 transition-colors ${myReaction ? "ring-1" : ""}`}
         title="See who reacted"
       >
         <span className="flex gap-0.5">
@@ -996,7 +996,7 @@ const ChatContainer = () => {
               const el = document.getElementById(`msg-${pinnedMessage._id}`);
               if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
             }}
-            className="bg-base-200/90 hover:bg-base-200 border-b border-base-300 px-4 py-2 flex items-center justify-between cursor-pointer transition-colors z-30 shadow-sm text-left animate-in slide-in-from-top duration-200"
+            className="hover:bg-base-200 border-b border-base-300 px-4 py-2 flex items-center justify-between cursor-pointer transition-colors z-30 shadow-sm text-left animate-in slide-in-from-top duration-200"
           >
             <div className="flex items-center gap-2.5 min-w-0">
               <Pin size={14} className="text-amber-500 flex-shrink-0 fill-amber-500/20" />
@@ -1004,7 +1004,7 @@ const ChatContainer = () => {
                 <span className="font-semibold text-amber-500 block text-[10px] uppercase tracking-wider">
                   Pinned Message
                 </span>
-                <p className="text-base-content/80 truncate font-medium max-w-[200px] sm:max-w-[400px]">
+                <p className="truncate font-medium max-w-[200px] sm:max-w-[400px]">
                   {pinnedMessage.text || (pinnedMessage.image || pinnedMessage.images?.length ? "📷 Photo" : pinnedMessage.voice ? "🎙️ Voice Message" : "Message")}
                 </p>
               </div>
@@ -1014,7 +1014,7 @@ const ChatContainer = () => {
                 e.stopPropagation();
                 togglePinMessage(pinnedMessage._id);
               }}
-              className="p-1 hover:bg-base-300 rounded-full transition-colors text-base-content/50 hover:text-red-500"
+              className="p-1 hover:bg-base-300 rounded-full transition-colors hover:text-red-500"
               title="Unpin message"
             >
               <X size={14} />
@@ -1038,7 +1038,7 @@ const ChatContainer = () => {
         >
           {activeLoading && (!Array.isArray(activeMessages) || activeMessages.length === 0) ? (
             <div className="h-full w-full flex items-center justify-center">
-              <span className="loading loading-spinner loading-md text-primary/60"></span>
+              <span className="loading loading-spinner loading-md"></span>
             </div>
           ) : (
             Array.isArray(activeMessages) && activeMessages.flatMap((message, index) => {
@@ -1050,7 +1050,7 @@ const ChatContainer = () => {
                 return [
                   isNewDay && <DateSeparator key={`sep-${message._id}`} date={message.createdAt} />,
                   <div key={message._id} className="flex justify-center my-3 select-none w-full animate-in fade-in duration-200">
-                    <div className="bg-base-200/80 border border-base-300 rounded-full px-4 py-1.5 flex items-center gap-2 text-xs text-base-content/75 font-medium shadow-sm">
+                    <div className="border border-base-300 rounded-full px-4 py-1.5 flex items-center gap-2 text-xs font-medium shadow-sm">
                       {message.callType === "video" ? (
                         <Video size={13} className={message.callStatus === "missed" ? "text-red-500" : "text-emerald-500"} />
                       ) : (
@@ -1089,7 +1089,7 @@ const ChatContainer = () => {
                       type="checkbox"
                       checked={selectedMessageIds.includes(message._id)}
                       onChange={() => toggleMessageSelection(message._id)}
-                      className="hidden lg:block checkbox checkbox-primary checkbox-sm border-base-content/30 select-none mr-2 cursor-pointer z-20"
+                      className="hidden lg:block checkbox checkbox-primary checkbox-sm select-none mr-2 cursor-pointer z-20"
                     />
                   )}
                   <div
@@ -1123,12 +1123,12 @@ const ChatContainer = () => {
                     style={swipe.id === message._id ? {
                       transform: `translateX(${swipeDxRef.current}px)`,
                     } : undefined}
-                    className={`flex flex-col py-2 px-2.5 chat-bubble relative min-w-[72px] pr-12 transition-colors duration-300 select-none cursor-default pb-3 ${isSelectionMode ? "cursor-pointer hover:bg-base-200/20" : ""} ${swipe.id === message._id ? "" : "transition-transform"}`}
+                    className={`flex flex-col py-2 px-2.5 chat-bubble relative min-w-[72px] pr-12 transition-colors duration-300 select-none cursor-default pb-3 ${isSelectionMode ? "cursor-pointer" : ""} ${swipe.id === message._id ? "" : "transition-transform"}`}
                   >
                   {swipe.id === message._id && swipe.stage >= 1 && (
                     <span
                       className={`absolute top-1/2 -translate-y-1/2 ${swipeDxRef.current > 0 ? "-left-8" : "-right-8"} ${
-                        swipe.stage === 2 ? "text-primary" : "text-base-content/30"
+                        swipe.stage === 2 ? "text-primary" : ""
                       }`}
                     >
                       <CornerUpLeft size={16} />
@@ -1163,7 +1163,7 @@ const ChatContainer = () => {
                       <span className="text-[10px] font-bold text-primary block mb-0.5">
                         {message.replyTo.senderId === authUser._id ? "You" : displayNameOf(selectedUser, nicknames)}
                       </span>
-                      <p className="truncate opacity-80 text-base-content/90 max-w-[200px] sm:max-w-[300px]">
+                      <p className="truncate opacity-80 max-w-[200px] sm:max-w-[300px]">
                         {message.replyTo.text || (message.replyTo.image || message.replyTo.images?.length ? "📷 Photo" : message.replyTo.voice ? "🎙️ Voice Message" : "Message")}
                       </p>
                     </div>
@@ -1212,13 +1212,13 @@ const ChatContainer = () => {
                         </button>
                       ))}
                       <div className="w-[1px] h-3 bg-base-300 mx-1" />
-                      <button onClick={() => setReplyingToMessage(message)} className="text-base-content/60 hover:text-primary transition-colors flex items-center" title="Reply"><CornerUpLeft size={13} /></button>
-                      {!message.isDeletedForEveryone && (<button onClick={(e) => { e.stopPropagation(); setForwardingMessage(message); }} className="text-base-content/60 hover:text-primary transition-colors flex items-center" title="Forward"><Forward size={13} /></button>)}
-                      {message.senderId === authUser?._id && !message.isDeletedForEveryone && message.text && (Date.now() - new Date(message.createdAt).getTime() <= 15 * 60 * 1000) && (<button onClick={() => setEditingMessage(message)} className="text-base-content/60 hover:text-primary transition-colors flex items-center" title="Edit"><Pencil size={13} /></button>)}
-                      {!message.isDeletedForEveryone && (<button onClick={() => togglePinMessage(message._id)} className={`transition-colors flex items-center ${message.isPinned ? "text-amber-500 hover:text-amber-600" : "text-base-content/60 hover:text-amber-500"}`} title={message.isPinned ? "Unpin" : "Pin"}><Pin size={13} /></button>)}
+                      <button onClick={() => setReplyingToMessage(message)} className="hover:text-primary transition-colors flex items-center" title="Reply"><CornerUpLeft size={13} /></button>
+                      {!message.isDeletedForEveryone && (<button onClick={(e) => { e.stopPropagation(); setForwardingMessage(message); }} className="hover:text-primary transition-colors flex items-center" title="Forward"><Forward size={13} /></button>)}
+                      {message.senderId === authUser?._id && !message.isDeletedForEveryone && message.text && (Date.now() - new Date(message.createdAt).getTime() <= 15 * 60 * 1000) && (<button onClick={() => setEditingMessage(message)} className="hover:text-primary transition-colors flex items-center" title="Edit"><Pencil size={13} /></button>)}
+                      {!message.isDeletedForEveryone && (<button onClick={() => togglePinMessage(message._id)} className={`transition-colors flex items-center ${message.isPinned ? "text-amber-500 hover:text-amber-600" : "hover:text-amber-500"}`} title={message.isPinned ? "Unpin" : "Pin"}><Pin size={13} /></button>)}
                       {!message.isDeletedForEveryone && (
                         <div className="dropdown dropdown-bottom dropdown-end flex items-center">
-                          <div tabIndex={0} role="button" className="text-base-content/60 hover:text-red-500 transition-colors flex items-center p-0.5 cursor-pointer" title="Delete"><Trash2 size={13} /></div>
+                          <div tabIndex={0} role="button" className="hover:text-red-500 transition-colors flex items-center p-0.5 cursor-pointer" title="Delete"><Trash2 size={13} /></div>
                           <ul tabIndex={0} className="dropdown-content z-50 menu p-1 shadow-xl bg-base-100 border border-base-300 rounded-box w-36 text-xs text-base-content mt-1">
                             <li><button onClick={() => deleteMessage(message._id, "me")} className="hover:bg-base-200 py-1.5 text-left font-medium">Delete for me</button></li>
                             {(message.senderId?._id || message.senderId) === authUser._id && (<li><button onClick={() => deleteMessage(message._id, "everyone")} className="hover:bg-red-500 hover:text-white py-1.5 text-left font-medium text-red-500">Delete for everyone</button></li>)}
@@ -1229,7 +1229,7 @@ const ChatContainer = () => {
                   )}
 
                   {message.isDeletedForEveryone ? (
-                    <p className="text-xs italic text-base-content/40 flex items-center gap-1 select-none py-1 pr-14">
+                    <p className="text-xs italic flex items-center gap-1 select-none py-1 pr-14">
                       <svg xmlns="http://www.w3.org/2000/svg" className="size-3.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
                       </svg>
@@ -1239,7 +1239,7 @@ const ChatContainer = () => {
                     <>
                       {/* Forwarded label */}
                       {message.isForwarded && (
-                        <span className="flex items-center gap-1 text-[9px] font-medium text-base-content/45 mb-1 select-none">
+                        <span className="flex items-center gap-1 text-[9px] font-medium mb-1 select-none">
                           <Forward size={9} className="opacity-60" />
                           Forwarded
                         </span>
@@ -1256,7 +1256,7 @@ const ChatContainer = () => {
                         <span className="whitespace-nowrap">{formatScheduledShort(message.scheduledAt)}</span>
                       </span>
                     ) : (
-                      <span className={`${((message.senderId?._id || message.senderId) === authUser._id) ? 'bg-[#1f2937]/20 text-white/85' : 'bg-transparent text-base-content/60'} inline-flex items-center gap-0.5 px-1 py-[2px] rounded-md text-[9px]`}>{formatMessageTime(message.createdAt)}</span>
+                      <span className={`${((message.senderId?._id || message.senderId) === authUser._id) ? 'bg-[#1f2937]/20 text-white/85' : 'bg-transparent'} inline-flex items-center gap-0.5 px-1 py-[2px] rounded-md text-[9px]`}>{formatMessageTime(message.createdAt)}</span>
                     )}
 
                     {(message.senderId?._id || message.senderId) === authUser._id && (
@@ -1301,7 +1301,7 @@ const ChatContainer = () => {
             <h3 className="font-semibold text-base text-base-content">Contact Info</h3>
             <button 
               onClick={() => setIsRecipientProfileOpen(false)}
-              className="p-1.5 hover:bg-base-200 rounded-full transition-colors text-base-content/60 hover:text-base-content"
+              className="p-1.5 hover:bg-base-200 rounded-full transition-colors hover:text-base-content"
             >
               <X size={18} />
             </button>
@@ -1311,7 +1311,7 @@ const ChatContainer = () => {
           <div className="flex-1 overflow-y-auto p-5 space-y-6">
             {/* Cover banner + center avatar & name */}
             <div className="-mx-5 -mt-5">
-              <div className="relative w-full h-24 overflow-hidden bg-gradient-to-r from-primary/25 via-secondary/20 to-accent/25">
+              <div className="relative w-full h-24 overflow-hidden bg-gradient-to-r">
                 {selectedUser.bannerPic && (
                   <img
                     src={selectedUser.bannerPic}
@@ -1320,7 +1320,7 @@ const ChatContainer = () => {
                     className="object-cover w-full h-full cursor-zoom-in hover:opacity-90 transition-opacity"
                   />
                 )}
-                <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-base-100 via-base-100/10 to-transparent" />
+                <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-base-100 to-transparent" />
               </div>
               {/* relative + z-10: the cover above is positioned, so without a
                   stacking context of its own this block paints *under* it and
@@ -1336,7 +1336,7 @@ const ChatContainer = () => {
                 <h2 className="font-semibold text-lg text-base-content mt-3">
                   {selectedUser._id === authUser._id ? "Personal Notes (You)" : displayNameOf(selectedUser, nicknames)}
                 </h2>
-                <span className="text-xs text-base-content/50 select-all">{selectedUser.email}</span>
+                <span className="text-xs select-all">{selectedUser.email}</span>
                 <div className="mt-2.5">
                   <SocialLinksRow user={selectedUser} variant="icons" emptyText="" />
                 </div>
@@ -1349,11 +1349,11 @@ const ChatContainer = () => {
               return (
                 <div className="space-y-2.5 pt-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-base-content/80 flex items-center gap-1.5 select-none">
+                    <span className="text-xs font-semibold flex items-center gap-1.5 select-none">
                       <Image size={14} className="text-primary" />
                       Media, links and docs
                     </span>
-                    <span className="text-xs text-base-content/50 font-medium select-none">
+                    <span className="text-xs font-medium select-none">
                       {mediaMessages.length}
                     </span>
                   </div>
@@ -1375,7 +1375,7 @@ const ChatContainer = () => {
                     </div>
                   ) : (
                     <div className="bg-base-200 p-3 rounded-xl text-center">
-                      <p className="text-xs text-base-content/40 italic">No media shared yet</p>
+                      <p className="text-xs italic">No media shared yet</p>
                     </div>
                   )}
                 </div>
@@ -1390,7 +1390,7 @@ const ChatContainer = () => {
                 <FileText size={12} />
                 Bio
               </span>
-              <p className="text-sm bg-base-200 p-3.5 rounded-2xl text-base-content/80 whitespace-pre-wrap leading-relaxed">
+              <p className="text-sm bg-base-200 p-3.5 rounded-2xl whitespace-pre-wrap leading-relaxed">
                 {selectedUser.bio || <span className="text-zinc-500 italic">No bio added yet</span>}
               </p>
             </div>
@@ -1401,7 +1401,7 @@ const ChatContainer = () => {
                 <Globe size={12} />
                 Website / Social Link
               </span>
-              <div className="text-sm bg-base-200 p-3.5 rounded-2xl text-base-content/80 truncate">
+              <div className="text-sm bg-base-200 p-3.5 rounded-2xl truncate">
                 {selectedUser.link ? (
                   <a 
                     href={selectedUser.link.startsWith("http") ? selectedUser.link : `https://${selectedUser.link}`} 
@@ -1434,7 +1434,7 @@ const ChatContainer = () => {
                   Disappearing Messages
                 </span>
                 <select
-                  className="w-full h-11 px-3 rounded-2xl bg-base-200 border-0 text-xs text-base-content outline-none focus:ring-2 focus:ring-primary/30 transition-shadow"
+                  className="w-full h-11 px-3 rounded-2xl bg-base-200 border-0 text-xs text-base-content outline-none focus:ring-2 transition-shadow"
                   value={authUser?.disappearingTimers?.[selectedUser._id] || "off"}
                   onChange={(e) => setDisappearingTimer(selectedUser._id, e.target.value)}
                 >
@@ -1447,7 +1447,7 @@ const ChatContainer = () => {
             )}
 
             {/* Meta details */}
-            <div className="pt-5 space-y-3 text-xs text-base-content/60">
+            <div className="pt-5 space-y-3 text-xs">
               <div className="flex items-center gap-2">
                 <Calendar size={14} />
                 <span>Joined: {selectedUser.createdAt?.split("T")[0]}</span>
@@ -1471,20 +1471,20 @@ const ChatContainer = () => {
             className="w-full sm:max-w-sm max-h-[70dvh] bg-base-100 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col cg-sheet sm:cg-dialog"
           >
             <div className="sm:hidden pt-2.5 pb-1 flex justify-center flex-shrink-0">
-              <span className="w-9 h-1 rounded-full bg-base-content/20" />
+              <span className="w-9 h-1 rounded-full" />
             </div>
             <div className="flex items-center gap-3 px-5 pt-2 pb-3 flex-shrink-0">
               <button
                 onClick={() => setReactionsSheet(null)}
                 data-modal-close
-                className="p-2 -ml-2 rounded-full text-base-content/70 hover:text-base-content hover:bg-base-200 active:scale-95 transition-all"
+                className="p-2 -ml-2 rounded-full hover:text-base-content hover:bg-base-200 active:scale-95 transition-all"
                 aria-label="Close"
               >
                 <X size={20} />
               </button>
               <h3 className="font-semibold text-[17px] text-base-content">
                 Reactions
-                <span className="ml-2 text-sm font-normal text-base-content/45">
+                <span className="ml-2 text-sm font-normal">
                   {reactionsSheet.reactions?.length || 0}
                 </span>
               </h3>
@@ -1518,7 +1518,7 @@ const ChatContainer = () => {
                         {isMe ? "You" : displayNameOf(person, nicknames) || "Someone"}
                       </span>
                       {isMe && (
-                        <span className="block text-xs text-base-content/45">Tap to remove</span>
+                        <span className="block text-xs">Tap to remove</span>
                       )}
                     </span>
                     <span className="text-xl flex-shrink-0">{reaction.emoji}</span>
