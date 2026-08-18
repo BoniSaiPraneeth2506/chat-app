@@ -16,8 +16,7 @@
 //   useEffect(()=>{
 //     checkAuth();
 //   },[])
-//   console.log(authUser);
-//   if(isCheckingAuth && !authUser ){
+// //   if(isCheckingAuth && !authUser ){
 //      return (
 //         <div className="flex items-center justify-center h-screen">
 //             <Loader className="w-10 h-10 animate-spin" />
@@ -250,8 +249,9 @@ const App = () => {
     navigate(`/chat-with/${pendingChatUserId}`, { replace: true });
   }, [authUser, navigate]);
 
+  const authUserId = authUser?._id;
   useEffect(() => {
-    if (authUser && socket) {
+    if (authUserId && socket) {
       subscribeToMessages();
       // Ensure group state and socket listeners are initialized globally
       getGroups();
@@ -261,7 +261,7 @@ const App = () => {
         unsubscribeFromGroupEvents();
       };
     }
-  }, [authUser, socket, subscribeToMessages, unsubscribeFromMessages]);
+  }, [authUserId, socket, subscribeToMessages, unsubscribeFromMessages]);
 
   // Global keyboard shortcuts (desktop only)
   useEffect(() => {
@@ -296,7 +296,6 @@ const App = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  console.log(authUser);
 
   // FLAG_SECURE is held only while view-once media is open, so ordinary
   // screenshots keep working everywhere else. The cleanup matters: unmounting
@@ -524,10 +523,6 @@ const App = () => {
             )}
 
             <div className="border-t border-base-200">
-              <p className="px-3 pt-2 text-[11px] text-center truncate t-dim">
-                {groupPreview.members?.length || 0}{" "}
-                {(groupPreview.members?.length || 0) === 1 ? "member" : "members"}
-              </p>
               <div className="flex items-center justify-around py-2.5 bg-base-100">
                 <button
                   onClick={() => {

@@ -202,7 +202,7 @@ const ChatHeader = () => {
 
   if (isSelectionMode) {
     return (
-      <div className="p-2.5 border-b border-base-300 min-h-[61px] flex items-center justify-between bg-base-100 relative z-30 animate-in fade-in duration-150">
+      <div className="p-2.5 border-b border-base-300 min-h-[64px] flex items-center justify-between bg-base-100 relative z-30 animate-in fade-in duration-150">
         <div className="flex items-center gap-3">
           <button onClick={exitSelection} className="p-1 -ml-1 rounded-full hover:bg-base-200 transition-colors" title="Cancel selection">
             <X className="size-5" />
@@ -341,7 +341,7 @@ const ChatHeader = () => {
   }
 
   return (
-    <div className="p-2.5 border-b border-base-300 min-h-[61px] flex items-center bg-base-100 relative z-30">
+    <div className="p-2.5 border-b border-base-300 min-h-[64px] flex items-center bg-base-100 relative z-30">
       {isSearchOpen ? (
         /* Full-width Search Bar mode */
         <div className="flex items-center gap-3 w-full bg-base-200/60 px-3 py-1.5 rounded-lg border border-base-300 animate-in fade-in duration-200">

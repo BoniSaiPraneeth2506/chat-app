@@ -337,8 +337,12 @@ const getUsersForSidebar = async (req, res) => {
     //    the sidebar after being deleted. Skipping them makes the row disappear
     //    like WhatsApp, and reappear on the next message — which is not hidden.
     const visibleToMe = { groupId: null, deletedFor: { $ne: loggedInUserId } };
-    const chattedUserIds = await Message.distinct("receiverId", { ...visibleToMe, senderId: loggedInUserId });
-    const chattedUserIds2 = await Message.distinct("senderId", { ...visibleToMe, receiverId: loggedInUserId });
+    // Independent of each other, so they go out together rather than one after
+    // the other — this is on the path of every sidebar load.
+    const [chattedUserIds, chattedUserIds2] = await Promise.all([
+      Message.distinct("receiverId", { ...visibleToMe, senderId: loggedInUserId }),
+      Message.distinct("senderId", { ...visibleToMe, receiverId: loggedInUserId }),
+    ]);
 
     const chattedSet = new Set([
       ...chattedUserIds.filter(Boolean).map(id => id.toString()),

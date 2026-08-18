@@ -33,6 +33,16 @@ const MessageInput = () => {
   const fileInputRef = useRef(null);
   const inputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  // Whether the other side has already been told we're typing. Without this every
+  // keystroke emitted its own socket event, and each one made the recipient's
+  // sidebar and chat header re-render.
+  const typingSentRef = useRef(false);
+  // A draft write goes into the shared store, which the sidebar reads for its
+  // preview — so writing per keystroke re-rendered the whole conversation list on
+  // every character. Held here and flushed on a trailing timer instead; a preview
+  // a third of a second behind is invisible, the stutter was not.
+  const draftTimerRef = useRef(null);
+  const pendingDraftRef = useRef(null);
 
   // Voice recording states
   const [isRecording, setIsRecording] = useState(false);
@@ -79,14 +89,21 @@ const MessageInput = () => {
     }
   }
 
-  // Load draft when switching users
+  // Load draft when switching users.
+  //
+  // Keyed on the id, not the object: selectedUser is replaced wholesale whenever
+  // the sidebar refreshes or the contact's presence changes, and re-running this
+  // then would overwrite whatever is currently being typed. The cleanup commits
+  // any draft still waiting on its timer, so leaving a chat mid-sentence keeps it.
   useEffect(() => {
     if (selectedUser) {
       setText(drafts[selectedUser._id] || "");
     } else {
       setText("");
     }
-  }, [selectedUser]);
+    return () => flushDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedUser?._id]);
 
   // Never carries across groups: leaving with it armed and returning later would
   // silently anonymise the next thing typed.
@@ -119,7 +136,9 @@ const MessageInput = () => {
     return () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const isMobile = typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -258,19 +277,38 @@ const MessageInput = () => {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  /** Writes whatever draft is waiting, for the chat it was typed in. */
+  const flushDraft = () => {
+    if (draftTimerRef.current) {
+      clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = null;
+    }
+    const pending = pendingDraftRef.current;
+    pendingDraftRef.current = null;
+    if (pending) setDraft(pending.userId, pending.text);
+  };
+
   const handleTextChange = (e) => {
     const val = e.target.value;
     setText(val);
     if (selectedUser) {
-      setDraft(selectedUser._id, val);
+      // The id is captured now, so a draft still in flight when the user switches
+      // chats lands under the conversation it was actually typed in.
+      pendingDraftRef.current = { userId: selectedUser._id, text: val };
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = setTimeout(flushDraft, 350);
     }
 
-    // Emit typing status to socket
-    sendTypingStatus(true);
+    // Emit typing status to socket — once when it starts, not once per character.
+    if (!typingSentRef.current) {
+      typingSentRef.current = true;
+      sendTypingStatus(true);
+    }
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
     typingTimeoutRef.current = setTimeout(() => {
+      typingSentRef.current = false;
       sendTypingStatus(false);
     }, 1500);
   };
@@ -330,6 +368,11 @@ const MessageInput = () => {
 
     // Clear text & draft instantly, but keep previews visible during upload
     setText("");
+    if (draftTimerRef.current) {
+      clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = null;
+    }
+    pendingDraftRef.current = null;
     if (selectedUser) {
       setDraft(selectedUser._id, "");
     }
@@ -340,6 +383,7 @@ const MessageInput = () => {
     }
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingSentRef.current = false;
     sendTypingStatus(false);
     
     setIsSendingAnimation(true);
@@ -476,6 +520,7 @@ const MessageInput = () => {
       mediaRecorder.start();
       setIsRecording(true);
       setRecordingTime(0);
+      typingSentRef.current = false;
       sendTypingStatus("recording");
 
       timerIntervalRef.current = setInterval(() => {
@@ -490,6 +535,7 @@ const MessageInput = () => {
   const stopRecording = (shouldSend = true) => {
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     setIsRecording(false);
+    typingSentRef.current = false;
     sendTypingStatus(false);
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {

@@ -265,15 +265,21 @@ export const useGroupStore = create((set, get) => ({
     const authUser = useAuthStore.getState().authUser;
     const conversationKey = groupKey(groupId);
 
+    // Same guard as the DM side: opening two groups quickly used to let the
+    // first response paint itself into the second one before correcting.
+    const isStillCurrent = () => get().selectedGroup?._id === groupId;
+
     // Cache-first: paint instantly, then confirm/refresh over the network.
     const cached = authUser ? await getCachedMessages(authUser._id, conversationKey) : [];
+    if (!isStillCurrent()) return;
     set({ isGroupMessagesLoading: true, groupMessages: cached });
 
     try {
       const res = await axiosInstance.get(`/groups/${groupId}/messages`);
       const messages = Array.isArray(res.data) ? res.data : [];
-      set({ groupMessages: messages });
       if (authUser) cacheMessages(authUser._id, conversationKey, messages);
+      if (!isStillCurrent()) return;
+      set({ groupMessages: messages });
     } catch (error) {
       if (isNetworkError(error)) {
         // Offline: keep whatever's cached (possibly empty) instead of a raw
@@ -282,7 +288,7 @@ export const useGroupStore = create((set, get) => ({
         toast.error(error.response?.data?.message || "Failed to load group messages");
       }
     } finally {
-      set({ isGroupMessagesLoading: false });
+      if (isStillCurrent()) set({ isGroupMessagesLoading: false });
     }
   },
 

@@ -102,5 +102,10 @@ const groupSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Every group listing is "the groups this user is in, newest activity first",
+// and it runs on each sign-in and reconnect. Without this it scanned every group
+// in the database and sorted the survivors in memory.
+groupSchema.index({ "members.user": 1, updatedAt: -1 });
+
 const Group = mongoose.model("Group", groupSchema);
 export default Group;

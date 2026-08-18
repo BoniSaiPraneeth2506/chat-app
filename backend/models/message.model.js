@@ -232,6 +232,30 @@ const messageSchema = new Schema(
   },
   { timestamps: true }
 );
+
+// Indexes.
+//
+// This collection had none, so every one of these read a whole collection:
+// opening a conversation, counting unread, and — every ten and twenty seconds
+// respectively — the scheduled-send and media-purge sweeps. That cost grows with
+// total message count rather than with the size of the conversation being read,
+// which is why the app got slower the more it was used.
+//
+// A direct message is fetched with an $or over the two (sender, receiver)
+// orderings, so both orderings are indexed; each also serves the unread
+// aggregation, which matches on receiverId and a list of senders. createdAt is
+// part of every one of them because all of these queries sort by it and page
+// from the newest end.
+messageSchema.index({ senderId: 1, receiverId: 1, createdAt: -1 });
+messageSchema.index({ receiverId: 1, senderId: 1, createdAt: -1 });
+messageSchema.index({ groupId: 1, createdAt: -1 });
+
+// The scheduled-send sweep. Sparse, because only a scheduled message carries a
+// scheduledStatus and indexing the nulls would cover the whole collection for no
+// benefit. The media-purge sweep needs no entry here: deleteAt already carries a
+// TTL index from its field definition, which serves that query too.
+messageSchema.index({ scheduledStatus: 1, scheduledAt: 1 }, { sparse: true });
+
 const Message=mongoose.model("Message",messageSchema)
 
 export default Message;

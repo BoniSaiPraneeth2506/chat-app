@@ -111,6 +111,21 @@ if (process.env.NODE_ENV === "production" && fs.existsSync(frontendIndex)) {
   });
 }
 
+// ── Last-resort guards ────────────────────────────────────────────────────────
+//
+// Node terminates the process on an unhandled promise rejection. For a socket
+// server that means every connected client is dropped and, on a free instance,
+// waits out a cold start — a single bad event taking the whole app down. These
+// log loudly and keep serving instead; the rejection is still a bug to fix, but
+// it stops being an outage.
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err);
+});
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT;
 server.listen(PORT, () => {

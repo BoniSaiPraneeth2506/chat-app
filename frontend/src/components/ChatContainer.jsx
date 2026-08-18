@@ -1,6 +1,6 @@
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
-import { useEffect, useRef, useLayoutEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useLayoutEffect, useState } from "react";
 import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image, Link2, EyeOff } from "lucide-react";
 import ForwardModal from "./ForwardModal";
 import SocialLinksRow from "./SocialLinksRow";
@@ -333,7 +333,7 @@ const blurPlaceholder = (url) => {
   return url.replace("/upload/", "/upload/w_24,e_blur:1200,q_10,f_auto/");
 };
 
-const SmoothImage = ({ src, alt, className, onClick }) => {
+const SmoothImage = ({ src, alt, className, onClick, onLoaded }) => {
   const [displayedSrc, setDisplayedSrc] = useState(src);
   const [isLoaded, setIsLoaded] = useState(false);
   const prevSrcRef = useRef(src);
@@ -366,7 +366,13 @@ const SmoothImage = ({ src, alt, className, onClick }) => {
       alt={alt}
       onClick={onClick}
       loading="lazy"
-      onLoad={() => setIsLoaded(true)}
+      onLoad={() => {
+        setIsLoaded(true);
+        // A single photo has no reserved height until it decodes, so every one
+        // that lands grows the list under the reader. The container re-pins if it
+        // was already at the newest message.
+        if (onLoaded) onLoaded();
+      }}
       style={placeholder && !isLoaded ? {
         backgroundImage: `url(${placeholder})`,
         backgroundSize: "cover",
@@ -442,9 +448,29 @@ const ChatContainer = () => {
   const touchStartRef = useRef(null);
   const lastTapRef = useRef({ id: null, time: 0 });
   const suppressClickRef = useRef(0);
-  const [swipe, setSwipe] = useState({ id: null, dx: 0 });
+  // Swipe-to-reply.
+  //
+  // The offset is written straight onto the bubble's own node rather than held in
+  // state. Every message row is rendered inline by this component, so a state
+  // update per touchmove re-rendered the entire loaded history on every frame of
+  // the drag — the single biggest reason a swipe felt like it was dragging the
+  // phone with it. State now only tracks which message is being dragged and which
+  // of the arrow's two appearances applies, so it changes at most twice per swipe
+  // while the movement itself stays at native speed.
+  const [swipe, setSwipe] = useState({ id: null, stage: 0 });
+  const swipeDxRef = useRef(0);
 
   const SWIPE_REPLY_THRESHOLD = 60;
+  const SWIPE_ARROW_THRESHOLD = 20;
+
+  // 0 = nothing shown, 1 = arrow visible, 2 = arrow armed. Anything between the
+  // same two thresholds looks identical, so it needs no render.
+  const stageFor = (dx) => {
+    const distance = Math.abs(dx);
+    if (distance >= SWIPE_REPLY_THRESHOLD) return 2;
+    if (distance >= SWIPE_ARROW_THRESHOLD) return 1;
+    return 0;
+  };
 
   const handleBubbleTouchStart = (message, e) => {
     if (isSelectionMode) return;
@@ -484,8 +510,14 @@ const ChatContainer = () => {
     // Only track a mostly-horizontal drag so vertical scrolling stays untouched.
     if (Math.abs(dx) > Math.abs(dy) * 1.5 && Math.abs(dx) > 10) {
       const clamped = Math.max(-90, Math.min(90, dx));
-      setSwipe({ id: message._id, dx: clamped });
+      swipeDxRef.current = clamped;
+      e.currentTarget.style.transform = `translateX(${clamped}px)`;
       start.swiping = true;
+
+      const stage = stageFor(clamped);
+      if (swipe.id !== message._id || swipe.stage !== stage) {
+        setSwipe({ id: message._id, stage });
+      }
     }
   };
 
@@ -495,8 +527,12 @@ const ChatContainer = () => {
 
     const start = touchStartRef.current;
     touchStartRef.current = null;
-    const swiped = start?.swiping && Math.abs(swipe.dx) >= SWIPE_REPLY_THRESHOLD;
-    setSwipe({ id: null, dx: 0 });
+    const swiped = start?.swiping && Math.abs(swipeDxRef.current) >= SWIPE_REPLY_THRESHOLD;
+    // Clearing state removes the inline transform on the next render, and the
+    // transition class is back by then, so the bubble still glides home.
+    swipeDxRef.current = 0;
+    if (swipe.id !== null) setSwipe({ id: null, stage: 0 });
+    else if (start?.swiping && e.currentTarget) e.currentTarget.style.transform = "";
 
     if (swiped) {
       if (longPressTimerRef.current) {
@@ -643,6 +679,7 @@ const ChatContainer = () => {
                 src={imgUrl}
                 alt={`Attachment ${i + 1}`}
                 onClick={() => setLightboxImage(imgUrl)}
+                onLoaded={handleMediaLoad}
                 className={`w-full object-cover cursor-zoom-in hover:opacity-95 transition-opacity rounded ${
                   message.images.length === 3 && i === 0 ? "col-span-2 h-36 sm:h-44" : "h-28 sm:h-36"
                 }`}
@@ -654,6 +691,7 @@ const ChatContainer = () => {
             src={message.image}
             alt="Attachment"
             onClick={() => setLightboxImage(message.image)}
+            onLoaded={handleMediaLoad}
             className="max-w-[220px] sm:max-w-[280px] max-h-[320px] w-auto object-cover rounded-xl mb-1.5 cursor-zoom-in hover:opacity-95 transition-opacity"
           />
         ) : null}
@@ -835,16 +873,48 @@ const ChatContainer = () => {
     isPrependingRef.current = false;
   }, [selectedUser?._id, selectedGroup?._id]);
 
+  // Whether the reader is sitting at the newest message. Sampled from real scroll
+  // events, so it is never measured after a late-loading image has already moved
+  // things — by then the answer would be wrong.
+  const isNearBottomRef = useRef(true);
+
   const handleScroll = async () => {
     const container = scrollableRef.current;
-    if (!container || selectedGroup) return; // groups don't support pagination yet
+    if (!container) return;
+    isNearBottomRef.current =
+      container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+    if (selectedGroup) return; // groups don't support pagination yet
 
     if (container.scrollTop === 0 && !isPrependingRef.current && selectedUser?._id) {
       prevScrollHeightRef.current = container.scrollHeight;
       prevScrollTopRef.current = container.scrollTop;
       isPrependingRef.current = true;
-      await loadMoreMessages(selectedUser._id);
+      const prepended = await loadMoreMessages(selectedUser._id);
+      // Nothing arrived, so no re-render is coming to release the flag.
+      if (!prepended) isPrependingRef.current = false;
     }
+  };
+
+  // The read heuristic below needs "has this person written since?". Working that
+  // out per message with a filter+pop was O(n^2) over the loaded history and ran
+  // again on every re-render — a keystroke, a typing indicator, a selection — so
+  // long chats stuttered. One pass, reused by every tick.
+  const latestIncomingAt = useMemo(() => {
+    const byUser = new Map();
+    if (!Array.isArray(messages)) return byUser;
+    for (const m of messages) {
+      const sender = m.senderId?._id || m.senderId;
+      if (!sender || sender === authUser?._id) continue;
+      const at = new Date(m.createdAt).getTime();
+      if (at > (byUser.get(sender) || 0)) byUser.set(sender, at);
+    }
+    return byUser;
+  }, [messages, authUser?._id]);
+
+  /** Keeps the newest message in view when a photo finishes decoding. */
+  const handleMediaLoad = () => {
+    if (!isNearBottomRef.current) return;
+    messageEndRef.current?.scrollIntoView({ behavior: "auto" });
   };
 
   const renderTicks = (message) => {
@@ -868,10 +938,7 @@ const ChatContainer = () => {
     }
 
     // Heuristic: If recipient has sent any message after this message, they have read it!
-    const latestReplyFromReceiver = Array.isArray(messages)
-      ? messages.filter((m) => m.senderId === receiverId).pop()
-      : null;
-    if (latestReplyFromReceiver && new Date(latestReplyFromReceiver.createdAt).getTime() > messageTime) {
+    if ((latestIncomingAt.get(receiverId) || 0) > messageTime) {
       return <DoubleCheck className={`w-[15px] h-[13px] ${privacyReadReceipts ? 'text-blue-500' : 'text-zinc-400'} flex-shrink-0`} />;
     }
 
@@ -1054,14 +1121,14 @@ const ChatContainer = () => {
                     onTouchEnd={(e) => handleBubbleTouchEnd(message, e)}
                     onTouchMove={(e) => handleBubbleTouchMove(message, e)}
                     style={swipe.id === message._id ? {
-                      transform: `translateX(${swipe.dx}px)`,
+                      transform: `translateX(${swipeDxRef.current}px)`,
                     } : undefined}
-                    className={`flex flex-col py-2 px-2.5 chat-bubble relative min-w-[72px] pr-12 transition-colors duration-300 select-none cursor-default ${message.reactions?.length > 0 ? "pb-4" : "pb-3"} ${isSelectionMode ? "cursor-pointer hover:bg-base-200/20" : ""} ${swipe.id === message._id ? "" : "transition-transform"}`}
+                    className={`flex flex-col py-2 px-2.5 chat-bubble relative min-w-[72px] pr-12 transition-colors duration-300 select-none cursor-default pb-3 ${isSelectionMode ? "cursor-pointer hover:bg-base-200/20" : ""} ${swipe.id === message._id ? "" : "transition-transform"}`}
                   >
-                  {swipe.id === message._id && Math.abs(swipe.dx) >= 20 && (
+                  {swipe.id === message._id && swipe.stage >= 1 && (
                     <span
-                      className={`absolute top-1/2 -translate-y-1/2 ${swipe.dx > 0 ? "-left-8" : "-right-8"} ${
-                        Math.abs(swipe.dx) >= SWIPE_REPLY_THRESHOLD ? "text-primary" : "text-base-content/30"
+                      className={`absolute top-1/2 -translate-y-1/2 ${swipeDxRef.current > 0 ? "-left-8" : "-right-8"} ${
+                        swipe.stage === 2 ? "text-primary" : "text-base-content/30"
                       }`}
                     >
                       <CornerUpLeft size={16} />

@@ -401,9 +401,16 @@ export const useChatStore = create((set, get) => ({
     const authUser = useAuthStore.getState().authUser;
     const conversationKey = dmKey(userId);
 
+    // Every write below is gated on this still being the open conversation.
+    // Tapping two chats in quick succession used to let the first request's
+    // response land in the second chat — the wrong history painted for a moment
+    // and then corrected itself, which reads as the screen flickering.
+    const isStillCurrent = () => get().selectedUser?._id === userId;
+
     // Cache-first: paint instantly from whatever's already on the device
     // (like WhatsApp reopening a chat) while the network call confirms.
     const cached = authUser ? await getCachedMessages(authUser._id, conversationKey) : [];
+    if (!isStillCurrent()) return;
     set({ isMessagesLoading: true, hasMoreMessages: true, messages: cached });
 
     try {
@@ -421,12 +428,16 @@ export const useChatStore = create((set, get) => ({
         }
       }
 
+      // Cached regardless — this history is worth keeping for next time even if
+      // the user has already moved on to another chat.
+      if (authUser) cacheMessages(authUser._id, conversationKey, messages);
+      if (!isStillCurrent()) return;
+
       set({
         messages,
         hasMoreMessages: messages.length === limit,
         pinnedMessage
       });
-      if (authUser) cacheMessages(authUser._id, conversationKey, messages);
 
       // Emit markAsRead to receiver
       const socket = useAuthStore.getState().socket;
@@ -439,34 +450,66 @@ export const useChatStore = create((set, get) => ({
         // Offline: stay on whatever's cached (possibly empty, if this chat
         // was never opened before) instead of surfacing axios's raw
         // "Network Error" — the offline banner already says what's going on.
-        set({ hasMoreMessages: false });
+        if (isStillCurrent()) set({ hasMoreMessages: false });
       } else {
         toast.error(error.response?.data?.message || error.message || "Failed to load messages");
       }
     } finally {
-      set({ isMessagesLoading: false });
+      // Leaving this set would strand a spinner over a conversation this
+      // request no longer owns.
+      if (isStillCurrent()) set({ isMessagesLoading: false });
     }
   },
 
+  isLoadingMore: false,
+
+  /**
+   * Prepends the previous page of history.
+   *
+   * Three things this has to be careful about, all of which used to bite:
+   *
+   *   * the merge must read the list as it is when the response lands, not the
+   *     snapshot from when the request went out — anything that arrived over the
+   *     socket in between was silently overwritten and the message vanished
+   *   * ids can repeat, because skip counts from the newest end and new arrivals
+   *     shift the window, so the same message could be prepended twice
+   *   * a second call must not start while one is in flight, and the caller must
+   *     be told when it settles even on the error path, or scroll-to-load stays
+   *     stuck for the rest of the conversation
+   */
   loadMoreMessages: async (userId) => {
-    const { messages, hasMoreMessages } = get();
-    if (!hasMoreMessages) return;
+    const { hasMoreMessages, isLoadingMore } = get();
+    if (!hasMoreMessages || isLoadingMore) return;
+    set({ isLoadingMore: true });
 
     try {
       const limit = 20;
-      const skip = Array.isArray(messages) ? messages.length : 0;
+      const skip = Array.isArray(get().messages) ? get().messages.length : 0;
       const res = await axiosInstance.get(`/messages/${userId}?limit=${limit}&skip=${skip}`);
       const newMessages = Array.isArray(res.data) ? res.data : [];
 
-      if (newMessages.length < limit) {
-        set({ hasMoreMessages: false });
-      }
+      if (get().selectedUser?._id !== userId) return false;
 
-      set({
-        messages: [...newMessages, ...(Array.isArray(messages) ? messages : [])] // Prepend older messages to the top
+      let prepended = 0;
+      set((state) => {
+        const current = Array.isArray(state.messages) ? state.messages : [];
+        const known = new Set(current.map((m) => m._id));
+        const older = newMessages.filter((m) => !known.has(m._id));
+        prepended = older.length;
+        return {
+          messages: [...older, ...current],
+          hasMoreMessages: newMessages.length === limit,
+        };
       });
+      // Reported back so the view knows whether to expect a re-render. Without
+      // it, a page that added nothing left the caller's scroll-anchor flag armed
+      // and loading older messages stayed dead for the rest of the conversation.
+      return prepended > 0;
     } catch (error) {
       console.error("Failed to load more messages:", error);
+      return false;
+    } finally {
+      set({ isLoadingMore: false });
     }
   },
   sendMessage: async (messageData) => {
@@ -817,8 +860,12 @@ export const useChatStore = create((set, get) => ({
           console.log(`[Socket Client] Active chat message received. Emitting markAsRead for: ${selectedUser._id}`);
           socket.emit("markAsRead", { senderId: selectedUser._id, receiverId: currentUser._id });
         }
-      } else {
-        // Otherwise, increment the unread count for this sender
+      } else if (senderKey !== currentUser?._id) {
+        // Otherwise, increment the unread count for this sender.
+        //
+        // Never for your own message. A note to yourself is delivered straight
+        // back to you, so writing one with any other chat open left an unread
+        // badge sitting on Personal Notes for something you had just typed.
         set((state) => ({
           unreadCounts: {
             ...state.unreadCounts,
