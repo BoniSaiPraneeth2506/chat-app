@@ -153,6 +153,33 @@
   .s-row:hover { background-color: color-mix(in oklch, var(--color-base-300) 45%, transparent); }
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+   Voice note player.
+
+   The unplayed waveform bars were `bg-base-content/25`, the play button
+   `bg-primary/15`, the timer `text-base-content/60` — every one of which
+   compiles to nothing here, so the track was genuinely invisible and a voice
+   note appeared to have no timeline at all. Only the played bars showed, because
+   `bg-primary` carries no opacity suffix.
+   ────────────────────────────────────────────────────────────────────────── */
+.vn-btn   { background-color: var(--color-base-300); }
+.vn-track { background-color: var(--color-base-300); }
+.vn-fill  { background-color: var(--color-primary); }
+.vn-head  { background-color: var(--color-primary); }
+.vn-time  { color: var(--color-base-content); }
+.vn-chip  { background-color: var(--color-base-300); }
+
+/* Composer placeholder. `placeholder-base-content/40` compiled to nothing, so
+   the placeholder fell back to the browser default rather than the theme. */
+.ph-dim::placeholder { color: var(--color-base-content); opacity: 0.45; }
+
+@supports (background-color: color-mix(in oklch, red 50%, transparent)) {
+  .vn-btn   { background-color: color-mix(in oklch, var(--color-primary) 16%, transparent); }
+  .vn-track { background-color: color-mix(in oklch, var(--color-base-content) 26%, transparent); }
+  .vn-time  { color: color-mix(in oklch, var(--color-base-content) 62%, transparent); }
+  .vn-chip  { background-color: color-mix(in oklch, var(--color-base-content) 12%, transparent); }
+}
+
 /* Horizontal chip strip: scrollable without a visible scrollbar. */
 .cg-scroll-x {
   scrollbar-width: none;

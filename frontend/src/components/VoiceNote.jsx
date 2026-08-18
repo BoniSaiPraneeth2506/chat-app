@@ -125,7 +125,7 @@ const VoiceNote = ({ src }) => {
         type="button"
         onClick={togglePlay}
         aria-label={isPlaying ? "Pause voice note" : "Play voice note"}
-        className="shrink-0 w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center hover:bg-primary/25 transition-colors"
+        className="shrink-0 w-8 h-8 rounded-full vn-btn text-primary flex items-center justify-center hover:opacity-80 transition-opacity"
       >
         {isPlaying ? <Pause size={15} /> : <Play size={15} className="ml-0.5" />}
       </button>
@@ -133,7 +133,7 @@ const VoiceNote = ({ src }) => {
       <div className="flex-1 min-w-0">
         <div
           onClick={seek}
-          className="flex items-end gap-[2px] h-7 cursor-pointer"
+          className="relative flex items-end gap-[2px] h-7 cursor-pointer"
           role="presentation"
         >
           {bars.map((height, i) => (
@@ -141,17 +141,30 @@ const VoiceNote = ({ src }) => {
               key={i}
               style={{ height: `${Math.round(height * 100)}%` }}
               className={`flex-1 rounded-full transition-colors ${
-                i < playedBars ? "bg-primary" : "bg-base-content/25"
+                i < playedBars ? "vn-fill" : "vn-track"
               } ${isPlaying && i === playedBars ? "animate-pulse" : ""}`}
             />
           ))}
+
+          {/* Playhead. The filled bars alone read as progress only once you know
+              to look for the colour change; a dot riding the track is what makes
+              the position obvious at a glance, the way every messenger draws it. */}
+          <span
+            aria-hidden="true"
+            style={{ left: `${Math.min(100, Math.max(0, progress * 100))}%` }}
+            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 size-2.5 rounded-full vn-head ring-2 ring-base-100 pointer-events-none transition-[left] duration-150"
+          />
         </div>
-        <div className="flex items-center justify-between mt-0.5 text-[10px] text-base-content/60">
-          <span>{formatTime(isPlaying || currentTime ? currentTime : duration)}</span>
+        <div className="flex items-center justify-between mt-0.5 text-[10px] vn-time">
+          <span className="tabular-nums">
+            {isPlaying || currentTime
+              ? `${formatTime(currentTime)} / ${formatTime(duration)}`
+              : formatTime(duration)}
+          </span>
           <button
             type="button"
             onClick={cycleSpeed}
-            className="px-1.5 py-[1px] rounded-full bg-base-content/10 hover:bg-base-content/20 font-semibold transition-colors"
+            className="px-1.5 py-[1px] rounded-full vn-chip hover:opacity-80 font-semibold transition-opacity"
             title="Playback speed"
           >
             {SPEEDS[speedIndex]}x

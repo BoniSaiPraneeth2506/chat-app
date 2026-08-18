@@ -9,6 +9,9 @@ import ImageEditorModal from "./ImageEditorModal";
 import CreatePollModal from "./CreatePollModal";
 import SchedulePicker from "./SchedulePicker";
 
+// About five lines; past that the field scrolls instead of pushing the chat up.
+const MAX_INPUT_HEIGHT = 112;
+
 const MessageInput = () => {
   const [text, setText] = useState("");
   // Mentions are tracked explicitly rather than re-parsed from the text, so a
@@ -121,7 +124,27 @@ const MessageInput = () => {
 
   const isMobile = typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad|iPod/.test(navigator.userAgent);
 
+  // Height is recomputed from scrollHeight rather than tracked as a line count:
+  // wrapping depends on the rendered width, which only the browser knows. Reset
+  // to auto first, or scrollHeight keeps reporting the previous larger height and
+  // the field can only ever grow.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el || el.tagName !== "TEXTAREA") return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_HEIGHT)}px`;
+  }, [text]);
+
   const handleKeyDown = (e) => {
+    // A textarea does not submit on Enter the way an input in a form does, so
+    // that behaviour is restored explicitly. Shift+Enter is what a multi-line
+    // field needs for a deliberate newline.
+    if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !isMobile) {
+      e.preventDefault();
+      handleSendMessage({ preventDefault: () => {} });
+      return;
+    }
+
     if (isMobile) return;
     // Ctrl/Cmd + Enter to send
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -691,8 +714,8 @@ const MessageInput = () => {
           </div>
         )}
 
-        <form onSubmit={handleSendMessage} className="flex items-center gap-3">
-        <div className="flex-1 min-w-0 flex items-center gap-3 bg-base-100 rounded-full px-4 py-1.5 min-h-[42px] border border-base-300/30 shadow-sm">
+        <form onSubmit={handleSendMessage} className="flex items-end gap-3">
+        <div className="flex-1 min-w-0 flex items-end gap-3 bg-base-100 rounded-3xl px-4 py-1.5 min-h-[42px] border border-base-300/30 shadow-sm">
           {isRecording ? (
             <div className="flex items-center justify-between w-full px-2">
               <div className="flex items-center gap-2">
@@ -758,13 +781,18 @@ const MessageInput = () => {
                 </button>
               )}
 
-              <input
+              {/* A textarea rather than an input: a single-line input scrolls
+                  sideways, so everything but the tail of a long message becomes
+                  invisible while typing. This grows downward instead and wraps,
+                  the way Instagram and WhatsApp do, then scrolls internally once
+                  it hits its ceiling. rows=1 keeps a short message on one line. */}
+              <textarea
                 id="message-input"
                 ref={inputRef}
-                type="text"
+                rows={1}
                 aria-label="Write a message"
                 aria-describedby="msg-help"
-                className="flex-1 min-w-0 bg-transparent text-sm text-base-content placeholder-base-content/40 focus:outline-none py-1"
+                className="flex-1 min-w-0 bg-transparent text-sm text-base-content ph-dim focus:outline-none py-1 resize-none leading-5 max-h-[112px] overflow-y-auto cg-scroll-x"
                 placeholder="Type a message..."
                 value={text}
                 onChange={(e) => { handleTextChange(e); handleMentionScan(e.target.value); }}
