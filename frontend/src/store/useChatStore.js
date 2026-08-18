@@ -113,6 +113,20 @@ const restoreSidebarRow = (getState, senderKey) => {
   getUsers();
 };
 
+// Applies transcript state to whichever list holds the message. DMs live here,
+// group messages in useGroupStore, and a voice note in either can be transcribed.
+const applyTranscript = (setState, messageId, transcript) => {
+  const merge = (m) =>
+    m._id === messageId ? { ...m, transcript: { ...(m.transcript || {}), ...transcript } } : m;
+
+  setState((state) => ({ messages: state.messages.map(merge) }));
+
+  const gs = useGroupStore.getState();
+  if (gs?.groupMessages?.some((m) => m._id === messageId)) {
+    useGroupStore.setState((state) => ({ groupMessages: state.groupMessages.map(merge) }));
+  }
+};
+
 /** Content carried over when forwarding; a deleted message forwards empty. */
 const buildForwardPayload = (message) => {
   const payload = { isForwarded: true };
@@ -728,6 +742,7 @@ export const useChatStore = create((set, get) => ({
     // Clean up existing listeners to avoid duplicates
     socket.off("newMessage");
     socket.off("messagesRead");
+    socket.off("messageTranscript");
     socket.off("typing");
     socket.off("messageReaction");
     socket.off("messageDeleted");
@@ -810,6 +825,12 @@ export const useChatStore = create((set, get) => ({
           }
         }));
       }
+    });
+
+    // Transcript progress for a DM voice note. Emitted only to the two
+    // participants, so nothing arrives here that this user may not see.
+    socket.on("messageTranscript", ({ messageId, transcript }) => {
+      applyTranscript(set, messageId, transcript || {});
     });
 
     // Handle read confirmation received from receiver
@@ -1052,6 +1073,7 @@ export const useChatStore = create((set, get) => ({
     if (socket) {
       socket.off("newMessage");
       socket.off("messagesRead");
+      socket.off("messageTranscript");
       socket.off("disappearingTimerUpdate");
       socket.off("userOffline");
       socket.off("typing");
@@ -1209,6 +1231,27 @@ export const useChatStore = create((set, get) => ({
   },
 
   /** Per-message read state for the "Message info" sheet. */
+  /**
+   * Asks the server to transcribe a voice note.
+   *
+   * The server owns duplicate prevention, so this stays thin: it writes back
+   * whatever state comes home and lets the socket deliver the finished text. A
+   * completed transcript comes straight from the database, so a second viewer
+   * costs nothing.
+   */
+  requestTranscript: async (messageId) => {
+    try {
+      const res = await axiosInstance.post(`/messages/${messageId}/transcribe`);
+      applyTranscript(set, messageId, res.data || {});
+      return res.data;
+    } catch (error) {
+      const detail = error.response?.data?.message || "Couldn't start transcription";
+      applyTranscript(set, messageId, { status: "failed", error: detail });
+      toast.error(detail);
+      return null;
+    }
+  },
+
   getMessageInfo: async (messageId) => {
     try {
       const res = await axiosInstance.get(`/messages/info/${messageId}`);

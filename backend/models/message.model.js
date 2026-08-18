@@ -167,6 +167,27 @@ const messageSchema = new Schema(
       type: String,
       default: ""
     },
+    // Speech-to-text for a voice note, produced on demand by AssemblyAI and
+    // then kept forever, so a message is never transcribed twice.
+    //
+    // Separate from voiceTranscript above, which was a client-side capture and
+    // is left alone — repurposing it would have conflated "what the recorder
+    // heard" with "what the service returned", and lost the status a retry needs.
+    transcript: {
+      text: { type: String, default: "" },
+      status: {
+        type: String,
+        enum: ["not_requested", "processing", "completed", "failed"],
+        default: "not_requested",
+      },
+      language: { type: String, default: "" },
+      assemblyTranscriptId: { type: String, default: "" },
+      error: { type: String, default: "" },
+      // Stamped when a job is claimed. A server restart mid-transcription would
+      // otherwise leave the message stuck on "processing" with nothing able to
+      // clear it; a claim older than the stale window can be retried.
+      requestedAt: { type: Date, default: null },
+    },
     isForwarded: {
       type: Boolean,
       default: false

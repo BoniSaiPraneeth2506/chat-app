@@ -1,6 +1,8 @@
 // import Message from "../models/message.model.js";
 // import User from "../models/user.model.js";
 import Group from "../models/group.model.js";
+import mongoose from "mongoose";
+import { transcribeAudioUrl, isTranscriptionConfigured } from "../lib/assemblyai.js";
 // import cloudinary from "../lib/cloudinary.js";
 
 // const getUsersForSidebar=async (req,res)=>{
@@ -1294,6 +1296,210 @@ const deleteMessagesBulk = async (req, res) => {
   }
 };
 
+// A claim this old is treated as abandoned, so a restart mid-transcription
+// cannot pin a message on "processing" forever.
+const STALE_CLAIM_MS = 5 * 60 * 1000;
+
+/**
+ * Sends transcript state to exactly the people entitled to the message.
+ *
+ * Group messages go to the group room; DMs go to the two participants only. The
+ * payload carries no author information, so it is also safe for an anonymous
+ * question — and it never includes anything about the transcription service.
+ */
+const broadcastTranscript = (message, transcript) => {
+  const payload = { messageId: message._id.toString(), transcript };
+
+  if (message.groupId) {
+    io.to(`group_${message.groupId.toString()}`).emit("groupMessageTranscript", {
+      ...payload,
+      groupId: message.groupId.toString(),
+    });
+    return;
+  }
+
+  for (const party of [message.senderId, message.receiverId]) {
+    if (!party) continue;
+    const socketId = getReceiverSocketId(party.toString());
+    if (socketId) io.to(socketId).emit("messageTranscript", payload);
+  }
+};
+
+/**
+ * Runs the transcription and records the outcome.
+ *
+ * Runs outside the request, so every exit has to persist something: leaving the
+ * document on "processing" would strand the message until the stale window
+ * expired. The message is re-read afterwards because it may have been deleted
+ * while the job was running.
+ */
+const runTranscription = async (messageId, audioUrl) => {
+  const result = await transcribeAudioUrl(audioUrl);
+
+  const update = result.ok
+    ? {
+        "transcript.status": "completed",
+        "transcript.text": (result.text || "").slice(0, 20000),
+        "transcript.language": result.language || "",
+        "transcript.assemblyTranscriptId": result.id || "",
+        "transcript.error": "",
+      }
+    : {
+        "transcript.status": "failed",
+        "transcript.error": result.error || "Transcription failed",
+        "transcript.assemblyTranscriptId": result.id || "",
+      };
+
+  const saved = await Message.findByIdAndUpdate(messageId, { $set: update }, { new: true });
+  if (!saved) return; // deleted while transcribing
+
+  broadcastTranscript(
+    saved,
+    result.ok
+      ? { status: "completed", text: saved.transcript.text, language: saved.transcript.language }
+      : { status: "failed", error: saved.transcript.error }
+  );
+};
+
+/**
+ * Requests speech-to-text for a voice note.
+ *
+ * Costs money per call, so the whole design is about calling AssemblyAI exactly
+ * once per message, ever:
+ *
+ *   completed  -> return the stored text, no upstream call
+ *   processing -> return that state, no upstream call
+ *   otherwise  -> claim the job atomically, then transcribe in the background
+ *
+ * The claim is a single findOneAndUpdate whose filter includes the current
+ * status. Reading the status and then writing it would leave a window where four
+ * rapid clicks each see "not_requested" and each start a job; here only the first
+ * update matches, and the losers fall through to the "already processing" reply.
+ *
+ * The response returns immediately rather than waiting for the transcript. A
+ * voice note can take tens of seconds, and holding the request open would tie up
+ * the client and break on any proxy timeout — the result arrives over the socket
+ * the app already uses.
+ */
+const requestTranscript = async (req, res) => {
+  try {
+    const { id: messageId } = req.params;
+    const userId = req.user._id;
+
+    if (!mongoose.isValidObjectId(messageId)) {
+      return res.status(400).json({ message: "Invalid message id" });
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) return res.status(404).json({ message: "Message not found" });
+
+    if (!message.voice) {
+      return res.status(400).json({ message: "That message has no voice note" });
+    }
+    if (message.isDeletedForEveryone) {
+      return res.status(400).json({ message: "That message was deleted" });
+    }
+
+    // Same access rules as reading the conversation itself: a member for a group,
+    // one of the two participants for a DM. Without this, any signed-in user
+    // could transcribe any voice note by guessing an id — and spend the credits.
+    if (message.groupId) {
+      const group = await Group.findById(message.groupId).select("members.user");
+      const isMember = group?.members?.some((m) => m.user?.toString() === userId.toString());
+      if (!isMember) return res.status(403).json({ message: "Not a member of this group" });
+    } else {
+      const participants = [message.senderId?.toString(), message.receiverId?.toString()];
+      if (!participants.includes(userId.toString())) {
+        return res.status(403).json({ message: "Not your conversation" });
+      }
+      // Blocking already prevents sending; it should equally prevent spending
+      // credits on the other party's audio.
+      const [me, other] = await Promise.all([
+        User.findById(userId).select("blockedUsers"),
+        User.findById(participants.find((p) => p !== userId.toString())).select("blockedUsers"),
+      ]);
+      const blocked =
+        me?.blockedUsers?.some((b) => b.toString() === other?._id?.toString()) ||
+        other?.blockedUsers?.some((b) => b.toString() === userId.toString());
+      if (blocked) return res.status(403).json({ message: "Unavailable" });
+    }
+
+    const current = message.transcript || {};
+
+    // Already done — hand back what is stored. This is the path every viewer
+    // after the first one takes, including the other participant.
+    if (current.status === "completed") {
+      return res.status(200).json({
+        status: "completed",
+        text: current.text || "",
+        language: current.language || "",
+      });
+    }
+
+    // Already in flight. Only a claim with a recent timestamp counts as live: a
+    // restart between claiming and finishing would otherwise pin the message on
+    // "processing" with nothing able to clear it.
+    if (current.status === "processing") {
+      const claimedAt = current.requestedAt ? new Date(current.requestedAt).getTime() : 0;
+      const isLive = claimedAt > 0 && Date.now() - claimedAt <= STALE_CLAIM_MS;
+      if (isLive) return res.status(200).json({ status: "processing" });
+      // Otherwise fall through and try to reclaim an abandoned job.
+    }
+
+    if (!isTranscriptionConfigured()) {
+      return res.status(503).json({ message: "Transcription is not available right now" });
+    }
+
+    // Atomic claim: whichever request's update matches first wins, and the rest
+    // stop matching because status is now "processing" with a fresh timestamp.
+    //
+    // The staleness bound has to live inside this filter rather than being
+    // decided from the earlier read. Deciding it beforehand meant a
+    // never-requested message — which has no requestedAt — looked stale to every
+    // concurrent request at once, so all of them claimed it and four clicks
+    // started four billable jobs.
+    const staleCutoff = new Date(Date.now() - STALE_CLAIM_MS);
+
+    const claimed = await Message.findOneAndUpdate(
+      { _id: messageId, $or: [
+        { "transcript.status": { $in: ["not_requested", "failed"] } },
+        { "transcript.status": { $exists: false } },
+        { transcript: { $exists: false } },
+        // Abandoned claims only. A live claim carries a recent timestamp and
+        // fails both of these, which is what makes the losers lose.
+        { "transcript.status": "processing", "transcript.requestedAt": { $lt: staleCutoff } },
+        { "transcript.status": "processing", "transcript.requestedAt": null },
+      ] },
+      {
+        $set: {
+          "transcript.status": "processing",
+          "transcript.requestedAt": new Date(),
+          "transcript.error": "",
+        },
+      },
+      { new: true }
+    );
+
+    if (!claimed) {
+      // Someone else claimed it between our read and our update.
+      return res.status(200).json({ status: "processing" });
+    }
+
+    broadcastTranscript(claimed, { status: "processing" });
+
+    // Deliberately not awaited: the HTTP response goes out now and the result
+    // reaches clients over the socket.
+    runTranscription(messageId, claimed.voice).catch((err) =>
+      console.error("Unhandled transcription failure:", err?.message || err)
+    );
+
+    return res.status(202).json({ status: "processing" });
+  } catch (error) {
+    console.error("Error in requestTranscript:", error);
+    res.status(500).json({ message: "Failed to start transcription" });
+  }
+};
+
 const cancelScheduledMessage = async (req, res) => {
   try {
     const { id: messageId } = req.params;
@@ -1333,4 +1539,5 @@ export {
   ,setContactNickname
   ,getBlockedUsers
   ,exportChat
+  ,requestTranscript
 };

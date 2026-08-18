@@ -599,6 +599,7 @@ export const useGroupStore = create((set, get) => ({
     socket.off("groupPollUpdated");
     socket.off("groupMessageDeleted");
     socket.off("groupMessageEdited");
+    socket.off("groupMessageTranscript");
     socket.off("groupCreated");
     socket.off("groupUpdated");
     socket.off("groupTyping");
@@ -616,6 +617,13 @@ export const useGroupStore = create((set, get) => ({
 
       // Don't ignore server-created call logs even when sender is current user
       if (message.senderId?._id === currentUser?._id && !message.isCallLog) return;
+
+      // Anonymous questions arrive with no author at all, so the check above
+      // cannot recognise the sender's own message and it was appended a second
+      // time on top of the copy the send request had already inserted — the
+      // author saw duplicates while everyone else saw one. Matching on _id
+      // covers that and any other path where both copies arrive.
+      if (get().groupMessages.some((m) => m._id === message._id)) return;
 
       set((state) => ({
         latestGroupMessages: {
@@ -672,6 +680,18 @@ export const useGroupStore = create((set, get) => ({
       }));
       const authUser = useAuthStore.getState().authUser;
       if (authUser) updateCachedMessage(authUser._id, message._id, message);
+    });
+
+    // Transcript progress for a group voice note, delivered to the group room.
+    // The payload carries no author, so it is safe for an anonymous question too.
+    socket.on("groupMessageTranscript", ({ messageId, transcript }) => {
+      set((state) => ({
+        groupMessages: state.groupMessages.map((m) =>
+          m._id === messageId
+            ? { ...m, transcript: { ...(m.transcript || {}), ...(transcript || {}) } }
+            : m
+        ),
+      }));
     });
 
     // Deletion of a group message. There was no listener for this at all, so a
@@ -811,9 +831,12 @@ export const useGroupStore = create((set, get) => ({
       socket.off("groupPollUpdated");
       socket.off("groupMessageDeleted");
       socket.off("groupMessageEdited");
+    socket.off("groupMessageTranscript");
     socket.off("groupMessageEdited");
+    socket.off("groupMessageTranscript");
     socket.off("groupMessageDeleted");
     socket.off("groupMessageEdited");
+    socket.off("groupMessageTranscript");
       socket.off("groupCreated");
       socket.off("groupUpdated");
       socket.off("groupTyping");

@@ -7,6 +7,7 @@ import SocialLinksRow from "./SocialLinksRow";
 import { useNicknames, displayNameOf } from "../lib/contacts";
 import PollMessage from "./PollMessage";
 import VoiceNote from "./VoiceNote";
+import VoiceTranscript from "./VoiceTranscript";
 import { useThemeStore } from "../store/useThemeStore";
 import { getWallpaperStyle } from "../pages/SettingsPage";
 
@@ -656,7 +657,14 @@ const ChatContainer = () => {
             className="max-w-[220px] sm:max-w-[280px] max-h-[320px] w-auto object-cover rounded-xl mb-1.5 cursor-zoom-in hover:opacity-95 transition-opacity"
           />
         ) : null}
-        {message.voice && <VoiceNote src={message.voice} />}
+        {message.voice && (
+          <>
+            <VoiceNote src={message.voice} />
+            {/* Below the player, not inside it, so playback and the waveform are
+                untouched. Only voice notes render this. */}
+            <VoiceTranscript message={message} />
+          </>
+        )}
         {message.text && (
           <div className="text-sm leading-loose break-words pr-10 select-text">
             <p>{renderWithMentions(message, highlightText(message.text, messageSearchQuery))}</p>
