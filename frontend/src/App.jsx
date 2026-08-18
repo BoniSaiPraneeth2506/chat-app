@@ -58,6 +58,7 @@ import JoinGroupPage from './pages/JoinGroupPage'
 import useAuthStore from './store/useAuthStore'
 import { useChatStore } from './store/useChatStore'
 import { setScreenSecure } from './lib/secureScreen'
+import { setBadgeCount, clearBadge } from './lib/badge'
 import { Loader, X, MessageSquare, Phone, Info } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import { useThemeStore } from './store/useThemeStore'
@@ -158,7 +159,7 @@ const App = () => {
   const { authUser, checkAuth, isCheckingAuth, onlineUsers, socket, switchingTo,
           accountChooserOpen, closeAccountChooser, savedAccounts, switchAccount } = useAuthStore();
   const { theme } = useThemeStore()
-  const { getGroups, subscribeToGroupEvents, unsubscribeFromGroupEvents, selectedGroup } = useGroupStore();
+  const { getGroups, subscribeToGroupEvents, unsubscribeFromGroupEvents, selectedGroup, unreadGroupCounts } = useGroupStore();
 
   // Groups whose welcome sheet has been dismissed in this session. The server
   // is the real record (welcomeSeenBy); this only stops the sheet reappearing in
@@ -169,6 +170,7 @@ const App = () => {
     unsubscribeFromMessages,
     profilePreviewUser,
     setProfilePreviewUser,
+    unreadCounts,
     lightboxImage,
     lightboxSecure,
     setLightboxImage,
@@ -314,6 +316,26 @@ const App = () => {
     !welcomeDismissed.includes(selectedGroup._id)
       ? selectedGroup
       : null;
+
+  // Launcher badge. Driven off the same counters the sidebar badges use, so the
+  // icon and the app can never disagree, and it updates the instant a message
+  // arrives or a chat is opened — the socket already keeps those numbers live, so
+  // nothing polls.
+  //
+  // The limit worth knowing: this only tracks while the app is running. Once
+  // Android kills the process nothing updates the count until next launch, which
+  // is precisely what push notifications solve and why the real apps use them.
+  const totalUnread =
+    Object.values(unreadCounts || {}).reduce((sum, n) => sum + (Number(n) || 0), 0) +
+    Object.values(unreadGroupCounts || {}).reduce((sum, n) => sum + (Number(n) || 0), 0);
+
+  useEffect(() => {
+    if (!authUser) {
+      clearBadge();
+      return;
+    }
+    setBadgeCount(totalUnread);
+  }, [totalUnread, authUser]);
 
   if (isCheckingAuth && !authUser) {
     return (
