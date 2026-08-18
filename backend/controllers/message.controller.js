@@ -313,6 +313,18 @@ const exportChat = async (req, res) => {
   }
 };
 
+/**
+ * Excludes a disappearing message whose time is up.
+ *
+ * The row itself is removed by the media sweep moments later, and by the TTL
+ * index after that if the sweep is down. Filtering at read time is what makes
+ * either delay invisible: the message leaves the conversation the instant it
+ * expires, not whenever a background job happens to catch it.
+ */
+const unexpired = () => ({
+  $or: [{ deleteAt: null }, { deleteAt: { $exists: false } }, { deleteAt: { $gt: new Date() } }],
+});
+
 const getUsersForSidebar = async (req, res) => {
   try {
     const { search } = req.query;
@@ -407,9 +419,14 @@ const getMessages = async (req, res) => {
 
     if (limit > 0) {
       const messages = await Message.find({
-        $or: [
-          { senderId: myId, receiverId: userToChatId, groupId: null },
-          { senderId: userToChatId, receiverId: myId, groupId: null }
+        $and: [
+          {
+            $or: [
+              { senderId: myId, receiverId: userToChatId, groupId: null },
+              { senderId: userToChatId, receiverId: myId, groupId: null }
+            ],
+          },
+          unexpired(),
         ],
         deletedFor: { $ne: myId }
       })
@@ -421,9 +438,14 @@ const getMessages = async (req, res) => {
       res.status(200).json(messages.reverse());
     } else {
       const messages = await Message.find({
-        $or: [
-          { senderId: myId, receiverId: userToChatId, groupId: null },
-          { senderId: userToChatId, receiverId: myId, groupId: null }
+        $and: [
+          {
+            $or: [
+              { senderId: myId, receiverId: userToChatId, groupId: null },
+              { senderId: userToChatId, receiverId: myId, groupId: null }
+            ],
+          },
+          unexpired(),
         ],
         deletedFor: { $ne: myId }
       })
@@ -440,7 +462,7 @@ const getMessages = async (req, res) => {
 const sendMessage = async (req, res) => {
   try {
     const { id: receiverId } = req.params;
-    const { text, image, images, voice, replyTo, isForwarded, isOneView, scheduledAt, attachments } = req.body;
+    const { text, image, images, voice, replyTo, isForwarded, isOneView, scheduledAt, attachments, clientId } = req.body;
     const senderId = req.user._id;
 
     // Check block list
@@ -591,10 +613,21 @@ const sendMessage = async (req, res) => {
     await newMessage.save();
     await newMessage.populate("replyTo");
 
-    const receiverSocketId=getReceiverSocketId(receiverId);
-    if(receiverSocketId){
-      io.to(receiverSocketId).emit("newMessage",newMessage)
-    }
+    // Delivered to the recipient and to the sender's own other devices.
+    //
+    // Only the recipient used to hear about this, so a message sent from a phone
+    // never appeared on the same account's laptop until something refetched —
+    // which is not how any messenger behaves. The echo carries the sending
+    // client's own id back with it, which is what lets that one device recognise
+    // its own optimistic copy and merge rather than show the message twice.
+    // Devices that have no such copy simply append it.
+    const payload = { ...newMessage.toObject(), clientId: clientId || null };
+    const rooms = new Set();
+    const receiverSocketId = getReceiverSocketId(receiverId);
+    if (receiverSocketId) rooms.add(receiverSocketId);
+    const senderRoom = getReceiverSocketId(senderId);
+    if (senderRoom) rooms.add(senderRoom);
+    if (rooms.size > 0) io.to([...rooms]).emit("newMessage", payload);
 
     res.status(201).json(newMessage);
 
@@ -1025,10 +1058,15 @@ const createCallLog = async (req, res) => {
       // Broadcast to group room
       io.to(`group_${groupId}`).emit("newGroupMessage", newMessage);
     } else if (receiverId) {
+      // The caller's own other devices get the log too, so a call placed from the
+      // phone shows in the laptop's history. Both copies carry the same _id, which
+      // is what the client dedups on.
+      const rooms = new Set();
       const receiverSocketId = getReceiverSocketId(receiverId);
-      if (receiverSocketId) {
-        io.to(receiverSocketId).emit("newMessage", newMessage);
-      }
+      if (receiverSocketId) rooms.add(receiverSocketId);
+      const senderRoom = getReceiverSocketId(senderId);
+      if (senderRoom) rooms.add(senderRoom);
+      if (rooms.size > 0) io.to([...rooms]).emit("newMessage", newMessage);
     }
 
     res.status(201).json(newMessage);

@@ -128,7 +128,15 @@ const messageSchema = new Schema(
     },
     deleteAt: {
       type: Date,
-      expires: 0
+      // Deliberately not `expires: 0`. A TTL deletion fires no application hook,
+      // so whenever Mongo's monitor reached a message before our own sweep did,
+      // the row vanished and its uploads were stranded in Cloudinary with nothing
+      // left pointing at them. The grace period means the sweep — which frees the
+      // media first — always wins, while this stays as the backstop that guarantees
+      // expiry even if the sweep is not running. Reads exclude anything past its
+      // deleteAt regardless of whether the row is still here, so the delay is
+      // invisible: an expired message is gone from the app the moment it expires.
+      expires: 600,
     },
     replyTo: {
       type: mongoose.Schema.Types.ObjectId,

@@ -1452,9 +1452,9 @@ const ChatContainer = () => {
                 <Calendar size={14} />
                 <span>Joined: {selectedUser.createdAt?.split("T")[0]}</span>
               </div>
-              <div className="flex items-center gap-2">
-                <ShieldCheck size={14} className="text-green-500" />
-                <span className="text-green-500 font-medium">Encryption: End-to-End Encrypted</span>
+              <div className="flex items-start gap-2">
+                <ShieldCheck size={14} className="mt-px shrink-0" />
+                <span>Encryption: in transit only (TLS) — not end-to-end</span>
               </div>
             </div>
           </div>

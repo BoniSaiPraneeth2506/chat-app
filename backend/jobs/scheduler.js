@@ -61,14 +61,13 @@ export function stopScheduler() {
 
 // ── Disappearing-message media purge ─────────────────────────────────────────
 //
-// The `deleteAt` TTL index removes expired messages, but a TTL deletion fires
-// no application hook — the document vanishes and its Cloudinary uploads are
-// stranded with nothing left pointing at them. This sweep deletes expired
-// messages ourselves, freeing their media first.
+// A TTL deletion fires no application hook — the document just vanishes, and its
+// Cloudinary uploads are stranded with nothing left pointing at them. So expired
+// messages are deleted here instead, media first.
 //
-// It races Mongo's TTL monitor, which runs about once a minute; sweeping more
-// often than that means we normally win. Anything the TTL reaches first is
-// only a leaked asset, never a correctness problem.
+// This used to race Mongo's TTL monitor and lose sometimes. The index now carries
+// a grace period (see the model), which puts this sweep firmly ahead of it: the
+// TTL is only the backstop for a sweep that is not running.
 const PURGE_INTERVAL_MS = parseInt(process.env.MEDIA_PURGE_INTERVAL_MS || "20000", 10);
 const PURGE_BATCH = 200;
 

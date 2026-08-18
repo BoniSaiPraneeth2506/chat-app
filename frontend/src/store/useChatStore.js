@@ -127,6 +127,30 @@ const applyTranscript = (setState, messageId, transcript) => {
   }
 };
 
+/**
+ * Adds a message to a list, or merges it into the copy already there.
+ *
+ * Three things can be the same message: an optimistic copy still carrying its
+ * tempId, the server's reply to the request that created it, and the socket event
+ * the server broadcasts. Now that the server echoes a message back to the
+ * sender's other devices, all three can arrive in any order on the device that
+ * sent it, so every path that adds a message goes through here.
+ */
+const upsertIntoList = (list, message) => {
+  if (!Array.isArray(list)) return [message];
+  const index = list.findIndex(
+    (m) =>
+      m._id === message._id ||
+      (message.clientId && m.tempId === message.clientId) ||
+      (m.tempId && message.tempId && m.tempId === message.tempId) ||
+      (m.tempId && m.tempId === message._id)
+  );
+  if (index === -1) return [...list, message];
+  const merged = [...list];
+  merged[index] = { ...merged[index], ...message };
+  return merged;
+};
+
 /** Content carried over when forwarding; a deleted message forwards empty. */
 const buildForwardPayload = (message) => {
   const payload = { isForwarded: true };
@@ -544,8 +568,8 @@ export const useChatStore = create((set, get) => ({
     }));
 
     const payload = replyingToMessage
-      ? { ...messageData, replyTo: replyingToMessage._id }
-      : messageData;
+      ? { ...messageData, replyTo: replyingToMessage._id, clientId: tempId }
+      : { ...messageData, clientId: tempId };
 
     try {
       const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, payload);
@@ -674,8 +698,8 @@ export const useChatStore = create((set, get) => ({
 
     try {
       const payload = replyingToMessage 
-        ? { ...messageData, replyTo: replyingToMessage._id } 
-        : messageData;
+        ? { ...messageData, replyTo: replyingToMessage._id, clientId: tempId } 
+        : { ...messageData, clientId: tempId };
 
       const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, payload, {
         signal: controller.signal
@@ -840,20 +864,18 @@ export const useChatStore = create((set, get) => ({
         if (otherPartyId) cacheMessages(currentUser._id, dmKey(otherPartyId), [newMessage]);
       }
 
-      // If the message is from the currently active chat, append or merge it
-      if (selectedUser && (senderKey === selectedUser._id || newMessage.receiverId === selectedUser._id)) {
-        set((state) => {
-          // If we have an optimistic temp message (tempId) matching server _id, replace it
-          const existingIndex = state.messages.findIndex(m => m._id === newMessage._id || m.tempId === newMessage._id || (m.tempId && newMessage.tempId && m.tempId === newMessage.tempId));
-          if (existingIndex > -1) {
-            const updated = [...state.messages];
-            updated[existingIndex] = { ...updated[existingIndex], ...newMessage };
-            return { messages: updated };
-          }
+      // Belongs to the open chat if either end of it is the person on screen —
+      // which covers a message this account sent from one of its other devices,
+      // where the sender is us and the recipient is who we are looking at.
+      const receiverKeyForMatch = typeof newMessage.receiverId === "object"
+        ? (newMessage.receiverId?._id || newMessage.receiverId?.toString())
+        : newMessage.receiverId;
+      const belongsToOpenChat =
+        selectedUser &&
+        (senderKey === selectedUser._id || receiverKeyForMatch === selectedUser._id);
 
-          // Otherwise append, ensuring we keep any existing fields like scheduledAt if server omitted them
-          return { messages: [...state.messages, { ...newMessage }] };
-        });
+      if (belongsToOpenChat) {
+        set((state) => ({ messages: upsertIntoList(state.messages, { ...newMessage }) }));
 
         // Emit read receipt back immediately if privacy setting allows it
         if (currentUser && useThemeStore.getState().privacyReadReceipts) {
@@ -1039,9 +1061,7 @@ export const useChatStore = create((set, get) => ({
           callDuration,
           callStatus
         }).then((res) => {
-          set((state) => ({
-            messages: [...state.messages, res.data]
-          }));
+          set((state) => ({ messages: upsertIntoList(state.messages, res.data) }));
         }).catch((err) => {
           console.error("Failed to save call log", err);
         });
@@ -1687,9 +1707,7 @@ export const useChatStore = create((set, get) => ({
         callDuration,
         callStatus
       }).then((res) => {
-        set((state) => ({
-          messages: [...state.messages, res.data]
-        }));
+        set((state) => ({ messages: upsertIntoList(state.messages, res.data) }));
       }).catch((err) => {
         console.error("Failed to save call log", err);
       });

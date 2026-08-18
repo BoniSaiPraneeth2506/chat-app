@@ -367,10 +367,10 @@ const ChatHeader = () => {
         </div>
       ) : (
         /* Normal Chat Header mode */
-        <div className="flex items-center justify-between w-full">
+        <div className="flex items-center justify-between w-full gap-2">
           
           {/* Left Section: Avatar & Info */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center min-w-0 gap-3">
             
             {/* Back button for mobile view */}
             <button 
@@ -387,9 +387,9 @@ const ChatHeader = () => {
               /* Group Chat Header details */
               <div 
                 onClick={() => setIsGroupDetailsModalOpen(true)}
-                className="flex items-center gap-3 cursor-pointer select-none group"
+                className="flex items-center min-w-0 gap-3 cursor-pointer select-none group"
               >
-                <div className="avatar hover:opacity-80 transition-opacity">
+                <div className="avatar hover:opacity-80 transition-opacity shrink-0">
                   <div className="relative rounded-full size-10 bg-secondary/10 border border-secondary/20 flex items-center justify-center text-secondary overflow-hidden">
                     {selectedGroup.groupPic ? (
                       <img src={selectedGroup.groupPic} alt={selectedGroup.name} className="w-full h-full object-cover" />
@@ -398,11 +398,11 @@ const ChatHeader = () => {
                     )}
                   </div>
                 </div>
-                <div className="text-left select-none">
-                  <h3 className="font-medium group-hover:text-primary transition-colors flex items-center gap-1.5 text-sm sm:text-base">
-                    {selectedGroup.name}
+                <div className="min-w-0 text-left select-none">
+                  <h3 className="font-medium group-hover:text-primary transition-colors flex items-center gap-1.5 text-sm sm:text-base min-w-0">
+                    <span className="truncate">{selectedGroup.name}</span>
                   </h3>
-                  <p className="text-xs text-base-content/60">
+                  <p className="text-xs text-base-content/60 truncate">
                     {selectedGroup.members?.length || 0} members {selectedGroup.isReadOnly ? "• Read Only" : ""}
                   </p>
                 </div>
@@ -410,7 +410,7 @@ const ChatHeader = () => {
             ) : isSelf ? (
               /* Personal Notes self-chat header details */
               <div className="flex items-center gap-3 select-none">
-                <div className="size-10 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+                <div className="size-10 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
                   <Bookmark className="size-5" />
                 </div>
                 <div className="text-left">
@@ -422,7 +422,7 @@ const ChatHeader = () => {
               /* Clickable Avatar and User Info details to open Sidebar details */
               <div 
                 onClick={() => setIsRecipientProfileOpen(!isRecipientProfileOpen)}
-                className="flex items-center gap-3 cursor-pointer select-none group"
+                className="flex items-center min-w-0 gap-3 cursor-pointer select-none group"
               >
                 {/* Avatar */}
                 <div 
@@ -430,7 +430,7 @@ const ChatHeader = () => {
                     e.stopPropagation();
                     setLightboxImage(selectedUser?.profilePic || "/avatar.png");
                   }}
-                  className="avatar hover:opacity-80 transition-opacity cursor-zoom-in"
+                  className="avatar hover:opacity-80 transition-opacity cursor-zoom-in shrink-0"
                 >
                   <div className="relative rounded-full size-10">
                     <img src={selectedUser?.profilePic || "/avatar.png"} alt={contactName} />
@@ -438,9 +438,9 @@ const ChatHeader = () => {
                 </div>
 
                 {/* User Info */}
-                <div className="text-left select-none">
-                  <h3 className="font-medium group-hover:text-primary transition-colors flex items-center gap-1.5">
-                    {contactName}
+                <div className="min-w-0 text-left select-none">
+                  <h3 className="font-medium group-hover:text-primary transition-colors flex items-center gap-1.5 min-w-0">
+                    <span className="truncate">{contactName}</span>
                     {authUser?.disappearingTimers?.[selectedUser?._id] && authUser?.disappearingTimers?.[selectedUser?._id] !== "off" && (
                       <Clock className="size-3 text-zinc-400" title={`Disappearing messages: ${authUser.disappearingTimers[selectedUser._id]}`} />
                     )}
@@ -460,7 +460,7 @@ const ChatHeader = () => {
                       )}
                     </div>
                   ) : (
-                    <p className="flex items-center gap-1 text-sm text-base-content/70">
+                    <p className="flex items-center gap-1 text-sm text-base-content/70 truncate">
                       {isOnline && (
                         <span className="size-[8px] rounded-full mt-[2.3px] bg-green-500"></span>
                       )}

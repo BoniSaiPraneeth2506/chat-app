@@ -179,21 +179,37 @@ export const useGroupStore = create((set, get) => ({
         groups.forEach((g) => socket.emit("joinGroupRoom", g._id));
       }
 
-      // Fetch latest message for each group
+      // Sidebar previews.
+      //
+      // The listing carries each group's newest message now, so the common path
+      // costs nothing extra. The per-group request below is only for a group the
+      // response said nothing about — which means a server that predates this,
+      // since a group with no messages comes back as an explicit null.
       const latestMsgs = {};
-      await Promise.all(
-        groups.map(async (group) => {
-          try {
-            const msgRes = await axiosInstance.get(`/groups/${group._id}/messages?limit=1`);
-            const msgs = Array.isArray(msgRes.data) ? msgRes.data : [];
-            if (msgs.length > 0) {
-              latestMsgs[group._id] = msgs[msgs.length - 1];
+      const unknown = [];
+      groups.forEach((group) => {
+        if ("lastMessage" in group) {
+          if (group.lastMessage) latestMsgs[group._id] = group.lastMessage;
+        } else {
+          unknown.push(group);
+        }
+      });
+
+      if (unknown.length > 0) {
+        await Promise.all(
+          unknown.map(async (group) => {
+            try {
+              const msgRes = await axiosInstance.get(`/groups/${group._id}/messages?limit=1`);
+              const msgs = Array.isArray(msgRes.data) ? msgRes.data : [];
+              if (msgs.length > 0) {
+                latestMsgs[group._id] = msgs[msgs.length - 1];
+              }
+            } catch (err) {
+              console.error("Error fetching group latest msg:", err);
             }
-          } catch (err) {
-            console.error("Error fetching group latest msg:", err);
-          }
-        })
-      );
+          })
+        );
+      }
       set({ latestGroupMessages: latestMsgs });
       if (authUser) cacheConversationsMeta(authUser._id, "group-sidebar", { groups, latestGroupMessages: latestMsgs });
     } catch (error) {
@@ -333,7 +349,10 @@ export const useGroupStore = create((set, get) => ({
     }));
 
     try {
-      const res = await axiosInstance.post(`/groups/${selectedGroup._id}/send`, messageData);
+      const res = await axiosInstance.post(`/groups/${selectedGroup._id}/send`, {
+        ...messageData,
+        clientId: tempId,
+      });
       const sentMsg = res.data;
 
       set((state) => ({
@@ -628,15 +647,30 @@ export const useGroupStore = create((set, get) => ({
       const { selectedGroup } = get();
       const currentUser = useAuthStore.getState().authUser;
 
-      // Don't ignore server-created call logs even when sender is current user
-      if (message.senderId?._id === currentUser?._id && !message.isCallLog) return;
+      // Whether this device already holds a copy of this message: either the
+      // optimistic one it inserted when sending (matched on the client id that
+      // travelled out and came back), or the confirmed one from the send response.
+      //
+      // This used to be "did I send it?", which discarded the broadcast for every
+      // message this account sent — including on the account's *other* devices,
+      // where it was the only notice they would get. It also could not recognise
+      // an anonymous question, whose author the server strips, so those duplicated
+      // for the person who asked. Asking what this device already has answers both:
+      // the sender's own device merges, its other devices append.
+      const existing = get().groupMessages.find(
+        (m) =>
+          m._id === message._id ||
+          (message.clientId && m.tempId === message.clientId)
+      );
 
-      // Anonymous questions arrive with no author at all, so the check above
-      // cannot recognise the sender's own message and it was appended a second
-      // time on top of the copy the send request had already inserted — the
-      // author saw duplicates while everyone else saw one. Matching on _id
-      // covers that and any other path where both copies arrive.
-      if (get().groupMessages.some((m) => m._id === message._id)) return;
+      if (existing) {
+        set((state) => ({
+          groupMessages: state.groupMessages.map((m) =>
+            m === existing ? { ...m, ...message } : m
+          ),
+        }));
+        return;
+      }
 
       set((state) => ({
         latestGroupMessages: {
@@ -653,7 +687,9 @@ export const useGroupStore = create((set, get) => ({
         set((state) => ({
           groupMessages: [...state.groupMessages, message],
         }));
-      } else {
+      } else if ((message.senderId?._id || message.senderId) !== currentUser?._id) {
+        // Never an unread badge for something this account sent from another
+        // device — that message is already read by definition.
         const mentionsMe = (message.mentions || []).some(
           (id) => String(id?._id || id) === String(currentUser?._id)
         );

@@ -101,9 +101,55 @@ export const getUserGroups = async (req, res) => {
       _id: { $nin: req.user.lockedGroups || [] },
     })
       .populate("members.user", MEMBER_FIELDS)
-      .sort({ updatedAt: -1 });
+      .sort({ updatedAt: -1 })
+      .lean();
 
-    res.status(200).json(groups);
+    // Each group's newest message travels with the listing.
+    //
+    // The sidebar needs one preview line per group, and it used to get them by
+    // asking for each group's messages separately — one HTTP round trip per group
+    // on every sign-in and reconnect. Two queries here replace all of them.
+    //
+    // The author still goes through the anonymity helper. A preview is a read path
+    // like any other, and skipping it here would unmask an anonymous question in
+    // the sidebar while the conversation itself kept the promise.
+    const groupIds = groups.map((g) => g._id);
+    let previewByGroup = new Map();
+
+    if (groupIds.length > 0) {
+      const newest = await Message.aggregate([
+        {
+          $match: {
+            groupId: { $in: groupIds },
+            deletedFor: { $ne: userId },
+            $or: [
+              { deleteAt: null },
+              { deleteAt: { $exists: false } },
+              { deleteAt: { $gt: new Date() } },
+            ],
+          },
+        },
+        { $sort: { createdAt: -1 } },
+        { $group: { _id: "$groupId", messageId: { $first: "$_id" } } },
+      ]);
+
+      // A second pass so the author can be populated — an aggregation would need
+      // a $lookup to do the same thing, for no gain at this size.
+      const previews = await Message.find({ _id: { $in: newest.map((n) => n.messageId) } })
+        .select(
+          "groupId senderId text image images voice poll isAnonymous isDeletedForEveryone createdAt"
+        )
+        .populate("senderId", "fullName profilePic")
+        .lean();
+
+      previewByGroup = new Map(
+        previews.map((m) => [String(m.groupId), hideAnonymousAuthor(m, userId)])
+      );
+    }
+
+    res.status(200).json(
+      groups.map((g) => ({ ...g, lastMessage: previewByGroup.get(String(g._id)) || null }))
+    );
   } catch (error) {
     console.error("Error fetching user groups:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -400,7 +446,13 @@ export const getGroupMessages = async (req, res) => {
     // Messages the caller deleted for themselves stay hidden. Without this,
     // "delete for me" in a group looked like it worked and then came back on
     // the next load, because only local state had dropped them.
-    const query = { groupId, deletedFor: { $ne: userId } };
+    // An expired disappearing message is withheld from the moment it expires,
+    // rather than whenever the background sweep gets to its row.
+    const query = {
+      groupId,
+      deletedFor: { $ne: userId },
+      $or: [{ deleteAt: null }, { deleteAt: { $exists: false } }, { deleteAt: { $gt: new Date() } }],
+    };
 
     const base = () =>
       Message.find(query)
@@ -583,7 +635,7 @@ export const closeGroupPoll = async (req, res) => {
 export const sendGroupMessage = async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { text, image, images, voice, replyTo, mentions, voiceTranscript, isAnonymous } = req.body;
+    const { text, image, images, voice, replyTo, mentions, voiceTranscript, isAnonymous, clientId } = req.body;
     const senderId = req.user._id;
 
     const group = await Group.findById(groupId);
@@ -665,7 +717,16 @@ export const sendGroupMessage = async (req, res) => {
     // The room gets a payload with no author at all. A per-viewer variant is
     // impossible here — one emit serves everyone — so the sender learns it was
     // theirs from the HTTP response below instead.
-    io.to(`group_${groupId}`).emit("newGroupMessage", hideAnonymousAuthor(populatedMessage));
+    //
+    // The sending client's own id rides along. Members other than the sender have
+    // no use for it and it identifies nobody; what it does is let the device that
+    // sent the message recognise its own optimistic copy, which is what allows the
+    // broadcast to reach that account's *other* devices instead of being discarded
+    // wholesale to avoid showing a duplicate.
+    io.to(`group_${groupId}`).emit("newGroupMessage", {
+      ...hideAnonymousAuthor(populatedMessage),
+      clientId: clientId || null,
+    });
 
     res.status(201).json(hideAnonymousAuthor(populatedMessage, senderId));
   } catch (error) {
