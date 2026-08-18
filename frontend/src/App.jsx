@@ -59,7 +59,7 @@ import useAuthStore from './store/useAuthStore'
 import { useChatStore } from './store/useChatStore'
 import { setScreenSecure } from './lib/secureScreen'
 import { setBadgeCount, clearBadge } from './lib/badge'
-import { Loader, X, MessageSquare, Phone, Info } from 'lucide-react'
+import { Loader, X, MessageSquare, Phone, Info, Users, Video } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import { useThemeStore } from './store/useThemeStore'
 import { THEME_COLORS } from './constants'
@@ -161,7 +161,8 @@ const App = () => {
   const { authUser, checkAuth, isCheckingAuth, onlineUsers, socket, switchingTo,
           accountChooserOpen, closeAccountChooser, savedAccounts, switchAccount } = useAuthStore();
   const { theme } = useThemeStore()
-  const { getGroups, subscribeToGroupEvents, unsubscribeFromGroupEvents, selectedGroup, unreadGroupCounts } = useGroupStore();
+  const { getGroups, subscribeToGroupEvents, unsubscribeFromGroupEvents, selectedGroup, unreadGroupCounts,
+    groupPreview, setGroupPreview, setSelectedGroup, setIsGroupDetailsModalOpen, startOrJoinGroupCall } = useGroupStore();
 
   // Groups whose welcome sheet has been dismissed in this session. The server
   // is the real record (welcomeSeenBy); this only stops the sheet reappearing in
@@ -468,6 +469,112 @@ const App = () => {
               >
                 <Info size={16} />
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Group preview — the same card the one-to-one avatars open, so tapping an
+          avatar behaves identically in both halves of the list. */}
+      {groupPreview && (
+        <div
+          onClick={() => setGroupPreview(null)}
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-black/55 backdrop-blur-[1px] p-4 select-none animate-in fade-in duration-200"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-[250px] bg-base-100 rounded-2xl overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200 border border-base-300 relative"
+          >
+            <div className="absolute top-0 inset-x-0 bg-black/35 backdrop-blur-[0.5px] px-3 py-2 flex items-center justify-between z-10">
+              <span className="text-white text-xs font-semibold truncate max-w-[80%]">
+                {groupPreview.name}
+              </span>
+              <button
+                onClick={() => setGroupPreview(null)}
+                className="transition-colors text-white/80 hover:text-white"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Only a real picture is worth expanding — the placeholder is not. */}
+            {groupPreview.groupPic ? (
+              <div
+                onClick={() => {
+                  setLightboxImage(groupPreview.groupPic);
+                  setGroupPreview(null);
+                }}
+                className="relative w-full aspect-square cursor-zoom-in group"
+              >
+                <img
+                  src={groupPreview.groupPic}
+                  alt={groupPreview.name}
+                  className="object-cover w-full h-full"
+                />
+                <div className="absolute inset-0 flex items-center justify-center transition-colors bg-black/0 group-hover:bg-black/10">
+                  <span className="text-white/0 group-hover:text-white/90 text-[11px] font-medium bg-black/40 px-2 py-0.5 rounded-full transition-all">
+                    Tap to expand
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="grid w-full aspect-square place-items-center bg-secondary/10 text-secondary">
+                <Users size={64} strokeWidth={1.5} />
+              </div>
+            )}
+
+            <div className="border-t border-base-200">
+              <p className="px-3 pt-2 text-[11px] text-center truncate t-dim">
+                {groupPreview.members?.length || 0}{" "}
+                {(groupPreview.members?.length || 0) === 1 ? "member" : "members"}
+              </p>
+              <div className="flex items-center justify-around py-2.5 bg-base-100">
+                <button
+                  onClick={() => {
+                    setSelectedGroup(groupPreview);
+                    setGroupPreview(null);
+                  }}
+                  className="p-2 transition-all rounded-full hover:bg-base-200 text-primary"
+                  title="Open chat"
+                >
+                  <MessageSquare size={16} />
+                </button>
+                <button
+                  onClick={() => {
+                    const group = groupPreview;
+                    setSelectedGroup(group);
+                    setGroupPreview(null);
+                    startOrJoinGroupCall(group._id, "voice");
+                  }}
+                  className="p-2 transition-all rounded-full hover:bg-base-200 text-primary"
+                  title="Group voice call"
+                >
+                  <Phone size={16} />
+                </button>
+                <button
+                  onClick={() => {
+                    const group = groupPreview;
+                    setSelectedGroup(group);
+                    setGroupPreview(null);
+                    startOrJoinGroupCall(group._id, "video");
+                  }}
+                  className="p-2 transition-all rounded-full hover:bg-base-200 text-primary"
+                  title="Group video call"
+                >
+                  <Video size={16} />
+                </button>
+                <button
+                  onClick={() => {
+                    setSelectedGroup(groupPreview);
+                    setGroupPreview(null);
+                    setIsGroupDetailsModalOpen(true);
+                  }}
+                  className="p-2 transition-all rounded-full hover:bg-base-200 text-primary"
+                  title="Group info"
+                >
+                  <Info size={16} />
+                </button>
+              </div>
             </div>
           </div>
         </div>

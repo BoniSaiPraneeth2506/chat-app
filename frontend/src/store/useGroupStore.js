@@ -51,6 +51,12 @@ export const useGroupStore = create((set, get) => ({
   mentionedGroups: {},
   groupTypingUsers: {},
 
+  // The group whose sidebar avatar was tapped — mirrors profilePreviewUser for
+  // one-to-one chats, so an avatar means "show me this" in both lists rather than
+  // only in one of them.
+  groupPreview: null,
+  setGroupPreview: (groupPreview) => set({ groupPreview }),
+
   // Modals
   isCreateGroupModalOpen: false,
   isGroupDetailsModalOpen: false,
@@ -842,15 +848,8 @@ export const useGroupStore = create((set, get) => ({
       socket.off("groupPollUpdated");
       socket.off("groupMessageDeleted");
       socket.off("groupMessageEdited");
-    socket.off("groupMessageTranscript");
-    socket.off("groupMessageReaction");
-    socket.off("groupMessageEdited");
-    socket.off("groupMessageTranscript");
-    socket.off("groupMessageReaction");
-    socket.off("groupMessageDeleted");
-    socket.off("groupMessageEdited");
-    socket.off("groupMessageTranscript");
-    socket.off("groupMessageReaction");
+      socket.off("groupMessageTranscript");
+      socket.off("groupMessageReaction");
       socket.off("groupCreated");
       socket.off("groupUpdated");
       socket.off("groupTyping");

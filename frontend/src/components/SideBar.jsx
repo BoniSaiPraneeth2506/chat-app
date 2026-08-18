@@ -416,6 +416,7 @@ const SideBar = () => {
     unreadGroupCounts,
     mentionedGroups,
     setIsCreateGroupModalOpen,
+    setGroupPreview,
     subscribeToGroupEvents,
     unsubscribeFromGroupEvents
   } = useGroupStore();
@@ -737,15 +738,21 @@ const SideBar = () => {
           isSelected ? "bg-base-200/80" : ""
         }`}
       >
-        <div className="relative flex-shrink-0">
+        <div
+          className="relative flex-shrink-0 cursor-pointer"
+          onClick={(e) => {
+            e.stopPropagation();
+            setGroupPreview(group);
+          }}
+        >
           {group.groupPic ? (
             <img
               src={group.groupPic}
               alt={group.name}
-              className="object-cover rounded-full size-12"
+              className="object-cover transition-all rounded-full size-12 hover:opacity-90 active:scale-95"
             />
           ) : (
-            <div className="size-12 rounded-full bg-secondary/10 border border-secondary/20 flex items-center justify-center text-secondary">
+            <div className="flex items-center justify-center transition-all border rounded-full size-12 bg-secondary/10 border-secondary/20 text-secondary hover:opacity-90 active:scale-95">
               <Users className="size-6" />
             </div>
           )}
