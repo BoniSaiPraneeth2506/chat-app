@@ -14,6 +14,7 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors'
 import { app, server } from './lib/socket.js';
 import { startScheduler, startMediaPurge } from './jobs/scheduler.js';
+import { startEmailDigest } from './jobs/emailDigest.js';
 import { getAllowedOrigins, isOriginAllowed } from './lib/origins.js';
 
 const ALLOWED_ORIGINS = getAllowedOrigins();
@@ -119,4 +120,6 @@ server.listen(PORT, () => {
   startScheduler();
   // Reclaim Cloudinary storage from expired disappearing messages
   startMediaPurge();
+  // Weekly summary and inactivity nudge, allowlisted to named addresses
+  startEmailDigest();
 });

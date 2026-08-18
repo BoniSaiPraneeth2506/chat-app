@@ -161,6 +161,16 @@ const userSchema=new mongoose.Schema({
     // Private notes the signed-in user keeps about other people, keyed by their
     // id. Lives on the note-taker's document, exactly like contactNicknames, so
     // it is never visible to the person it describes.
+    // When each kind of mail last went out. The schedule is derived from these
+    // rather than from a timer, so a restart cannot skip a send or duplicate one.
+    lastDigestAt:{
+        type:Date,
+        default:null
+    },
+    lastNudgeAt:{
+        type:Date,
+        default:null
+    },
     memberNotes:{
         type:Map,
         of:String,

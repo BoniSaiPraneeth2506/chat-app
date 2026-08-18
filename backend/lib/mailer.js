@@ -28,21 +28,16 @@ const createTransporter = ({ port, secure }) =>
     socketTimeout: SMTP_TIMEOUT_MS,
   });
 
-const mailOptions = (to, otp) => ({
+const mailOptions = ({ to, subject, text, html }) => ({
   from: process.env.EMAIL_FROM || process.env.SMTP_USER,
   to,
-  subject: "Your Chatty password reset code",
-  text: `Your password reset code is ${otp}. It expires in 10 minutes. If you did not request this, you can ignore this email.`,
-  html: `
-    <p>Your password reset code is:</p>
-    <p style="font-size:24px;letter-spacing:4px;font-weight:bold">${otp}</p>
-    <p>This code expires in 10 minutes.</p>
-    <p>If you did not request this, you can ignore this email.</p>
-  `,
+  subject,
+  text,
+  html,
 });
 
-const sendViaResend = async (to, otp) => {
-  const { subject, text, html, from } = mailOptions(to, otp);
+const sendViaResend = async (message) => {
+  const { to, subject, text, html, from } = mailOptions(message);
   const baseUrl = (process.env.RESEND_BASE_URL || "https://api.resend.com").replace(/\/$/, "");
   const res = await fetch(`${baseUrl}/emails`, {
     method: "POST",
@@ -64,8 +59,8 @@ const sendViaResend = async (to, otp) => {
   }
 };
 
-const sendViaBrevo = async (to, otp) => {
-  const { subject, text, html, from } = mailOptions(to, otp);
+const sendViaBrevo = async (message) => {
+  const { to, subject, text, html, from } = mailOptions(message);
   const baseUrl = (process.env.BREVO_BASE_URL || "https://api.brevo.com/v3").replace(/\/$/, "");
   const res = await fetch(`${baseUrl}/smtp/email`, {
     method: "POST",
@@ -88,7 +83,7 @@ const sendViaBrevo = async (to, otp) => {
   }
 };
 
-const sendViaSmtp = async (to, otp) => {
+const sendViaSmtp = async (message) => {
   const preferredPort = Number(process.env.SMTP_PORT) || 587;
   const preferredSecure = process.env.SMTP_SECURE === "true" || preferredPort === 465;
   const attempts = [
@@ -100,7 +95,7 @@ const sendViaSmtp = async (to, otp) => {
   for (const attempt of attempts) {
     try {
       const transporter = createTransporter(attempt);
-      await transporter.sendMail(mailOptions(to, otp));
+      await transporter.sendMail(mailOptions(message));
       return;
     } catch (err) {
       lastError = err;
@@ -118,11 +113,22 @@ const HTTP_PROVIDERS = [
   { name: "Resend", isConfigured: hasResendConfig, send: sendViaResend },
 ];
 
-export const sendPasswordResetOtp = async (to, otp) => {
+/** True when any provider is configured; lets callers skip work entirely. */
+export const isMailConfigured = () =>
+  HTTP_PROVIDERS.some((p) => p.isConfigured()) || hasSmtpConfig();
+
+/**
+ * Sends one message through the provider chain.
+ *
+ * Extracted from the password-reset path so every kind of mail shares one set of
+ * fallbacks. With nothing configured it logs instead of throwing, which keeps
+ * local development working without credentials.
+ */
+export const sendEmail = async ({ to, subject, text, html }) => {
   const providers = HTTP_PROVIDERS.filter((p) => p.isConfigured());
 
   if (providers.length === 0 && !hasSmtpConfig()) {
-    console.log(`[DEV] Password reset OTP for ${to}: ${otp}`);
+    console.log(`[DEV] email not sent (no provider configured) -> ${to}: ${subject}`);
     return { sent: false };
   }
 
@@ -130,8 +136,8 @@ export const sendPasswordResetOtp = async (to, otp) => {
 
   for (const provider of providers) {
     try {
-      await provider.send(to, otp);
-      return { sent: true };
+      await provider.send({ to, subject, text, html });
+      return { sent: true, via: provider.name };
     } catch (err) {
       lastError = err;
       console.error(`${provider.name} send failed:`, err.message);
@@ -140,12 +146,31 @@ export const sendPasswordResetOtp = async (to, otp) => {
 
   if (hasSmtpConfig()) {
     try {
-      await sendViaSmtp(to, otp);
-      return { sent: true };
+      await sendViaSmtp({ to, subject, text, html });
+      return { sent: true, via: "SMTP" };
     } catch (err) {
       lastError = err;
     }
   }
 
   throw lastError;
+};
+
+export const sendPasswordResetOtp = async (to, otp) => {
+  if (!isMailConfigured()) {
+    console.log(`[DEV] Password reset OTP for ${to}: ${otp}`);
+    return { sent: false };
+  }
+
+  return sendEmail({
+    to,
+    subject: "Your Chatty password reset code",
+    text: `Your password reset code is ${otp}. It expires in 10 minutes. If you did not request this, you can ignore this email.`,
+    html: `
+    <p>Your password reset code is:</p>
+    <p style="font-size:24px;letter-spacing:4px;font-weight:bold">${otp}</p>
+    <p>This code expires in 10 minutes.</p>
+    <p>If you did not request this, you can ignore this email.</p>
+  `,
+  });
 };
