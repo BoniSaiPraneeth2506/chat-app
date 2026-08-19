@@ -227,6 +227,20 @@ const userSchema=new mongoose.Schema({
         ref:"User",
         default:[]
     }],
+    // Conversations this user has deleted.
+    //
+    // Hiding the messages is not enough on its own to keep the row out of the
+    // sidebar. A contact with no visible messages left drops out of "people I
+    // have talked to", which makes them eligible again for the handful of
+    // introductory accounts the sidebar offers a new user — so a deleted chat
+    // reappeared by the back door on the next load. Recording the deletion is
+    // what makes it stick; a new message from either side clears the entry, so
+    // the row comes back exactly when there is something in it again.
+    clearedChats:[{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"User",
+        default:[]
+    }],
     blockedUsers:[{
         type:mongoose.Schema.Types.ObjectId,
         ref:"User",

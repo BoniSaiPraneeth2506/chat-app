@@ -3,6 +3,7 @@ import protectRoute from "../middlewares/auth.middleware.js";
 import { 
   getMessages, 
   getUsersForSidebar, 
+  getContactById,
   sendMessage, 
   setDisappearingTimer, 
   toggleMessageReaction,
@@ -31,6 +32,7 @@ router.get('/users',protectRoute,getUsersForSidebar)
 router.get('/blocked',protectRoute,getBlockedUsers)
 router.get('/export/:id',protectRoute,exportChat)
 router.get('/info/:id',protectRoute,getMessageInfo)
+router.get('/contact/:id',protectRoute,getContactById)
 router.get('/:id',protectRoute,getMessages)
 // per-user message send limiter: 20 messages per 10 seconds (cost=1)
 router.post('/send/:id', protectRoute, sendMessage)

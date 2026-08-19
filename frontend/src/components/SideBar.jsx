@@ -355,7 +355,7 @@
 // };
 
 // export default Sidebar;
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useLayoutEffect, useState, useRef } from "react";
 import { useChatStore } from "../store/useChatStore";
 import useAuthStore from "../store/useAuthStore";
 import { useGroupStore } from "../store/useGroupStore";
@@ -422,6 +422,16 @@ const SideBar = () => {
   } = useGroupStore();
 
   const { onlineUsers, authUser } = useAuthStore();
+
+  // Where the action menu actually fits.
+  //
+  // The position used to be clamped against a hardcoded 150px, but the menu is
+  // taller than that with five actions in it, so opening one on a row near the
+  // bottom of the list pushed Lock and Delete off the screen entirely. Measured
+  // before paint instead, which also keeps it inside the right edge and handles
+  // the menu growing or shrinking without another magic number.
+  const menuRef = useRef(null);
+  const [menuPos, setMenuPos] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterMode, setFilterMode] = useState("all");
   // Favourites, archive and pins are stored on the account, not in this
@@ -435,6 +445,23 @@ const SideBar = () => {
   const pinnedUserIds = asIds(authUser?.pinnedChats);
   const [showArchivedOnly, setShowArchivedOnly] = useState(false);
   const [contextMenu, setContextMenu] = useState(null); // { x, y, id, kind }
+
+  // Runs before the browser paints, so the menu never appears at the raw pointer
+  // position first and jump afterwards.
+  useLayoutEffect(() => {
+    if (!contextMenu) {
+      setMenuPos(null);
+      return;
+    }
+    const el = menuRef.current;
+    if (!el) return;
+    const pad = 8;
+    const { offsetWidth: w, offsetHeight: h } = el;
+    setMenuPos({
+      top: Math.max(pad, Math.min(contextMenu.y, window.innerHeight - h - pad)),
+      left: Math.max(pad, Math.min(contextMenu.x, window.innerWidth - w - pad)),
+    });
+  }, [contextMenu]);
   const [swipe, setSwipe] = useState({ id: null, dx: 0 });
   const [lockPrompt, setLockPrompt] = useState(null); // { id, type }
   const swipeRef = useRef(null);
@@ -786,7 +813,9 @@ const SideBar = () => {
                   <strong className="font-medium text-base-content/80">
                     {latestMsg.isAnonymous ? "Anonymous" : latestMsg.senderId?.fullName?.split(" ")[0]}:{" "}
                   </strong>
-                  {latestMsg.poll ? `📊 ${latestMsg.poll.question}` : latestMsg.voice ? "🎤 Voice message" : latestMsg.image ? "📷 Image" : latestMsg.text}
+                  {latestMsg.isDeletedForEveryone
+                    ? "This message was deleted"
+                    : latestMsg.poll ? `📊 ${latestMsg.poll.question}` : latestMsg.voice ? "🎤 Voice message" : latestMsg.image ? "📷 Image" : latestMsg.text}
                 </span>
               ) : (
                 <span className="text-base-content/40 italic">Group created</span>
@@ -923,7 +952,9 @@ const SideBar = () => {
             )}
             <span className="truncate">
               {latestMessages[user._id] ? (
-                latestMessages[user._id].voice ? (
+                latestMessages[user._id].isDeletedForEveryone ? (
+                  <span className="italic t-dim">This message was deleted</span>
+                ) : latestMessages[user._id].voice ? (
                   "🎤 Voice message"
                 ) : latestMessages[user._id].image ? (
                   "📷 Image"
@@ -1149,9 +1180,10 @@ const SideBar = () => {
           
           {/* Action Menu Dropdown */}
           <div 
-            style={{ 
-              top: Math.min(contextMenu.y, window.innerHeight - 150), 
-              left: Math.min(contextMenu.x, window.innerWidth - 170) 
+            ref={menuRef}
+            style={{
+              top: menuPos ? menuPos.top : contextMenu.y,
+              left: menuPos ? menuPos.left : contextMenu.x,
             }}
             className="fixed z-50 min-w-[150px] bg-base-100 border border-base-300 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 select-none"
           >

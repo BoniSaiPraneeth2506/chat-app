@@ -389,10 +389,10 @@ const ChatHeader = () => {
                 onClick={() => setIsGroupDetailsModalOpen(true)}
                 className="flex items-center min-w-0 gap-3 cursor-pointer select-none group"
               >
-                <div className="avatar hover:opacity-80 transition-opacity shrink-0">
-                  <div className="relative rounded-full size-10 border flex items-center justify-center text-secondary overflow-hidden">
+                <div className="transition-opacity hover:opacity-80 shrink-0">
+                  <div className="flex items-center justify-center overflow-hidden border rounded-full size-10 text-secondary">
                     {selectedGroup.groupPic ? (
-                      <img src={selectedGroup.groupPic} alt={selectedGroup.name} className="w-full h-full object-cover" />
+                      <img src={selectedGroup.groupPic} alt={selectedGroup.name} className="object-cover w-full h-full" />
                     ) : (
                       <Users className="size-5" />
                     )}

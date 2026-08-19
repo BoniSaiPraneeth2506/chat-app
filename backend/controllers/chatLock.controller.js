@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import User from "../models/user.model.js";
 import Group from "../models/group.model.js";
-import { SIDEBAR_USER_FIELDS, attachUnreadCounts } from "./message.controller.js";
+import { SIDEBAR_USER_FIELDS, attachUnreadCounts, attachLastMessages } from "./message.controller.js";
 import { emitAccountLists } from "../lib/socket.js";
 
 // ── Chat lock ────────────────────────────────────────────────────────────────
@@ -76,6 +76,41 @@ const setupChatLock = async (req, res) => {
  * The list only exists in this response. Nothing else exposes it, so a client
  * that has not passed the password has nothing to display.
  */
+/**
+ * Newest visible message per locked group, keyed by group id.
+ *
+ * Mirrors what the group listing attaches, including the anonymity strip — a
+ * preview is a read path, and an anonymous question must not name its author here
+ * any more than it does in the conversation.
+ */
+const lockedGroupPreviews = async (groups, viewerId) => {
+  const ids = groups.map((g) => g._id);
+  if (ids.length === 0) return new Map();
+
+  const newest = await Message.aggregate([
+    {
+      $match: {
+        groupId: { $in: ids },
+        deletedFor: { $ne: viewerId },
+        $or: [
+          { deleteAt: null },
+          { deleteAt: { $exists: false } },
+          { deleteAt: { $gt: new Date() } },
+        ],
+      },
+    },
+    { $sort: { createdAt: -1 } },
+    { $group: { _id: "$groupId", messageId: { $first: "$_id" } } },
+  ]);
+
+  const previews = await Message.find({ _id: { $in: newest.map((n) => n.messageId) } })
+    .select("groupId senderId text image images voice poll isAnonymous isDeletedForEveryone createdAt")
+    .populate("senderId", "fullName")
+    .lean();
+
+  return new Map(previews.map((m) => [String(m.groupId), hideAnonymousAuthor(m, viewerId)]));
+};
+
 const unlockChats = async (req, res) => {
   try {
     const { password } = req.body;
@@ -94,9 +129,22 @@ const unlockChats = async (req, res) => {
         .lean(),
     ]);
 
+    // A locked conversation is still a conversation. Behind the password it should
+    // read like the normal list — who wrote last and when — rather than a row of
+    // identical "Locked chat" labels that say nothing about which is which.
+    const [withPreviews, groupPreviews] = await Promise.all([
+      attachLastMessages(await attachUnreadCounts(users, user), user._id),
+      lockedGroupPreviews(groups, user._id),
+    ]);
+
     res.status(200).json({
-      users: await attachUnreadCounts(users, user),
-      groups: groups.map((g) => ({ ...g, memberCount: g.members?.length || 0, members: undefined })),
+      users: withPreviews,
+      groups: groups.map((g) => ({
+        ...g,
+        memberCount: g.members?.length || 0,
+        members: undefined,
+        lastMessage: groupPreviews.get(String(g._id)) || null,
+      })),
     });
   } catch (error) {
     console.error("Error in unlockChats:", error);

@@ -3,7 +3,7 @@ import toast from "react-hot-toast";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
 import { useState, useEffect, useRef } from "react";
-import { MessageSquare, Settings, User, Laptop, ShieldOff, UserPlus, Check, X, Info } from "lucide-react";
+import { MessageSquare, Settings, User, Laptop, ShieldOff, UserPlus, Info } from "lucide-react";
 import { useGroupStore } from "../store/useGroupStore";
 import { useChatLockStore } from "../store/useChatLockStore";
 import { haptic } from "../lib/haptics";
@@ -12,6 +12,22 @@ const Navbar = () => {
   const { authUser, savedAccounts, switchAccount, forgetSavedAccount, refreshSavedAccounts } = useAuthStore();
   const [isSwitching, setIsSwitching] = useState(false);
   const lastWordmarkTap = useRef(0);
+  const forgetTimer = useRef(null);
+
+  // Removing a saved account is rare and irreversible on this device, so it lives
+  // behind a press-and-hold (or right-click) rather than a permanent button.
+  const cancelForgetPress = () => {
+    if (forgetTimer.current) {
+      clearTimeout(forgetTimer.current);
+      forgetTimer.current = null;
+    }
+  };
+
+  const askForget = (acc) => {
+    if (window.confirm(`Remove ${acc.fullName || acc.email} from this device? You can sign in again any time.`)) {
+      forgetSavedAccount(acc._id);
+    }
+  };
   const openLockedChats = useChatLockStore((s) => s.openModal);
 
   // The list is written to localStorage by the auth store, so re-read it
@@ -39,7 +55,11 @@ const Navbar = () => {
               className="flex items-center gap-2.5 hover:opacity-80 transition-all select-none"
               onClick={(e) => {
                 const now = Date.now();
-                if (now - lastWordmarkTap.current < 400) {
+                // Signed out there is nothing to unlock, and the sign-in and
+                // create-account screens carry this same header — so a stray
+                // double tap there used to raise the locked-chats screen over the
+                // form.
+                if (authUser && now - lastWordmarkTap.current < 400) {
                   e.preventDefault();
                   lastWordmarkTap.current = 0;
                   haptic("longPress");
@@ -74,7 +94,7 @@ const Navbar = () => {
               </div>
               <ul
                 tabIndex={0}
-                className="dropdown-content z-50 menu p-2 shadow-2xl bg-base-100 border border-base-300 rounded-2xl w-52 text-sm text-base-content mt-1 space-y-1"
+                className="dropdown-content z-50 menu p-2 shadow-2xl bg-base-100 border border-base-300 rounded-2xl w-52 max-w-[calc(100vw-1.5rem)] overflow-hidden text-sm text-base-content mt-1 space-y-1"
               >
                 <li>
                   <Link to="/profile" onClick={() => document.activeElement.blur()} className="flex items-center gap-2 rounded-xl">
@@ -120,7 +140,23 @@ const Navbar = () => {
                   return (
                     <li key={acc._id}>
                       <div
-                        className={`flex items-center gap-2 rounded-xl px-3 py-2 transition-colors ${
+                        onContextMenu={(e) => {
+                          if (isActive) return;
+                          e.preventDefault();
+                          askForget(acc);
+                        }}
+                        onTouchStart={() => {
+                          if (isActive) return;
+                          forgetTimer.current = setTimeout(() => {
+                            forgetTimer.current = null;
+                            haptic("longPress");
+                            askForget(acc);
+                          }, 500);
+                        }}
+                        onTouchEnd={cancelForgetPress}
+                        onTouchMove={cancelForgetPress}
+                        onTouchCancel={cancelForgetPress}
+                        className={`flex items-center min-w-0 gap-2 rounded-xl px-3 py-2 transition-colors ${
                           isActive ? "bg-primary/10" : "hover:bg-base-200"
                         }`}
                       >
@@ -146,21 +182,6 @@ const Navbar = () => {
                           <span className="block text-xs font-medium truncate">{acc.fullName}</span>
                           <span className="block text-[10px] text-base-content/45 truncate">{acc.email}</span>
                         </button>
-                        {isActive ? (
-                          <Check size={14} className="text-primary flex-shrink-0" />
-                        ) : (
-                          <button
-                            type="button"
-                            title="Remove from this device"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              forgetSavedAccount(acc._id);
-                            }}
-                            className="p-1 rounded-full text-base-content/30 hover:text-error hover:bg-error/10 transition-colors flex-shrink-0"
-                          >
-                            <X size={12} />
-                          </button>
-                        )}
                       </div>
                     </li>
                   );

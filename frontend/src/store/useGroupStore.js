@@ -758,11 +758,22 @@ export const useGroupStore = create((set, get) => ({
     socket.on("groupMessageDeleted", ({ messageId, isDeletedForEveryone }) => {
       if (!isDeletedForEveryone) return;
       const patch = { isDeletedForEveryone: true, text: "", image: "", images: [], reactions: [] };
-      set((state) => ({
-        groupMessages: state.groupMessages.map((m) =>
-          m._id === messageId ? { ...m, ...patch } : m
-        ),
-      }));
+      set((state) => {
+        // The sidebar's preview is a separate copy of the message, so it kept
+        // quoting text the group itself no longer shows.
+        const latestGroupMessages = { ...state.latestGroupMessages };
+        for (const key of Object.keys(latestGroupMessages)) {
+          if (latestGroupMessages[key]?._id === messageId) {
+            latestGroupMessages[key] = { ...latestGroupMessages[key], ...patch };
+          }
+        }
+        return {
+          groupMessages: state.groupMessages.map((m) =>
+            m._id === messageId ? { ...m, ...patch } : m
+          ),
+          latestGroupMessages,
+        };
+      });
       const authUser = useAuthStore.getState().authUser;
       if (authUser) updateCachedMessage(authUser._id, messageId, patch);
     });

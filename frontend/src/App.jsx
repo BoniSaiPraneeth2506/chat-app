@@ -7,6 +7,7 @@
 // import SettingsPage from './pages/SettingsPage'
 // import ProfilePage from './pages/ProfilePage'
 // import useAuthStore from './store/useAuthStore'
+import axiosInstance from './lib/axios'
 // import { Loader } from 'lucide-react'
 // import { Toaster } from 'react-hot-toast'
 // import  {useThemeStore}  from './store/useThemeStore'
@@ -124,15 +125,28 @@ const ChatRedirectHandler = () => {
       }
 
       await getUsers();
-      const foundUser = useChatStore.getState().users?.find((u) => u._id === userId);
+      let foundUser = useChatStore.getState().users?.find((u) => u._id === userId);
 
-      if (foundUser) {
-        setSelectedUser(foundUser);
-      } else {
+      // The sidebar only lists people this account has already talked to, so a
+      // scanned code for someone new was never in it — which is the one case the
+      // whole feature exists for. Asking for the contact directly covers that, and
+      // a cleared conversation, and anyone the list happens not to carry.
+      if (!foundUser) {
+        try {
+          const res = await axiosInstance.get(`/messages/contact/${userId}`);
+          foundUser = res.data;
+        } catch {
+          foundUser = null;
+        }
+      }
+
+      if (!foundUser) {
         toast.error("Could not find that user");
         navigate("/", { replace: true });
         return;
       }
+
+      setSelectedUser(foundUser);
       navigate("/", { replace: true });
     };
 

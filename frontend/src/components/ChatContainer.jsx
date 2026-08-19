@@ -316,13 +316,13 @@ const getDateLabel = (dateStr) => {
   return msgDate.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
 };
 
-const DateSeparator = ({ date }) => (
-  <div className="flex items-center gap-3 my-3 select-none px-2">
-    <div className="flex-1 h-px bg-base-300/50" />
+const DateSeparator = ({ date, bare }) => (
+  <div className={`flex items-center gap-3 my-3 select-none px-2 ${bare ? "justify-center" : ""}`}>
+    {!bare && <div className="flex-1 h-px bg-base-300/50" />}
     <span className="text-[10px] font-medium text-base-content/40 bg-base-200/50 px-3 py-1 rounded-full whitespace-nowrap">
       {getDateLabel(date)}
     </span>
-    <div className="flex-1 h-px bg-base-300/50" />
+    {!bare && <div className="flex-1 h-px bg-base-300/50" />}
   </div>
 );
 
@@ -1048,7 +1048,7 @@ const ChatContainer = () => {
 
               if (message.isCallLog) {
                 return [
-                  isNewDay && <DateSeparator key={`sep-${message._id}`} date={message.createdAt} />,
+                  isNewDay && <DateSeparator key={`sep-${message._id}`} date={message.createdAt} bare={index === 0} />,
                   <div key={message._id} className="flex justify-center my-3 select-none w-full animate-in fade-in duration-200">
                     <div className="border border-base-300 rounded-full px-4 py-1.5 flex items-center gap-2 text-xs font-medium shadow-sm">
                       {message.callType === "video" ? (
@@ -1068,7 +1068,7 @@ const ChatContainer = () => {
               }
 
               return [
-                isNewDay && <DateSeparator key={`sep-${message.tempId || message._id}-d`} date={message.createdAt} />,
+                isNewDay && <DateSeparator key={`sep-${message.tempId || message._id}-d`} date={message.createdAt} bare={index === 0} />,
                 <div
                   key={message.tempId || message._id}
                   className={`flex items-center gap-2 group relative transition-colors duration-150 -mx-4 px-6 lg:mx-0 lg:px-2 ${

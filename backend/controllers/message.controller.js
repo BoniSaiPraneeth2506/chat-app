@@ -314,6 +314,60 @@ const exportChat = async (req, res) => {
 };
 
 /**
+ * Attaches each contact's newest message to the rows the sidebar will render.
+ *
+ * The client used to build these previews by requesting every conversation in
+ * full — one round trip per contact, each returning that contact's entire history
+ * so the last item could be read off the end. Two queries replace all of it, and
+ * the cost stops growing with how much has been said.
+ *
+ * Only messages this user can still see count: cleared ones carry them in
+ * deletedFor, and an expired disappearing message is gone from the conversation,
+ * so neither should be quoted in a preview.
+ */
+const attachLastMessages = async (users, myId) => {
+  if (!Array.isArray(users) || users.length === 0) return users;
+  const ids = users.map((u) => u._id);
+
+  const newest = await Message.aggregate([
+    {
+      $match: {
+        $and: [
+          { groupId: null, deletedFor: { $ne: myId } },
+          { $or: [{ senderId: myId }, { receiverId: myId }] },
+          unexpired(),
+        ],
+      },
+    },
+    {
+      $addFields: {
+        counterparty: {
+          $cond: [{ $eq: ["$senderId", myId] }, "$receiverId", "$senderId"],
+        },
+      },
+    },
+    { $match: { counterparty: { $in: ids } } },
+    { $sort: { createdAt: -1 } },
+    { $group: { _id: "$counterparty", messageId: { $first: "$_id" } } },
+  ]);
+
+  if (newest.length === 0) return users.map((u) => ({ ...u, lastMessage: null }));
+
+  const previews = await Message.find({ _id: { $in: newest.map((n) => n.messageId) } })
+    .select(
+      "senderId receiverId text image images voice createdAt isDeletedForEveryone isCallLog callType callStatus callDuration"
+    )
+    .lean();
+
+  const byId = new Map(previews.map((m) => [String(m._id), m]));
+  const byCounterparty = new Map(
+    newest.map((n) => [String(n._id), byId.get(String(n.messageId)) || null])
+  );
+
+  return users.map((u) => ({ ...u, lastMessage: byCounterparty.get(String(u._id)) || null }));
+};
+
+/**
  * Excludes a disappearing message whose time is up.
  *
  * The row itself is removed by the media sweep moments later, and by the TTL
@@ -324,6 +378,42 @@ const exportChat = async (req, res) => {
 const unexpired = () => ({
   $or: [{ deleteAt: null }, { deleteAt: { $exists: false } }, { deleteAt: { $gt: new Date() } }],
 });
+
+/**
+ * One contact, by id, for a QR deep link.
+ *
+ * The link used to be resolved against the sidebar list, which only holds people
+ * this user has already talked to — so scanning a code for someone new always
+ * ended in "could not find that user" and a bounce to the home screen, which is
+ * precisely the case the feature exists for. A cleared conversation had the same
+ * problem for the same reason.
+ *
+ * A locked contact is refused. Otherwise the deep link would be a way around the
+ * lock: the row is withheld from every list, and handing it back here would undo
+ * that for anyone holding the URL.
+ */
+const getContactById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+    if ((req.user.lockedChats || []).some((locked) => String(locked) === String(id))) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const contact = await User.findById(id).select(SIDEBAR_USER_FIELDS).lean();
+    if (!contact || !contact.fullName) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const [withCounts] = await attachUnreadCounts([contact], req.user);
+    res.status(200).json(withCounts || contact);
+  } catch (error) {
+    console.error("Error in getContactById:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
 
 const getUsersForSidebar = async (req, res) => {
   try {
@@ -337,7 +427,9 @@ const getUsersForSidebar = async (req, res) => {
         _id: { $ne: loggedInUserId, $nin: req.user.lockedChats || [] },
         fullName: { $regex: safeSearch, $options: "i" }
       }).select(SIDEBAR_USER_FIELDS).lean();
-      return res.status(200).json(await attachUnreadCounts(filteredUsers, req.user));
+      return res.status(200).json(
+        await attachLastMessages(await attachUnreadCounts(filteredUsers, req.user), loggedInUserId)
+      );
     }
 
     // 1. Users the logged-in user has chatted with (1-on-1 only; groupId is set
@@ -367,10 +459,12 @@ const getUsersForSidebar = async (req, res) => {
     // If they were sent and merely not rendered, the lock would be one edited
     // state away from being bypassed.
     const lockedIds = (req.user.lockedChats || []).map(String);
+    const clearedIds = (req.user.clearedChats || []).map(String);
+    const withheld = [...new Set([...lockedIds, ...clearedIds])];
 
     // 2. Fetch the chatted users
     const chattedUsers = await User.find({
-      _id: { $in: chattedIds.filter((id) => !lockedIds.includes(id)), $ne: loggedInUserId },
+      _id: { $in: chattedIds.filter((id) => !withheld.includes(id)), $ne: loggedInUserId },
       fullName: { $exists: true, $ne: "" }
     }).select(SIDEBAR_USER_FIELDS).lean();
 
@@ -379,7 +473,7 @@ const getUsersForSidebar = async (req, res) => {
     // A locked contact with no message history is not in chattedIds, so it fell
     // through this second query and appeared in the sidebar anyway.
     const dummyUsers = await User.find({
-      _id: { $ne: loggedInUserId, $nin: [...chattedIds, ...lockedIds] },
+      _id: { $ne: loggedInUserId, $nin: [...chattedIds, ...withheld] },
       fullName: { $exists: true, $ne: "" },
       email: { $regex: "@example\\.com$" }
     })
@@ -390,7 +484,9 @@ const getUsersForSidebar = async (req, res) => {
     // 4. Combine chatted users and dummy users
     const combinedUsers = [...chattedUsers, ...dummyUsers];
 
-    return res.status(200).json(await attachUnreadCounts(combinedUsers, req.user));
+    return res.status(200).json(
+      await attachLastMessages(await attachUnreadCounts(combinedUsers, req.user), loggedInUserId)
+    );
   } catch (err) {
     console.log(err);
     res.status(500).json({ message: "Internal server error" });
@@ -612,6 +708,12 @@ const sendMessage = async (req, res) => {
 
     await newMessage.save();
     await newMessage.populate("replyTo");
+
+    // Either side writing again undoes the deletion, on both accounts: the sender
+    // is plainly in this conversation once more, and the recipient has something
+    // new to read. Anything already hidden stays hidden — only the row returns.
+    await User.updateOne({ _id: senderId }, { $pull: { clearedChats: receiverId } });
+    await User.updateOne({ _id: receiverId }, { $pull: { clearedChats: senderId } });
 
     // Delivered to the recipient and to the sender's own other devices.
     //
@@ -925,6 +1027,11 @@ const clearChatHistory = async (req, res) => {
       await destroyAssets(purgeable.flatMap(assetUrlsOf));
       await Message.deleteMany({ _id: { $in: purgeable.map((m) => m._id) } });
     }
+
+    // Remembered so the row stays out of the sidebar. Without this the contact
+    // simply stopped counting as someone this user had talked to, which let the
+    // introductory-accounts query offer them again on the next load.
+    await User.updateOne({ _id: myId }, { $addToSet: { clearedChats: contactId } });
 
     res.status(200).json({
       message: "Chat history cleared successfully",
@@ -1599,6 +1706,8 @@ const cancelScheduledMessage = async (req, res) => {
 };
 
 export { 
+  attachLastMessages,
+  getContactById,
   getUsersForSidebar, 
   getMessages, 
   sendMessage, 

@@ -2,7 +2,7 @@ import User from "../models/user.model.js";
 import Message from "../models/message.model.js";
 import Group from "../models/group.model.js";
 import { sendEmail, isMailConfigured } from "../lib/mailer.js";
-import { getAppUrl } from "../lib/appUrl.js";
+import { getAppUrl, getAppDownloadUrl } from "../lib/appUrl.js";
 import { weeklyDigestEmail, inactivityNudgeEmail } from "../lib/emailTemplates.js";
 
 /**
@@ -10,7 +10,7 @@ import { weeklyDigestEmail, inactivityNudgeEmail } from "../lib/emailTemplates.j
  *
  * Restricted to an explicit allowlist. This sends real mail to real inboxes, and
  * a bug that fans out across every registered account cannot be taken back — so
- * the default is three named addresses rather than "everyone". DIGEST_RECIPIENTS
+ * the default is one named address rather than "everyone". DIGEST_RECIPIENTS
  * overrides it (comma-separated) without a code change.
  *
  * Timing is derived from stored timestamps rather than from when the process
@@ -19,11 +19,7 @@ import { weeklyDigestEmail, inactivityNudgeEmail } from "../lib/emailTemplates.j
  * timer would do both of.
  */
 
-const DEFAULT_RECIPIENTS = [
-  "koppisettyjyothika@gmail.com",
-  "saipraneethboni0037@gmail.com",
-  "bunnyking828@gmail.com",
-];
+const DEFAULT_RECIPIENTS = ["saipraneethboni0037@gmail.com"];
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -184,7 +180,7 @@ const planFor = (user, now) => {
   return null;
 };
 
-const sendFor = async (user, kind, appUrl) => {
+const sendFor = async (user, kind, appUrl, downloadUrl) => {
   const activity = await collectActivity(user);
 
   if (kind === "nudge" && activity.unreadTotal === 0) {
@@ -197,8 +193,8 @@ const sendFor = async (user, kind, appUrl) => {
   const sinceDays = daysSince(user.lastSeen);
   const message =
     kind === "digest"
-      ? weeklyDigestEmail({ name: user.fullName, appUrl, sinceDays, ...activity })
-      : inactivityNudgeEmail({ name: user.fullName, appUrl, sinceDays, ...activity });
+      ? weeklyDigestEmail({ name: user.fullName, appUrl, downloadUrl, sinceDays, ...activity })
+      : inactivityNudgeEmail({ name: user.fullName, appUrl, downloadUrl, sinceDays, ...activity });
 
   const result = await sendEmail({ to: user.email, ...message });
 
@@ -218,6 +214,7 @@ const sendFor = async (user, kind, appUrl) => {
  */
 export const runEmailDigest = async ({ dryRun = false, force = null } = {}) => {
   const appUrl = getAppUrl();
+  const downloadUrl = getAppDownloadUrl();
   if (!appUrl) {
     console.warn("[digest] no public app URL (set PUBLIC_APP_URL or ALLOWED_ORIGIN) — skipping");
     return [];
@@ -254,7 +251,7 @@ export const runEmailDigest = async ({ dryRun = false, force = null } = {}) => {
         continue;
       }
 
-      const result = await sendFor(user, kind, appUrl);
+      const result = await sendFor(user, kind, appUrl, downloadUrl);
       outcomes.push({ email: user.email, action: kind, ...result });
     } catch (err) {
       console.error(`[digest] ${user.email} failed:`, err?.message || err);

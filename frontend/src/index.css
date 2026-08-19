@@ -271,3 +271,32 @@
   background-color: #1b3a6b;
   color: #e8eefc;
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Header icon buttons.
+
+   A bare icon floating in a header reads as unfinished — there is nothing to
+   tell you it is a control until you hover it. These sit on a real surface with
+   a hairline edge, so both actions look like the buttons they are and match each
+   other exactly.
+   ────────────────────────────────────────────────────────────────────────── */
+.icon-btn {
+  background-color: var(--color-base-300);
+  border: 1px solid var(--color-base-300);
+  color: var(--color-base-content);
+  transition: background-color 150ms ease, border-color 150ms ease, transform 120ms ease;
+}
+.icon-btn:active { transform: scale(0.94); }
+
+@supports (background-color: color-mix(in oklch, red 50%, transparent)) {
+  .icon-btn {
+    background-color: color-mix(in oklch, var(--color-base-content) 6%, transparent);
+    border-color: color-mix(in oklch, var(--color-base-content) 12%, transparent);
+    color: color-mix(in oklch, var(--color-base-content) 78%, transparent);
+  }
+  .icon-btn:hover {
+    background-color: color-mix(in oklch, var(--color-base-content) 11%, transparent);
+    border-color: color-mix(in oklch, var(--color-base-content) 20%, transparent);
+    color: var(--color-base-content);
+  }
+}

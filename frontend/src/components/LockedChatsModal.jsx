@@ -10,6 +10,7 @@ import {
   isBiometryAvailable, verifyBiometry, hasStoredLockSecret, readLockSecret, storeLockSecret,
 } from "../lib/biometrics";
 import { useNicknames, displayNameOf } from "../lib/contacts";
+import { formatMessageTime } from "../lib/utils";
 import { haptic } from "../lib/haptics";
 
 // The locked chats screen.
@@ -138,6 +139,24 @@ const LockedChatsModal = () => {
 
   const total = lockedUsers.length + lockedGroups.length;
 
+  /**
+   * The preview line for a locked row.
+   *
+   * These rows used to read "Locked chat", the same words on every one of them,
+   * which told you nothing about which conversation you were looking at. Behind
+   * the password there is no reason to withhold it: the list reads like the normal
+   * one, from the same fields.
+   */
+  const previewOf = (lastMessage, fallbackText) => {
+    if (!lastMessage) return fallbackText;
+    if (lastMessage.isDeletedForEveryone) return "This message was deleted";
+    if (lastMessage.isCallLog) return lastMessage.text || "Call";
+    if (lastMessage.poll) return `📊 ${lastMessage.poll.question}`;
+    if (lastMessage.voice) return "🎤 Voice message";
+    if (lastMessage.image || lastMessage.images?.length) return "📷 Image";
+    return lastMessage.text || fallbackText;
+  };
+
   const row = (key, { avatar, fallback, title, subtitle, time, unread, onOpen, press }) => (
     <button
       key={key}
@@ -166,10 +185,7 @@ const LockedChatsModal = () => {
           {time && <span className="text-xs leading-none t-dim shrink-0">{time}</span>}
         </span>
         <span className="flex items-center justify-between gap-2 mt-1">
-          <span className="flex items-center gap-1 text-sm truncate t-dim">
-            <Lock size={10} className="shrink-0" />
-            {subtitle}
-          </span>
+          <span className="text-sm truncate t-dim">{subtitle}</span>
           {unread > 0 && (
             <span className="flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[9px] leading-none font-bold text-white bg-primary rounded-full shrink-0">
               {unread}
@@ -199,10 +215,10 @@ const LockedChatsModal = () => {
           <button
             type="button"
             onClick={() => (view === "recover" ? setView("locked") : closeModal())}
-            className="p-2 rounded-full t-dim hover:text-base-content hover:bg-base-200 transition-colors"
+            className="icon-btn grid size-9 shrink-0 place-items-center rounded-full"
             aria-label="Back"
           >
-            <ArrowLeft size={19} />
+            <ArrowLeft size={17} />
           </button>
           <div className="flex-1 min-w-0">
             <h2 className="flex items-center gap-2 text-[17px] font-semibold text-base-content">
@@ -218,10 +234,10 @@ const LockedChatsModal = () => {
           <button
             type="button"
             onClick={closeModal}
-            className="p-2 rounded-full t-dim hover:text-base-content hover:bg-base-200 transition-colors"
+            className="icon-btn grid size-9 shrink-0 place-items-center rounded-full"
             aria-label="Close"
           >
-            <X size={19} />
+            <X size={17} />
           </button>
         </div>
       </div>
@@ -358,8 +374,10 @@ const LockedChatsModal = () => {
                   row(user._id, {
                     avatar: user.profilePic || "/avatar.png",
                     title: displayNameOf(user, nicknames),
-                    subtitle: "Locked chat",
-                    time: "",
+                    subtitle: previewOf(user.lastMessage, "No messages"),
+                    time: user.lastMessage?.createdAt
+                      ? formatMessageTime(user.lastMessage.createdAt)
+                      : "",
                     unread: user.unreadCount || 0,
                     onOpen: () => openChat(user, false),
                     press: { id: user._id, type: "user", name: displayNameOf(user, nicknames) },
@@ -370,7 +388,13 @@ const LockedChatsModal = () => {
                     avatar: group.groupPic || "",
                     fallback: <Users size={19} />,
                     title: group.name,
-                    subtitle: `${group.memberCount || 0} members`,
+                    subtitle: previewOf(
+                      group.lastMessage,
+                      `${group.memberCount || 0} members`
+                    ),
+                    time: group.lastMessage?.createdAt
+                      ? formatMessageTime(group.lastMessage.createdAt)
+                      : "",
                     unread: 0,
                     onOpen: () => openChat(group, true),
                     press: { id: group._id, type: "group", name: group.name },

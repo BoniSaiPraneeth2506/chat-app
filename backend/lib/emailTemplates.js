@@ -81,7 +81,7 @@ const conversationRow = (item, isLast) => `
     </td>
   </tr>`;
 
-const shell = ({ preheader, heading, intro, bodyHtml, ctaUrl, ctaLabel, footnote }) => `<!doctype html>
+const shell = ({ preheader, heading, intro, bodyHtml, ctaUrl, ctaLabel, footnote, downloadUrl }) => `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -134,6 +134,30 @@ const shell = ({ preheader, heading, intro, bodyHtml, ctaUrl, ctaLabel, footnote
 
           <tr><td style="padding:26px 28px 6px;">${button(ctaUrl, ctaLabel)}</td></tr>
 
+          <!-- The address is written out as text, not only wrapped around a
+               button: a reader who wants to open it on a different device has to
+               be able to see and copy it. The Android row appears only when a
+               build is actually published, so the mail never carries a dead
+               link. -->
+          <tr>
+            <td style="padding:16px 28px 0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                     style="background:${CANVAS};border-radius:10px;">
+                <tr>
+                  <td style="padding:14px 16px;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:12px;line-height:1.7;color:${MUTED};">
+                    <strong style="color:${INK};">On the web</strong><br>
+                    <a href="${esc(ctaUrl)}" style="color:${NAVY};text-decoration:underline;word-break:break-all;">${esc(ctaUrl)}</a>
+                    ${downloadUrl ? `
+                    <br><br>
+                    <strong style="color:${INK};">Android app</strong><br>
+                    <a href="${esc(downloadUrl)}" style="color:${NAVY};text-decoration:underline;word-break:break-all;">${esc(downloadUrl)}</a>
+                    <br><span style="font-size:11px;color:${MUTED};">Save the file, then open it on your phone to install.</span>` : ""}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
           <tr>
             <td style="padding:14px 28px 30px;">
               <p style="margin:0;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:${MUTED};text-align:center;">
@@ -165,7 +189,7 @@ const shell = ({ preheader, heading, intro, bodyHtml, ctaUrl, ctaLabel, footnote
  * account rather than a template. With nothing waiting it says so plainly instead
  * of inventing activity.
  */
-export const weeklyDigestEmail = ({ name, appUrl, unreadTotal, conversations, mentions, missedCalls, sinceDays }) => {
+export const weeklyDigestEmail = ({ name, appUrl, downloadUrl, unreadTotal, conversations, mentions, missedCalls, sinceDays }) => {
   const firstName = String(name || "there").trim().split(/\s+/)[0];
   const hasActivity = unreadTotal > 0 || mentions > 0 || missedCalls > 0;
 
@@ -216,6 +240,7 @@ export const weeklyDigestEmail = ({ name, appUrl, unreadTotal, conversations, me
     ...conversations.map((c) => `- ${c.name}${c.isGroup ? " (group)" : ""}: ${c.count} new${c.preview ? ` — ${c.preview}` : ""}`),
     "",
     `Open Chatty: ${appUrl}`,
+    ...(downloadUrl ? [`Android app: ${downloadUrl}`] : []),
     "",
     "You are receiving this weekly summary because this address has a Chatty account.",
   ]
@@ -235,6 +260,7 @@ export const weeklyDigestEmail = ({ name, appUrl, unreadTotal, conversations, me
       intro: `Hi ${firstName} — ${intro}`,
       bodyHtml: statsHtml + listHtml + missedHtml,
       ctaUrl: appUrl,
+      downloadUrl,
       ctaLabel: hasActivity ? "Read your messages" : "Open Chatty",
       footnote: "This is your weekly summary. It arrives once a week, never more often.",
     }),
@@ -247,7 +273,7 @@ export const weeklyDigestEmail = ({ name, appUrl, unreadTotal, conversations, me
  * Deliberately quieter than the digest: one number, one sentence, one button. A
  * nudge that arrives looking like a newsletter gets treated like one.
  */
-export const inactivityNudgeEmail = ({ name, appUrl, unreadTotal, conversations, sinceDays }) => {
+export const inactivityNudgeEmail = ({ name, appUrl, downloadUrl, unreadTotal, conversations, sinceDays }) => {
   const firstName = String(name || "there").trim().split(/\s+/)[0];
   const who = conversations.slice(0, 2).map((c) => c.name);
   const whoLine = who.length
@@ -280,6 +306,7 @@ export const inactivityNudgeEmail = ({ name, appUrl, unreadTotal, conversations,
     whoLine,
     "",
     `Sign in: ${appUrl}`,
+    ...(downloadUrl ? [`Android app: ${downloadUrl}`] : []),
   ].join("\n");
 
   return {
@@ -291,6 +318,7 @@ export const inactivityNudgeEmail = ({ name, appUrl, unreadTotal, conversations,
       intro: `Hi ${firstName} — it has been ${plural(sinceDays, "day", "days")} since you last signed in.`,
       bodyHtml,
       ctaUrl: appUrl,
+      downloadUrl,
       ctaLabel: "Sign in to Chatty",
       footnote: "We only send this when messages are actually waiting for you.",
     }),

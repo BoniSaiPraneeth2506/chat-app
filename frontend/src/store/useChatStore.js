@@ -151,6 +151,37 @@ const upsertIntoList = (list, message) => {
   return merged;
 };
 
+/**
+ * Applies a patch to whichever sidebar previews quote this message.
+ *
+ * The sidebar reads its preview line from latestMessages, which is a separate
+ * copy of the message from the one in the open conversation. Patching only the
+ * conversation left the sidebar quoting text that had been withdrawn for
+ * everyone — visible until something forced a full refetch.
+ */
+const patchSidebarPreview = (setState, messageId, patch) => {
+  const applyTo = (map) => {
+    let changed = false;
+    const next = { ...map };
+    for (const key of Object.keys(next)) {
+      if (next[key]?._id === messageId) {
+        next[key] = { ...next[key], ...patch };
+        changed = true;
+      }
+    }
+    return changed ? next : null;
+  };
+
+  setState((state) => {
+    const next = applyTo(state.latestMessages);
+    return next ? { latestMessages: next } : {};
+  });
+
+  const groupState = useGroupStore.getState();
+  const nextGroup = applyTo(groupState.latestGroupMessages || {});
+  if (nextGroup) useGroupStore.setState({ latestGroupMessages: nextGroup });
+};
+
 /** Content carried over when forwarding; a deleted message forwards empty. */
 const buildForwardPayload = (message) => {
   const payload = { isForwarded: true };
@@ -386,21 +417,39 @@ export const useChatStore = create((set, get) => ({
         return { users, unreadCounts, lastReadTimestamps };
       });
 
-      // Fetch the last message for each user to populate latestMessages
+      // Sidebar previews.
+      //
+      // These used to be gathered by requesting each conversation in turn — and
+      // with no limit, so every contact's entire history was downloaded just to
+      // read the last line off the end of it. The listing carries the preview
+      // now. The per-contact request survives only for a row the response said
+      // nothing about, which means a server older than this change; a contact
+      // with no messages comes back as an explicit null.
       const latestMsgs = {};
-      await Promise.all(
-        users.map(async (user) => {
-          try {
-            const msgRes = await axiosInstance.get(`/messages/${user._id}`);
-            const userMessages = Array.isArray(msgRes.data) ? msgRes.data : [];
-            if (userMessages && userMessages.length > 0) {
-              latestMsgs[user._id] = userMessages[userMessages.length - 1];
+      const unknown = [];
+      users.forEach((user) => {
+        if ("lastMessage" in user) {
+          if (user.lastMessage) latestMsgs[user._id] = user.lastMessage;
+        } else {
+          unknown.push(user);
+        }
+      });
+
+      if (unknown.length > 0) {
+        await Promise.all(
+          unknown.map(async (user) => {
+            try {
+              const msgRes = await axiosInstance.get(`/messages/${user._id}?limit=1&skip=0`);
+              const userMessages = Array.isArray(msgRes.data) ? msgRes.data : [];
+              if (userMessages.length > 0) {
+                latestMsgs[user._id] = userMessages[userMessages.length - 1];
+              }
+            } catch (err) {
+              console.error("Error fetching latest message for user", user._id, err);
             }
-          } catch (err) {
-            console.error("Error fetching latest message for user", user._id, err);
-          }
-        })
-      );
+          })
+        );
+      }
       set({ latestMessages: latestMsgs });
 
       // Cache only the canonical unfiltered sidebar, not per-search results,
@@ -999,6 +1048,7 @@ export const useChatStore = create((set, get) => ({
           msg._id === messageId ? { ...msg, ...patch } : msg
         )
       }));
+      if (isDeletedForEveryone) patchSidebarPreview(set, messageId, patch);
       const authUser = useAuthStore.getState().authUser;
       if (authUser) updateCachedMessage(authUser._id, messageId, patch);
     });
@@ -1330,6 +1380,7 @@ export const useChatStore = create((set, get) => ({
           )
         }));
         patchGroupMessageLocally(messageId, patch);
+        patchSidebarPreview(set, messageId, patch);
         if (authUser) updateCachedMessage(authUser._id, messageId, patch);
         toast.success("Message deleted for everyone");
       }
@@ -1396,6 +1447,14 @@ export const useChatStore = create((set, get) => ({
         };
       });
 
+      // The sidebar is painted from this cache before the network answers, so
+      // leaving the deleted row in it meant the chat flashed back into the list
+      // every time the app was opened cold.
+      if (authUser) {
+        const { users, latestMessages } = get();
+        cacheConversationsMeta(authUser._id, "dm-sidebar", { users, latestMessages });
+      }
+
       toast.success("Chat deleted");
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to clear history");
@@ -1438,6 +1497,7 @@ export const useChatStore = create((set, get) => ({
           )
         }));
         messageIds.forEach((id) => patchGroupMessageLocally(id, patch));
+        messageIds.forEach((id) => patchSidebarPreview(set, id, patch));
         if (authUser) messageIds.forEach((id) => updateCachedMessage(authUser._id, id, patch));
         toast.success("Selected messages deleted for everyone");
       }
