@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect } from "react";
+import GifPicker from "./GifPicker";
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
 import useAuthStore from "../store/useAuthStore";
@@ -18,6 +19,18 @@ const MessageInput = () => {
   // name that merely looks like "@someone" never notifies a real person.
   const [mentionIds, setMentionIds] = useState([]);
   const [mentionQuery, setMentionQuery] = useState(null); // null = picker closed
+
+  // The GIF command the composer is currently showing, or null.
+  //
+  //   /giphy            trending GIFs
+  //   /giphy happy      GIFs for "happy"
+  //   /stickers         trending stickers
+  //   /stickers cat     stickers for "cat"
+  //   /cat              GIFs for "cat" — any other single word is read as a search
+  //
+  // Only ever recognised when the whole composer holds just the command, so a "/"
+  // typed in the middle of a sentence is left alone.
+  const [gifCommand, setGifCommand] = useState(null);
   const [imagePreviews, setImagePreviews] = useState([]);
   // Index of the preview being edited, or null. Held by index rather than by
   // value so the edited result can be written straight back into place.
@@ -101,6 +114,7 @@ const MessageInput = () => {
     } else {
       setText("");
     }
+    setGifCommand(null);
     return () => flushDraft();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedUser?._id]);
@@ -291,6 +305,7 @@ const MessageInput = () => {
   const handleTextChange = (e) => {
     const val = e.target.value;
     setText(val);
+    setGifCommand(parseGifCommand(val));
     if (selectedUser) {
       // The id is captured now, so a draft still in flight when the user switches
       // chats lands under the conversation it was actually typed in.
@@ -311,6 +326,65 @@ const MessageInput = () => {
       typingSentRef.current = false;
       sendTypingStatus(false);
     }, 1500);
+  };
+
+  /**
+   * Reads a slash command out of the composer.
+   *
+   * Deliberately strict: the text has to be nothing but the command, so "10/giphy"
+   * or "see /cat later" are ordinary text. A bare "/" shows nothing until there is
+   * a word after it, which keeps the picker from flashing open on the keystroke
+   * that starts a command.
+   */
+  /**
+   * Sends a picked GIF.
+   *
+   * It travels as the message's image, which is what lets every existing part of
+   * the app treat it as one: the bubble renders it, the lightbox opens it, reply,
+   * forward, delete and the sidebar preview all work untouched. The URL is
+   * GIPHY's own and stays that way — the server accepts it from an allowlisted
+   * host rather than copying the file into our storage.
+   */
+  const sendGif = async (item) => {
+    const wasCommand = text;
+    setText("");
+    setGifCommand(null);
+
+    try {
+      if (selectedGroup) {
+        await sendGroupMessage({
+          image: item.url,
+          replyTo: replyingToMessage?._id || null,
+          mentions: [],
+        });
+      } else {
+        await sendMessage({ image: item.url });
+      }
+      if (replyingToMessage) setReplyingToMessage(null);
+    } catch (error) {
+      console.error("Failed to send GIF", error);
+      toast.error("Could not send that GIF");
+      // Put the command back so the picker reopens where it was.
+      setText(wasCommand);
+      setGifCommand(parseGifCommand(wasCommand));
+    }
+  };
+
+  const parseGifCommand = (value) => {
+    const match = /^\/([a-z0-9_-]{1,24})(?:\s+(.{0,50}))?$/i.exec(value.trim());
+    if (!match) return null;
+
+    const word = match[1].toLowerCase();
+    const rest = (match[2] || "").trim();
+
+    if (word === "giphy" || word === "gif" || word === "gifs") {
+      return { kind: "gifs", query: rest };
+    }
+    if (word === "stickers" || word === "sticker") {
+      return { kind: "stickers", query: rest };
+    }
+    // Anything else is the search itself, which is what makes "/cat" work.
+    return { kind: "gifs", query: rest ? `${word} ${rest}` : word };
   };
 
   // Opens the picker when the caret sits on an "@word" and we're in a group.
@@ -363,6 +437,10 @@ const MessageInput = () => {
     const currentImages = [...imagePreviews];
     const messageOneView = isOneView;
     const currentEditing = editingMessage;
+
+    // A bare slash command is the picker's input, not a message. Sending it would
+    // post the literal "/giphy" into the conversation.
+    if (gifCommand && imagePreviews.length === 0) return;
 
     const willUploadImages = imagePreviews.length > 0;
 
@@ -715,6 +793,21 @@ const MessageInput = () => {
               </div>
             ))}
           </div>
+        )}
+
+        {/* GIF and sticker picker — floats above the composer, so nothing in the
+            conversation moves to make room for it. */}
+        {gifCommand && (
+          <GifPicker
+            kind={gifCommand.kind}
+            query={gifCommand.query}
+            onPick={sendGif}
+            onClose={() => {
+              setGifCommand(null);
+              setText("");
+              inputRef.current?.focus();
+            }}
+          />
         )}
 
         {/* Mention picker — floats above the composer, group chats only */}

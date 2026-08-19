@@ -7,6 +7,7 @@ import authRoutes from './routes/auth.route.js'
 import messageRoutes from './routes/message.route.js'
 import groupRoutes from './routes/group.route.js'
 import uploadRoutes from './routes/upload.route.js'
+import giphyRoutes from "./routes/giphy.route.js";
 import connectDB from './lib/db.js';
 import path from "path";
 import fs from "fs";
@@ -86,6 +87,11 @@ app.use(cors({
     }
   },
   credentials: true,
+  // Without this the browser hides these from the response entirely. The frontend
+  // and the API are separate origins, so a custom header is unreadable unless it
+  // is named here — which is why the pinned-message banner never appeared: the
+  // server sent it and the client could not see it.
+  exposedHeaders: ["X-Pinned-Message", "X-Window-Anchor", "X-Window-Has-Newer"],
 }));
 
 // Rate limiting removed: no express-rate-limit middleware applied.
@@ -95,6 +101,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/uploads', uploadRoutes);
+app.use('/api/giphy', giphyRoutes);
 
 app.get('/', (req, res) => {
   res.send("api is working");

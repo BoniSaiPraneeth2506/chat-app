@@ -344,25 +344,28 @@ const ChatHeader = () => {
     <div className="p-2.5 border-b border-base-300 min-h-[64px] flex items-center bg-base-100 relative z-30">
       {isSearchOpen ? (
         /* Full-width Search Bar mode */
-        <div className="flex items-center gap-3 w-full px-3 py-1.5 rounded-lg border border-base-300 animate-in fade-in duration-200">
-          <Search size={16} className="" />
+        <div className="relative w-full cg-fade">
+          <Search className="absolute -translate-y-1/2 left-4 top-1/2 size-4 text-base-content/40 pointer-events-none" />
           <input
             type="text"
-            placeholder="Search messages in this chat..."
-            className="flex-1 bg-transparent text-xs outline-none text-base-content"
+            placeholder="Search in this chat..."
             value={messageSearchQuery}
             onChange={(e) => setMessageSearchQuery(e.target.value)}
             autoFocus
+            className="field-flat w-full h-10 pl-11 pr-10 transition-colors rounded-full border-0 bg-base-200 text-sm text-base-content ph-dim"
           />
-          <button 
+          <button
             onClick={() => {
+              if (messageSearchQuery) {
+                setMessageSearchQuery("");
+                return;
+              }
               setIsSearchOpen(false);
-              setMessageSearchQuery("");
-            }} 
-            className="p-1 hover:bg-base-300 rounded-full transition-colors hover:text-red-500"
-            title="Close search"
+            }}
+            title={messageSearchQuery ? "Clear" : "Close search"}
+            className="absolute -translate-y-1/2 right-3 top-1/2 p-1 hover:bg-base-300 rounded-full text-base-content/40 hover:text-base-content transition-colors flex items-center justify-center"
           >
-            <X size={16} />
+            <X className="size-3.5" />
           </button>
         </div>
       ) : (

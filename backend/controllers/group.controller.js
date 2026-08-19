@@ -4,6 +4,7 @@ import User from "../models/user.model.js";
 import cloudinary from "../lib/cloudinary.js";
 import { io, getReceiverSocketId } from "../lib/socket.js";
 import { hideAnonymousAuthor } from "../lib/anonymity.js";
+import { isGiphyMediaUrl } from "../lib/giphy.js";
 
 // Fields returned for each group member. Wider than before so a member's
 // profile can be shown inside the group without a second request per person —
@@ -632,6 +633,30 @@ export const closeGroupPoll = async (req, res) => {
 };
 
 // 9. Send Message to Group
+/**
+ * Hosts an image may be referenced from rather than uploaded — our own image and
+ * file storage, and GIPHY's media domains. Mirrors the direct-message path; see
+ * the longer note there for why the host is checked rather than trusted.
+ */
+const isTrustedMediaUrl = (value) => {
+  if (typeof value !== "string" || !value.startsWith("https://") || value.length > 400) {
+    return false;
+  }
+  if (isGiphyMediaUrl(value)) return true;
+  try {
+    const { hostname } = new URL(value);
+    if (hostname === "res.cloudinary.com") return true;
+    const r2 = String(process.env.R2_PUBLIC_URL || "");
+    if (r2) {
+      const r2Host = new URL(r2).hostname;
+      if (r2Host && hostname === r2Host) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+};
+
 export const sendGroupMessage = async (req, res) => {
   try {
     const { groupId } = req.params;
@@ -670,17 +695,22 @@ export const sendGroupMessage = async (req, res) => {
       const uploadResponse = await cloudinary.uploader.upload(image);
       imageUrl = uploadResponse.secure_url;
     } else if (image) {
+      if (!isTrustedMediaUrl(image)) {
+        return res.status(400).json({ message: "Invalid image" });
+      }
       imageUrl = image;
     }
 
     let uploadedImages = [];
     if (Array.isArray(images) && images.length > 0) {
       for (const img of images) {
-        if (img.startsWith("data:image")) {
+        if (typeof img === "string" && img.startsWith("data:image")) {
           const uploadRes = await cloudinary.uploader.upload(img);
           uploadedImages.push(uploadRes.secure_url);
-        } else {
+        } else if (isTrustedMediaUrl(img)) {
           uploadedImages.push(img);
+        } else {
+          return res.status(400).json({ message: "Invalid image" });
         }
       }
     }

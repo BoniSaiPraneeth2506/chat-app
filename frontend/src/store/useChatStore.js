@@ -484,7 +484,13 @@ export const useChatStore = create((set, get) => ({
     // (like WhatsApp reopening a chat) while the network call confirms.
     const cached = authUser ? await getCachedMessages(authUser._id, conversationKey) : [];
     if (!isStillCurrent()) return;
-    set({ isMessagesLoading: true, hasMoreMessages: true, messages: cached });
+    set({
+      isMessagesLoading: true,
+      hasMoreMessages: true,
+      messages: cached,
+      isViewingHistory: false,
+      pendingScrollId: null,
+    });
 
     try {
       const limit = 20;
@@ -535,6 +541,64 @@ export const useChatStore = create((set, get) => ({
   },
 
   isLoadingMore: false,
+
+  // Set while the conversation is showing a window from the past rather than its
+  // newest messages, so the view can offer a way back to the bottom.
+  isViewingHistory: false,
+  // The message a jump should land on. Cleared by the view once it has scrolled.
+  pendingScrollId: null,
+  clearPendingScroll: () => set({ pendingScrollId: null }),
+
+  /** The days this conversation has messages on, for the calendar. */
+  getMessageDates: async (userId) => {
+    // The server groups by day in this timezone, so the calendar agrees with the
+    // date separators in the conversation rather than being a day out near
+    // midnight.
+    const minutes = -new Date().getTimezoneOffset();
+    const sign = minutes >= 0 ? "+" : "-";
+    const abs = Math.abs(minutes);
+    const tz = `${sign}${String(Math.floor(abs / 60)).padStart(2, "0")}:${String(abs % 60).padStart(2, "0")}`;
+
+    try {
+      const res = await axiosInstance.get(`/messages/dates/${userId}`, { params: { tz } });
+      return Array.isArray(res.data?.days) ? res.data.days : [];
+    } catch (error) {
+      console.error("Failed to load chat dates", error);
+      return [];
+    }
+  },
+
+  /**
+   * Loads the conversation around one message and asks the view to scroll to it.
+   *
+   * The window replaces what is on screen, which is what makes the jump feel like
+   * moving through the conversation rather than opening a separate screen. Older
+   * messages still load by scrolling up; getting back to the newest is one tap on
+   * the pill the view shows while this is set.
+   */
+  jumpToMessage: async (userId, messageId) => {
+    try {
+      const res = await axiosInstance.get(`/messages/${userId}`, {
+        params: { around: messageId, limit: 40 },
+      });
+      const window = Array.isArray(res.data) ? res.data : [];
+      if (window.length === 0) return false;
+
+      const hasNewer = res.headers["x-window-has-newer"] === "1";
+      set({
+        messages: window,
+        // More history above the window is likely; the view stops asking once a
+        // page comes back empty.
+        hasMoreMessages: true,
+        isViewingHistory: hasNewer,
+        pendingScrollId: messageId,
+      });
+      return true;
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Could not open that day");
+      return false;
+    }
+  },
 
   /**
    * Prepends the previous page of history.

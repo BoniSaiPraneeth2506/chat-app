@@ -74,6 +74,7 @@ import cloudinary from "../lib/cloudinary.js";
 import { getReceiverSocketId, io, invalidateBlockCache, emitAccountLists } from "../lib/socket.js";
 import sanitizeHtml from "sanitize-html";
 import { destroyMessageAssets, assetUrlsOf, destroyAssets } from "../lib/mediaCleanup.js";
+import { isGiphyMediaUrl } from "../lib/giphy.js";
 import {
   verifyAttachment,
   publicUrlForKey,
@@ -110,6 +111,38 @@ const validateImage = (dataUri) => {
     return { valid: false, reason: "Image file too large (max 6 MB)" };
   }
   return { valid: true };
+};
+
+/**
+ * Hosts an image may be referenced from rather than uploaded.
+ *
+ * Until now this path took a data URI and nothing else, which quietly broke two
+ * things: forwarding an image sent its existing URL and was rejected as an
+ * "invalid image format", and a GIF picked from GIPHY had nowhere to go but a
+ * re-upload of a file GIPHY already hosts permanently.
+ *
+ * A URL from a client ends up stored on a message and then loaded by everyone
+ * else's browser, so the host is checked rather than trusted. Only three are
+ * allowed: our own image storage, our own file storage, and GIPHY's media
+ * domains. Anything else still has to arrive as data and go through validation.
+ */
+const isTrustedMediaUrl = (value) => {
+  if (typeof value !== "string" || !value.startsWith("https://") || value.length > 400) {
+    return false;
+  }
+  if (isGiphyMediaUrl(value)) return true;
+  try {
+    const { hostname } = new URL(value);
+    if (hostname === "res.cloudinary.com") return true;
+    const r2 = String(process.env.R2_PUBLIC_URL || "");
+    if (r2) {
+      const r2Host = new URL(r2).hostname;
+      if (r2Host && hostname === r2Host) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 };
 
 /** Validate audio/voice data URI */
@@ -513,6 +546,55 @@ const getMessages = async (req, res) => {
       res.setHeader("X-Pinned-Message", encodeURIComponent(JSON.stringify(pinnedMessage)));
     }
 
+    // A window centred on one message, for jumping to a date from the calendar.
+    //
+    // Paging backwards from the newest end until the target appears would mean a
+    // request per page and could be dozens of them on an old conversation. This
+    // reads outwards from the message itself: half the window before it, half
+    // after, in one pair of indexed queries.
+    if (req.query.around) {
+      const aroundId = String(req.query.around);
+      if (!mongoose.Types.ObjectId.isValid(aroundId)) {
+        return res.status(400).json({ message: "Invalid message id" });
+      }
+
+      const conversation = {
+        $and: [
+          {
+            $or: [
+              { senderId: myId, receiverId: userToChatId, groupId: null },
+              { senderId: userToChatId, receiverId: myId, groupId: null },
+            ],
+          },
+          unexpired(),
+        ],
+        deletedFor: { $ne: myId },
+      };
+
+      const target = await Message.findOne({ _id: aroundId, ...conversation }).lean();
+      if (!target) {
+        return res.status(404).json({ message: "That message is no longer here" });
+      }
+
+      const half = Math.max(Math.floor((limit || 40) / 2), 5);
+      const [before, after] = await Promise.all([
+        Message.find({ ...conversation, createdAt: { $lte: target.createdAt } })
+          .sort({ createdAt: -1 })
+          .limit(half + 1)
+          .populate("replyTo"),
+        Message.find({ ...conversation, createdAt: { $gt: target.createdAt } })
+          .sort({ createdAt: 1 })
+          .limit(half)
+          .populate("replyTo"),
+      ]);
+
+      // `before` came back newest-first and includes the target itself.
+      const window = [...before.reverse(), ...after];
+      res.setHeader("X-Window-Anchor", aroundId);
+      res.setHeader("X-Window-Has-Newer", after.length === half ? "1" : "0");
+      return res.status(200).json(window);
+    }
+
     if (limit > 0) {
       const messages = await Message.find({
         $and: [
@@ -575,26 +657,39 @@ const sendMessage = async (req, res) => {
 
     let imageUrl = "";
     if (image) {
-      const imgValidation = validateImage(image);
-      if (!imgValidation.valid) {
-        return res.status(400).json({ message: imgValidation.reason });
+      if (isTrustedMediaUrl(image)) {
+        // Already hosted — a forwarded image, or a GIF. Copying it into our own
+        // storage would spend quota on a file that is served fine where it is.
+        imageUrl = image;
+      } else {
+        const imgValidation = validateImage(image);
+        if (!imgValidation.valid) {
+          return res.status(400).json({ message: imgValidation.reason });
+        }
+        const uploadResponse = await cloudinary.uploader.upload(image);
+        imageUrl = uploadResponse.secure_url;
       }
-      const uploadResponse = await cloudinary.uploader.upload(image);
-      imageUrl = uploadResponse.secure_url;
     }
 
     let imagesUrlArray = [];
     if (Array.isArray(images) && images.length > 0) {
-      const imagesToUpload = images.slice(0, 5); // Limit max 5 images
-      for (const imgData of imagesToUpload) {
+      const incoming = images.slice(0, 5); // Limit max 5 images
+      // Same split as the single image above: already-hosted ones pass through in
+      // place, the rest are validated and uploaded.
+      for (const imgData of incoming) {
+        if (isTrustedMediaUrl(imgData)) continue;
         const imgValidation = validateImage(imgData);
         if (!imgValidation.valid) {
           return res.status(400).json({ message: imgValidation.reason });
         }
       }
-      const uploadPromises = imagesToUpload.map((imgData) => cloudinary.uploader.upload(imgData));
-      const uploadResponses = await Promise.all(uploadPromises);
-      imagesUrlArray = uploadResponses.map((res) => res.secure_url);
+      imagesUrlArray = await Promise.all(
+        incoming.map(async (imgData) => {
+          if (isTrustedMediaUrl(imgData)) return imgData;
+          const uploaded = await cloudinary.uploader.upload(imgData);
+          return uploaded.secure_url;
+        })
+      );
     }
 
     let voiceUrl = "";
@@ -990,6 +1085,156 @@ const deleteMessage = async (req, res) => {
   } catch (error) {
     console.error("Error in deleteMessage:", error);
     res.status(500).json({ message: "Failed to delete message" });
+  }
+};
+
+/**
+ * Which days this conversation has messages on, and where each one starts.
+ *
+ * The calendar in a contact's profile used to work this out from the loaded page —
+ * the newest twenty messages — so every day older than those read as empty even
+ * when it held a hundred messages. One grouped count answers it for the whole
+ * conversation instead.
+ *
+ * Grouped in the caller's timezone, not UTC. A message sent at 00:30 in Chennai is
+ * the 19th there and the 18th in UTC, and a calendar that disagrees with the date
+ * separator above the message is worse than no calendar.
+ */
+const getMessageDates = async (req, res) => {
+  try {
+    const { id: contactId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(contactId)) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+    const contact = new mongoose.Types.ObjectId(contactId);
+    const myId = req.user._id;
+
+    // "+05:30" / "-08:00". Anything else falls back to UTC rather than being
+    // passed through to the database.
+    const tz = /^[+-]\d{2}:\d{2}$/.test(String(req.query.tz || "")) ? req.query.tz : "+00:00";
+
+    const rows = await Message.aggregate([
+      {
+        $match: {
+          $and: [
+            {
+              $or: [
+                { senderId: myId, receiverId: contact, groupId: null },
+                { senderId: contact, receiverId: myId, groupId: null },
+              ],
+            },
+            unexpired(),
+          ],
+          deletedFor: { $ne: myId },
+        },
+      },
+      { $sort: { createdAt: 1 } },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: tz } },
+          // The first message of that day is where the jump should land.
+          firstId: { $first: "$_id" },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    res.status(200).json({
+      days: rows.map((row) => ({ date: row._id, firstId: String(row.firstId), count: row.count })),
+    });
+  } catch (error) {
+    console.error("Error in getMessageDates:", error);
+    res.status(500).json({ message: "Failed to load chat dates" });
+  }
+};
+
+/**
+ * Every image in a conversation, for the gallery in a contact's profile.
+ *
+ * The panel used to build this from whatever was loaded in the open conversation,
+ * which is the newest page and nothing more — so it painted from the cache, then
+ * the fetch replaced that page and every picture older than the last twenty
+ * messages disappeared a couple of seconds after the panel opened.
+ *
+ * Multi-image messages are included. Those keep their files in `images` and leave
+ * `image` empty, so the old filter missed them entirely and the count was wrong
+ * even for what was loaded.
+ */
+const getSharedMedia = async (req, res) => {
+  try {
+    const { id: contactId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(contactId)) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+    const contact = new mongoose.Types.ObjectId(contactId);
+    const myId = req.user._id;
+
+    // The profile panel shows a handful of tiles; the gallery behind it asks for
+    // pages. Capped so a single request cannot be turned into a full export.
+    const LIMIT = Math.min(Math.max(parseInt(req.query.limit, 10) || 60, 1), 120);
+    const SKIP = Math.max(parseInt(req.query.skip, 10) || 0, 0);
+
+    const scope = {
+      $and: [
+        {
+          $or: [
+            { senderId: myId, receiverId: contact, groupId: null },
+            { senderId: contact, receiverId: myId, groupId: null },
+          ],
+        },
+        { $or: [{ image: { $nin: [null, ""] } }, { "images.0": { $exists: true } }] },
+        unexpired(),
+      ],
+      deletedFor: { $ne: myId },
+      isDeletedForEveryone: { $ne: true },
+    };
+
+    const [recent, totals] = await Promise.all([
+      Message.find(scope)
+        .sort({ createdAt: -1 })
+        .skip(SKIP)
+        .limit(LIMIT)
+        .select("image images createdAt")
+        .lean(),
+      Message.aggregate([
+        { $match: scope },
+        {
+          $project: {
+            pictures: {
+              $add: [
+                { $cond: [{ $gt: [{ $strLenCP: { $ifNull: ["$image", ""] } }, 0] }, 1, 0] },
+                { $size: { $ifNull: ["$images", []] } },
+              ],
+            },
+          },
+        },
+        { $group: { _id: null, total: { $sum: "$pictures" } } },
+      ]),
+    ]);
+
+    const total = totals[0]?.total || 0;
+
+    // One entry per picture, newest first, so a message carrying five of them
+    // contributes five tiles rather than one.
+    const items = [];
+    for (const message of recent) {
+      const urls = message.image ? [message.image] : [];
+      if (Array.isArray(message.images)) urls.push(...message.images.filter(Boolean));
+      urls.forEach((url, index) => {
+        items.push({ _id: `${message._id}-${index}`, url, createdAt: message.createdAt });
+      });
+    }
+
+    res.status(200).json({
+      items,
+      total,
+      hasMore: recent.length === LIMIT,
+      skip: SKIP,
+    });
+  } catch (error) {
+    console.error("Error in getSharedMedia:", error);
+    res.status(500).json({ message: "Failed to load shared media" });
   }
 };
 
@@ -1708,6 +1953,8 @@ const cancelScheduledMessage = async (req, res) => {
 export { 
   attachLastMessages,
   getContactById,
+  getSharedMedia,
+  getMessageDates,
   getUsersForSidebar, 
   getMessages, 
   sendMessage, 

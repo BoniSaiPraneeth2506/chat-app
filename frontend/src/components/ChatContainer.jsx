@@ -1,8 +1,10 @@
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
 import { useEffect, useMemo, useRef, useLayoutEffect, useState } from "react";
-import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image, Link2, EyeOff } from "lucide-react";
+import axiosInstance from "../lib/axios";
+import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image, Link2, EyeOff, ChevronRight } from "lucide-react";
 import ForwardModal from "./ForwardModal";
+import MediaGallerySheet from "./MediaGallerySheet";
 import SocialLinksRow from "./SocialLinksRow";
 import { useNicknames, displayNameOf } from "../lib/contacts";
 import PollMessage from "./PollMessage";
@@ -149,26 +151,46 @@ const LinkPreviewCard = ({ url }) => {
   );
 };
 
-const MessageCalendar = ({ messages, scrollToMessage }) => {
+const MessageCalendar = ({ userId, onPickDay }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [dayIndex, setDayIndex] = useState(null); // null = not fetched yet
+  const getMessageDates = useChatStore((state) => state.getMessageDates);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
 
-  // Find all message dates
-  const messageDates = {};
-  if (Array.isArray(messages)) {
-    messages.forEach((msg) => {
-      if (msg.createdAt) {
-        const d = new Date(msg.createdAt);
-        const dateStr = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-        if (!messageDates[dateStr]) {
-          messageDates[dateStr] = msg._id;
-        }
-      }
+  // Which days actually hold messages, for the whole conversation.
+  //
+  // This used to be derived from the loaded page — the newest twenty messages — so
+  // every day before those looked empty however much was said on it, and the grid
+  // for last month was entirely dead. Fetched once when the calendar is opened
+  // rather than on every profile open, since most opens never expand it.
+  useEffect(() => {
+    if (!isOpen || !userId || dayIndex !== null) return;
+    let cancelled = false;
+    getMessageDates(userId).then((rows) => {
+      if (!cancelled) setDayIndex(rows);
     });
-  }
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, userId, dayIndex, getMessageDates]);
+
+  // Reset when the conversation changes, so one contact's days never show under
+  // another's name.
+  useEffect(() => {
+    setDayIndex(null);
+  }, [userId]);
+
+  // "2026-08-19" -> first message id of that day.
+  const messageDates = {};
+  (dayIndex || []).forEach((row) => {
+    messageDates[row.date] = { id: row.firstId, count: row.count };
+  });
+
+  const keyFor = (y, m, d) =>
+    `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDayIndex = new Date(year, month, 1).getDay();
@@ -235,6 +257,10 @@ const MessageCalendar = ({ messages, scrollToMessage }) => {
             </button>
           </div>
 
+          {dayIndex === null && (
+            <p className="text-[10px] text-center t-dim">Loading dates…</p>
+          )}
+
           <div className="grid grid-cols-7 gap-1 text-center text-[10px]">
             {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
               <div key={i} className="font-bold py-0.5 select-none">{d}</div>
@@ -242,23 +268,26 @@ const MessageCalendar = ({ messages, scrollToMessage }) => {
             {days.map((day, i) => {
               if (day === null) return <div key={i} />;
               
-              const dateStr = `${year}-${month}-${day}`;
-              const targetMsgId = messageDates[dateStr];
-              const hasMessage = !!targetMsgId;
+              const entry = messageDates[keyFor(year, month, day)];
+              const hasMessage = Boolean(entry);
 
               return (
                 <button
                   key={i}
                   type="button"
                   disabled={!hasMessage}
-                  onClick={() => targetMsgId && scrollToMessage(targetMsgId)}
+                  onClick={() => entry && onPickDay(entry.id)}
                   className={`py-1 rounded-md transition-all font-semibold
                     ${hasMessage 
                       ? "text-primary hover:scale-105 cursor-pointer font-bold border" 
                       : "disabled:opacity-50 pointer-events-none"
                     }
                   `}
-                  title={hasMessage ? "Click to view chat history from this day" : ""}
+                  title={
+                    hasMessage
+                      ? `${entry.count} ${entry.count === 1 ? "message" : "messages"} — open this day`
+                      : ""
+                  }
                 >
                   {day}
                 </button>
@@ -393,6 +422,10 @@ const ChatContainer = () => {
     selectedUser,
     lastReadTimestamps,
     loadMoreMessages,
+    jumpToMessage,
+    isViewingHistory,
+    pendingScrollId,
+    clearPendingScroll,
     isRecipientProfileOpen,
     setIsRecipientProfileOpen,
     setDisappearingTimer,
@@ -425,6 +458,15 @@ const ChatContainer = () => {
   } = useGroupStore();
 
   const [reactionsSheet, setReactionsSheet] = useState(null);
+
+  // The contact profile's gallery.
+  //
+  // Held separately from `messages` on purpose. That list is one page of the
+  // conversation, so deriving the gallery from it meant every picture older than
+  // the newest twenty vanished the moment the fetch replaced the cached page —
+  // which is what made the media appear and then disappear a second later.
+  const [sharedMedia, setSharedMedia] = useState(null); // null = not loaded yet
+  const [isGalleryOpen, setIsGalleryOpen] = useState(false);
 
   const { authUser, onlineUsers } = useAuthStore();
   const { theme, wallpaper, privacyReadReceipts } = useThemeStore();
@@ -571,9 +613,9 @@ const ChatContainer = () => {
     if (element) {
       element.scrollIntoView({ behavior: "smooth", block: "center" });
       
-      element.classList.add("", "rounded-lg");
+      element.classList.add("msg-jump");
       setTimeout(() => {
-        element.classList.remove("", "rounded-lg");
+        element.classList.remove("msg-jump");
       }, 1500);
     }
   };
@@ -852,6 +894,35 @@ const ChatContainer = () => {
     messageEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [scrollToBottomSignal]);
 
+  useEffect(() => {
+    if (!isRecipientProfileOpen || !selectedUser?._id || selectedGroup) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await axiosInstance.get(`/messages/media/${selectedUser._id}`);
+        if (cancelled) return;
+        setSharedMedia({
+          items: Array.isArray(res.data?.items) ? res.data.items : [],
+          total: Number(res.data?.total) || 0,
+        });
+      } catch {
+        // Leave whatever is on screen rather than emptying the gallery on a
+        // failed request — the loaded page is still a truthful subset.
+        if (!cancelled) setSharedMedia(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isRecipientProfileOpen, selectedUser?._id, selectedGroup]);
+
+  // Opening a different conversation must not show the previous one's gallery.
+  useEffect(() => {
+    setSharedMedia(null);
+  }, [selectedUser?._id]);
+
   // Selection mode can end from ChatHeader's toolbar (back button, or an
   // action that exits it) — drop the emoji row too so it doesn't linger.
   useEffect(() => {
@@ -911,6 +982,23 @@ const ChatContainer = () => {
     return byUser;
   }, [messages, authUser?._id]);
 
+  /**
+   * Opens the day the calendar was tapped on.
+   *
+   * If that message is already on screen this is just a scroll. Otherwise the
+   * conversation is reloaded as a window around it, which is what lets a day from
+   * months ago be reached without paging through everything in between.
+   */
+  const handlePickDay = async (messageId) => {
+    setIsRecipientProfileOpen(false);
+
+    if (activeMessages?.some((m) => m._id === messageId)) {
+      scrollToMessage(messageId);
+      return;
+    }
+    if (selectedUser?._id) await jumpToMessage(selectedUser._id, messageId);
+  };
+
   /** Keeps the newest message in view when a photo finishes decoding. */
   const handleMediaLoad = () => {
     if (!isNearBottomRef.current) return;
@@ -962,6 +1050,22 @@ const ChatContainer = () => {
     const latestMessageId = latestMessage ? latestMessage._id : null;
     const container = scrollableRef.current;
 
+    // A jump landed. Go to the message that was asked for and take none of the
+    // branches below: this list is a window from the past, and the newest-message
+    // rule would yank the view to the bottom of it immediately.
+    if (pendingScrollId && activeMessages.some((m) => m._id === pendingScrollId)) {
+      const target = document.getElementById(`msg-${pendingScrollId}`);
+      if (target) {
+        target.scrollIntoView({ behavior: "auto", block: "center" });
+        target.classList.add("msg-jump");
+        setTimeout(() => target.classList.remove("msg-jump"), 1500);
+      }
+      prevMessagesLengthRef.current = activeMessages.length;
+      lastMessageIdRef.current = latestMessageId;
+      clearPendingScroll();
+      return;
+    }
+
     if (isPrependingRef.current && container && prevScrollHeightRef.current) {
       // Synchronously adjust scroll offset in the same layout pass before paint
       const deltaHeight = container.scrollHeight - prevScrollHeightRef.current;
@@ -981,7 +1085,8 @@ const ChatContainer = () => {
 
     prevMessagesLengthRef.current = activeMessages.length;
     lastMessageIdRef.current = latestMessageId;
-  }, [activeMessages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMessages, pendingScrollId]);
 
   return (
     <div className="flex-1 flex h-full max-h-full overflow-hidden relative">
@@ -1287,6 +1392,17 @@ const ChatContainer = () => {
           <div ref={messageEndRef} />
         </div>
 
+        {isViewingHistory && (
+          <button
+            type="button"
+            onClick={() => selectedUser?._id && getMessages(selectedUser._id)}
+            className="absolute z-20 flex items-center gap-1.5 px-3.5 h-9 -translate-x-1/2 rounded-full shadow-xl bottom-[86px] left-1/2 bg-primary text-primary-content text-[12.5px] font-semibold active:scale-95 transition-transform cg-fade"
+          >
+            <Clock size={13} />
+            Back to latest
+          </button>
+        )}
+
         <MessageInput />
 
         {/* Selection-mode actions (DM) now live in ChatHeader's toolbar
@@ -1345,29 +1461,50 @@ const ChatContainer = () => {
 
             {/* Media, links and docs gallery section (WhatsApp Desktop style) */}
             {(() => {
-              const mediaMessages = Array.isArray(messages) ? messages.filter((m) => m.image && !m.isDeletedForEveryone) : [];
+              // Until the request lands, the open page is used so the panel is
+              // never blank; after it lands the full conversation's media replaces
+              // it. Multi-image messages contribute each of their pictures.
+              const fallback = Array.isArray(messages)
+                ? messages
+                    .filter((m) => !m.isDeletedForEveryone)
+                    .flatMap((m) => {
+                      const urls = m.image ? [m.image] : [];
+                      if (Array.isArray(m.images)) urls.push(...m.images.filter(Boolean));
+                      return urls.map((url, index) => ({ _id: `${m._id}-${index}`, url }));
+                    })
+                : [];
+              const mediaMessages = sharedMedia ? sharedMedia.items : fallback;
+              const mediaTotal = sharedMedia ? sharedMedia.total : mediaMessages.length;
               return (
                 <div className="space-y-2.5 pt-2">
-                  <div className="flex items-center justify-between">
+                  {/* The heading opens the full gallery; the eight tiles below
+                      stay as the preview they were. */}
+                  <button
+                    type="button"
+                    onClick={() => mediaTotal > 0 && setIsGalleryOpen(true)}
+                    className="flex items-center justify-between w-full text-left"
+                  >
                     <span className="text-xs font-semibold flex items-center gap-1.5 select-none">
                       <Image size={14} className="text-primary" />
                       Media, links and docs
                     </span>
-                    <span className="text-xs font-medium select-none">
-                      {mediaMessages.length}
+                    <span className="flex items-center gap-1 text-xs font-medium select-none">
+                      {mediaTotal}
+                      {mediaTotal > 0 && <ChevronRight size={13} className="t-dim" />}
                     </span>
-                  </div>
+                  </button>
                   {mediaMessages.length > 0 ? (
                     <div className="grid grid-cols-4 gap-1.5">
-                      {mediaMessages.slice(-8).reverse().map((msg) => (
+                      {(sharedMedia ? mediaMessages.slice(0, 8) : mediaMessages.slice(-8).reverse()).map((item) => (
                         <div 
-                          key={msg._id}
-                          onClick={() => setLightboxImage(msg.image)}
+                          key={item._id}
+                          onClick={() => setLightboxImage(item.url)}
                           className="aspect-square rounded-xl overflow-hidden bg-base-200 cursor-zoom-in group relative hover:opacity-90 transition-all"
                         >
                           <img 
-                            src={msg.image} 
+                            src={item.url} 
                             alt="Shared media" 
+                            loading="lazy"
                             className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-200" 
                           />
                         </div>
@@ -1382,7 +1519,7 @@ const ChatContainer = () => {
               );
             })()}
 
-            <MessageCalendar messages={messages} scrollToMessage={scrollToMessage} />
+            <MessageCalendar userId={selectedUser?._id} onPickDay={handlePickDay} />
 
             {/* Bio info */}
             <div className="space-y-1">
@@ -1460,6 +1597,15 @@ const ChatContainer = () => {
           </div>
         </div>
       )}
+      {isGalleryOpen && selectedUser && (
+        <MediaGallerySheet
+          userId={selectedUser._id}
+          contactName={displayNameOf(selectedUser, nicknames)}
+          onClose={() => setIsGalleryOpen(false)}
+          onOpenImage={(url) => setLightboxImage(url)}
+        />
+      )}
+
       {/* Who reacted — grouped by emoji, your own row removes the reaction */}
       {reactionsSheet && (
         <div

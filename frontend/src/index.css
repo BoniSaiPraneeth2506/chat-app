@@ -300,3 +300,21 @@
     color: var(--color-base-content);
   }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Jump-to-message highlight.
+
+   Briefly tints the message the calendar or a reply preview jumped to, so it is
+   obvious which one was landed on after the scroll settles.
+   ────────────────────────────────────────────────────────────────────────── */
+.msg-jump {
+  background-color: var(--color-base-300);
+  border-radius: 0.5rem;
+  transition: background-color 300ms ease;
+}
+
+@supports (background-color: color-mix(in oklch, red 50%, transparent)) {
+  .msg-jump {
+    background-color: color-mix(in oklch, var(--color-primary) 22%, transparent);
+  }
+}

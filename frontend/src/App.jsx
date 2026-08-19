@@ -441,11 +441,7 @@ const App = () => {
                 alt={profilePreviewUser.fullName} 
                 className="w-full h-full object-cover"
               />
-              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                <span className="text-white/0 group-hover:text-white/90 text-[11px] font-medium bg-black/40 px-2 py-0.5 rounded-full transition-all">
-                  Tap to expand
-                </span>
-              </div>
+
             </div>
 
             {/* Action Bar Footer */}
@@ -524,11 +520,7 @@ const App = () => {
                   alt={groupPreview.name}
                   className="object-cover w-full h-full"
                 />
-                <div className="absolute inset-0 flex items-center justify-center transition-colors bg-black/0 group-hover:bg-black/10">
-                  <span className="text-white/0 group-hover:text-white/90 text-[11px] font-medium bg-black/40 px-2 py-0.5 rounded-full transition-all">
-                    Tap to expand
-                  </span>
-                </div>
+
               </div>
             ) : (
               <div className="grid w-full aspect-square place-items-center bg-secondary/10 text-secondary">
