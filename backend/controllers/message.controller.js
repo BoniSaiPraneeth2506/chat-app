@@ -73,7 +73,7 @@ import User from "../models/user.model.js";
 import cloudinary from "../lib/cloudinary.js";
 import { getReceiverSocketId, io, invalidateBlockCache, emitAccountLists } from "../lib/socket.js";
 import sanitizeHtml from "sanitize-html";
-import { destroyMessageAssets, assetUrlsOf, destroyAssets } from "../lib/mediaCleanup.js";
+import { destroyMessageAssets, assetUrlsOf, destroyAssets, attachmentKeysOf, destroyObjects } from "../lib/mediaCleanup.js";
 import { isGiphyMediaUrl } from "../lib/giphy.js";
 import {
   verifyAttachment,
@@ -388,7 +388,7 @@ const attachLastMessages = async (users, myId) => {
 
   const previews = await Message.find({ _id: { $in: newest.map((n) => n.messageId) } })
     .select(
-      "senderId receiverId text image images voice createdAt isDeletedForEveryone isCallLog callType callStatus callDuration"
+      "senderId receiverId text image images voice attachments contact createdAt isDeletedForEveryone isCallLog callType callStatus callDuration"
     )
     .lean();
 
@@ -640,7 +640,7 @@ const getMessages = async (req, res) => {
 const sendMessage = async (req, res) => {
   try {
     const { id: receiverId } = req.params;
-    const { text, image, images, voice, replyTo, isForwarded, isOneView, scheduledAt, attachments, clientId } = req.body;
+    const { text, image, images, voice, replyTo, isForwarded, isOneView, scheduledAt, attachments, contact, clientId } = req.body;
     const senderId = req.user._id;
 
     // Check block list
@@ -704,7 +704,7 @@ const sendMessage = async (req, res) => {
       voiceUrl = uploadResponse.secure_url;
     }
 
-    // R2 attachments arrive as metadata only — the bytes went straight from the
+    // Attachments arrive as metadata only — the bytes went straight from the
     // client to the bucket. Each one is confirmed to actually exist and match
     // what was authorized before it is allowed onto a message, otherwise a
     // client could reference a key it never uploaded.
@@ -742,6 +742,26 @@ const sendMessage = async (req, res) => {
           posterUrl: typeof att.posterUrl === "string" ? att.posterUrl : "",
         });
       }
+    }
+
+    // A shared contact is resolved from the id rather than taken as given: the
+    // client sends who it means, and the name and picture come from that account
+    // here. Otherwise a card could carry any name against any profile.
+    let contactCard = undefined;
+    if (contact?.user) {
+      if (!mongoose.Types.ObjectId.isValid(String(contact.user))) {
+        return res.status(400).json({ message: "Invalid contact" });
+      }
+      const shared = await User.findById(contact.user).select("fullName email profilePic").lean();
+      if (!shared) {
+        return res.status(400).json({ message: "That contact no longer exists" });
+      }
+      contactCard = {
+        user: shared._id,
+        name: shared.fullName || "",
+        email: shared.email || "",
+        profilePic: shared.profilePic || "",
+      };
     }
 
     const timer = sender?.disappearingTimers?.get(receiverId) || "off";
@@ -798,7 +818,9 @@ const sendMessage = async (req, res) => {
       deleteAt,
       replyTo: replyTo || null,
       isForwarded: isForwarded || false,
-      isOneView: isOneView || false
+      isOneView: isOneView || false,
+      attachments: verifiedAttachments.length > 0 ? verifiedAttachments : undefined,
+      contact: contactCard,
     });
 
     await newMessage.save();
@@ -1269,7 +1291,10 @@ const clearChatHistory = async (req, res) => {
     }).select("image images voice");
 
     if (purgeable.length > 0) {
-      await destroyAssets(purgeable.flatMap(assetUrlsOf));
+      await Promise.all([
+        destroyAssets(purgeable.flatMap(assetUrlsOf)),
+        destroyObjects(purgeable.flatMap(attachmentKeysOf)),
+      ]);
       await Message.deleteMany({ _id: { $in: purgeable.map((m) => m._id) } });
     }
 

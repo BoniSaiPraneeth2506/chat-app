@@ -31,14 +31,15 @@ const pollSchema = new Schema({
   },
 }, { _id: false });
 
-// Large attachments (video, documents) live in Cloudflare R2 rather than
-// Cloudinary, and are described by one polymorphic array instead of another
-// pair of top-level fields. `key` is the source of truth: if the bucket or the
-// domain in front of it ever changes, the key survives and `url` is rebuilt.
+// Large attachments (video, large images, documents) live in object storage
+// rather than Cloudinary, and are described by one polymorphic array instead of
+// another pair of top-level fields. `key` is the source of truth: the bucket is
+// private, so there is no lasting URL to store — the client asks the API for a
+// short-lived signed one when the file is actually opened.
 const attachmentSchema = new Schema({
   kind: {
     type: String,
-    enum: ["video", "document"],
+    enum: ["video", "image", "document"],
     required: true,
   },
   key: {
@@ -47,7 +48,7 @@ const attachmentSchema = new Schema({
   },
   url: {
     type: String,
-    required: true,
+    default: "",
   },
   name: {
     type: String,
@@ -108,6 +109,24 @@ const messageSchema = new Schema(
     attachments: {
       type: [attachmentSchema],
       default: [],
+    },
+    // A shared contact.
+    //
+    // Deliberately a Chatty account rather than an entry from the phone's address
+    // book: reading the device's contacts needs a native permission and a Play
+    // Store disclosure, and what someone actually wants from "share a contact" in
+    // a chat app is to hand over someone the other person can then message. The
+    // card carries a name so it still reads correctly if that account is later
+    // deleted.
+    contact: {
+      user: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+      name: { type: String, default: "" },
+      email: { type: String, default: "" },
+      profilePic: { type: String, default: "" },
     },
     isEdited: {
       type: Boolean,

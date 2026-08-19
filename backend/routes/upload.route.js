@@ -1,6 +1,6 @@
 import express from "express";
 import protectRoute from "../middlewares/auth.middleware.js";
-import { signUpload, getUploadLimits } from "../controllers/upload.controller.js";
+import { signUpload, getUploadLimits, getAttachmentUrl } from "../controllers/upload.controller.js";
 
 const router = express.Router();
 
@@ -8,5 +8,8 @@ const router = express.Router();
 // write objects into the bucket.
 router.get("/limits", protectRoute, getUploadLimits);
 router.post("/sign", protectRoute, signUpload);
+// The bucket is private, so this is the only route to its contents. It checks that
+// the caller belongs to the conversation before signing anything.
+router.get("/url", protectRoute, getAttachmentUrl);
 
 export default router;

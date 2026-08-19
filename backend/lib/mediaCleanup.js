@@ -5,6 +5,8 @@
 // assets whose messages had been deleted for everyone, cleared from a chat by
 // both sides, or silently removed by the disappearing-message TTL.
 import cloudinary from "./cloudinary.js";
+import { DeleteObjectsCommand } from "@aws-sdk/client-s3";
+import { getStorage, storageBucket } from "./storage.js";
 
 /**
  * Recovers the public_id from a Cloudinary delivery URL.
@@ -84,4 +86,64 @@ export const destroyAssets = async (urls) => {
 };
 
 /** Convenience: free everything one message owns. */
-export const destroyMessageAssets = (message) => destroyAssets(assetUrlsOf(message));
+/**
+ * The bucket keys a message owns.
+ *
+ * Separate from assetUrlsOf because these are not URLs and not Cloudinary: a
+ * private bucket has no address to parse, so the key stored on the attachment is
+ * the only handle to the object.
+ */
+export const attachmentKeysOf = (message) =>
+  (message?.attachments || [])
+    .map((att) => att?.key)
+    .filter((key) => typeof key === "string" && key.length > 0);
+
+/**
+ * Best-effort delete of bucket objects, same contract as destroyAssets: a
+ * failure here is logged and swallowed, because a leaked object is a smaller
+ * problem than a delete that appears not to work.
+ *
+ * Batched — DeleteObjects takes up to a thousand keys per call, which is well
+ * past anything a single delete produces here.
+ */
+export const destroyObjects = async (keys) => {
+  const unique = [...new Set((keys || []).filter(Boolean))];
+  if (unique.length === 0) return { destroyed: 0, failed: 0 };
+
+  const s3 = getStorage();
+  if (!s3) {
+    // Storage is not configured, so there is nothing this process can reach.
+    // Not an error: it means these keys were written by a deployment that had
+    // credentials and this one does not.
+    return { destroyed: 0, failed: unique.length };
+  }
+
+  try {
+    const result = await s3.send(
+      new DeleteObjectsCommand({
+        Bucket: storageBucket(),
+        Delete: { Objects: unique.map((Key) => ({ Key })), Quiet: true },
+      })
+    );
+    const failed = result.Errors?.length || 0;
+    if (failed > 0) {
+      console.error("Some bucket objects could not be deleted:", result.Errors?.[0]?.Message);
+    }
+    return { destroyed: unique.length - failed, failed };
+  } catch (err) {
+    console.error("Error deleting bucket objects:", err.message);
+    return { destroyed: 0, failed: unique.length };
+  }
+};
+
+/** Everything one message owns, wherever it lives. */
+export const destroyMessageAssets = async (message) => {
+  const [cloud, bucket] = await Promise.all([
+    destroyAssets(assetUrlsOf(message)),
+    destroyObjects(attachmentKeysOf(message)),
+  ]);
+  return {
+    destroyed: cloud.destroyed + bucket.destroyed,
+    failed: cloud.failed + bucket.failed,
+  };
+};

@@ -1,11 +1,12 @@
-// Rules and helpers for R2-backed chat attachments (video + documents).
+// Rules and helpers for bucket-backed chat attachments (video, large images,
+// documents and other files).
 //
-// Kept separate from r2.js so "what is allowed" stays independent of "how we
+// Kept separate from storage.js so "what is allowed" stays independent of "how we
 // talk to the bucket", and so the limits can be read by any controller without
 // pulling in the S3 client.
 import crypto from "crypto";
 import { HeadObjectCommand } from "@aws-sdk/client-s3";
-import { getR2, R2_BUCKET, R2_PUBLIC_URL } from "./r2.js";
+import { getStorage, storageBucket, publicBaseUrl } from "./storage.js";
 
 const mb = (n) => n * 1_000_000;
 
@@ -15,22 +16,35 @@ const mb = (n) => n * 1_000_000;
  * env-overridable so the ceiling can be raised without a code change once the
  * account is on a paid plan.
  */
-const envMb = (name, fallbackMb) => {
-  const parsed = Number(process.env[name]);
-  return mb(Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMb);
+const envMb = (names, fallbackMb) => {
+  for (const name of [].concat(names)) {
+    const parsed = Number(process.env[name]);
+    if (Number.isFinite(parsed) && parsed > 0) return mb(parsed);
+  }
+  return mb(fallbackMb);
 };
 
 export const ATTACHMENT_RULES = {
   video: {
     get maxBytes() {
-      return envMb("R2_MAX_VIDEO_MB", 50);
+      return envMb(["B2_MAX_VIDEO_MB", "R2_MAX_VIDEO_MB"], 50);
     },
-    types: ["video/mp4", "video/webm", "video/quicktime"],
+    types: ["video/mp4", "video/webm", "video/quicktime", "video/x-matroska"],
     label: "Video",
+  },
+  // Large images come here rather than through Cloudinary. The composer still
+  // sends ordinary photos the old way; this is for the ones too big for a JSON
+  // body, and it keeps the original file rather than a re-encode.
+  image: {
+    get maxBytes() {
+      return envMb(["B2_MAX_IMAGE_MB", "R2_MAX_IMAGE_MB"], 25);
+    },
+    types: ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"],
+    label: "Image",
   },
   document: {
     get maxBytes() {
-      return envMb("R2_MAX_DOC_MB", 10);
+      return envMb(["B2_MAX_DOC_MB", "R2_MAX_DOC_MB"], 25);
     },
     types: [
       "application/pdf",
@@ -108,7 +122,10 @@ export const safeDisplayName = (fileName) =>
     .trim()
     .slice(0, 120) || "file";
 
-export const publicUrlForKey = (key) => `${R2_PUBLIC_URL()}/${key}`;
+export const publicUrlForKey = (key) => {
+  const base = publicBaseUrl();
+  return base ? `${base}/${key}` : "";
+};
 
 /**
  * Confirms an attachment the client claims to have uploaded really exists,
@@ -117,8 +134,8 @@ export const publicUrlForKey = (key) => `${R2_PUBLIC_URL()}/${key}`;
  * because the upload failed halfway.
  */
 export const verifyAttachment = async ({ key, kind, size, mime }) => {
-  const r2 = getR2();
-  if (!r2) return { valid: false, reason: "File storage is not configured" };
+  const s3 = getStorage();
+  if (!s3) return { valid: false, reason: "File storage is not configured" };
 
   const rule = ATTACHMENT_RULES[kind];
   if (!rule) return { valid: false, reason: "Unsupported attachment type" };
@@ -130,8 +147,8 @@ export const verifyAttachment = async ({ key, kind, size, mime }) => {
   }
 
   try {
-    const head = await r2.send(
-      new HeadObjectCommand({ Bucket: R2_BUCKET(), Key: key })
+    const head = await s3.send(
+      new HeadObjectCommand({ Bucket: storageBucket(), Key: key })
     );
 
     if (head.ContentLength > rule.maxBytes) {

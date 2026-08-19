@@ -1,7 +1,7 @@
 import Message from "../models/message.model.js";
 import { getReceiverSocketId, io } from "../lib/socket.js";
 import { hideAnonymousAuthor } from "../lib/anonymity.js";
-import { assetUrlsOf, destroyAssets } from "../lib/mediaCleanup.js";
+import { assetUrlsOf, destroyAssets, attachmentKeysOf, destroyObjects } from "../lib/mediaCleanup.js";
 
 // Simple scheduler that polls for due scheduled messages every 10 seconds.
 // For production consider a job queue (BullMQ/Redis) instead.
@@ -78,14 +78,20 @@ export function startMediaPurge() {
   purgeInterval = setInterval(async () => {
     try {
       const expired = await Message.find({ deleteAt: { $lte: new Date() } })
-        .select("image images voice")
+        .select("image images voice attachments")
         .limit(PURGE_BATCH);
 
       if (expired.length === 0) return;
 
       const urls = expired.flatMap(assetUrlsOf);
-      if (urls.length > 0) {
-        const { destroyed, failed } = await destroyAssets(urls);
+      const keys = expired.flatMap(attachmentKeysOf);
+      if (urls.length > 0 || keys.length > 0) {
+        const [cloud, bucket] = await Promise.all([
+          destroyAssets(urls),
+          destroyObjects(keys),
+        ]);
+        const destroyed = cloud.destroyed + bucket.destroyed;
+        const failed = cloud.failed + bucket.failed;
         console.log(`[MediaPurge] freed ${destroyed} asset(s), ${failed} failed`);
       }
 

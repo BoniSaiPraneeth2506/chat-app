@@ -1,9 +1,18 @@
 import { useRef, useState, useEffect } from "react";
 import GifPicker from "./GifPicker";
+import AttachMenu from "./AttachMenu";
+import ContactPickerSheet from "./ContactPickerSheet";
+import {
+  fetchUploadLimits,
+  validateFile,
+  formatBytes,
+  createLocalUrl,
+  releaseLocalUrl,
+} from "../lib/attachments";
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
 import useAuthStore from "../store/useAuthStore";
-import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3, Pencil, EyeOff } from "lucide-react";
+import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3, Pencil, EyeOff, Paperclip, FileText, Video, Loader } from "lucide-react";
 import toast from "react-hot-toast";
 import { haptic } from "../lib/haptics";
 import ImageEditorModal from "./ImageEditorModal";
@@ -40,10 +49,17 @@ const MessageInput = () => {
   const [askAnonymously, setAskAnonymously] = useState(false);
   const [isOneView, setIsOneView] = useState(false);
   const [isSendingAnimation, setIsSendingAnimation] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const uploadAbortRef = useRef(null);
   const fileInputRef = useRef(null);
+  const videoInputRef = useRef(null);
+  const docInputRef = useRef(null);
+
+  // The attachment menu, the contact picker, and the one large file being sent.
+  const [isAttachOpen, setIsAttachOpen] = useState(false);
+  const [isContactOpen, setIsContactOpen] = useState(false);
+  const [limits, setLimits] = useState({ enabled: false });
+  // A chosen video or document waiting to be sent: { file, kind, previewUrl }.
+  // Nothing is uploaded until the send button is pressed, the same as a photo.
+  const [stagedFile, setStagedFile] = useState(null);
   const inputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   // Whether the other side has already been told we're typing. Without this every
@@ -78,6 +94,7 @@ const MessageInput = () => {
     setEditingMessage,
     editMessage,
     sendTypingStatus, 
+    sendAttachmentMessage,
     selectedUser,
     drafts,
     setDraft
@@ -115,6 +132,10 @@ const MessageInput = () => {
       setText("");
     }
     setGifCommand(null);
+    setStagedFile((current) => {
+      if (current?.previewUrl) releaseLocalUrl(current.previewUrl);
+      return null;
+    });
     return () => flushDraft();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedUser?._id]);
@@ -291,6 +312,91 @@ const MessageInput = () => {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  // The caps and allowed types come from the server so the composer refuses
+  // exactly what the server would, rather than keeping its own copy that can drift.
+  useEffect(() => {
+    let cancelled = false;
+    fetchUploadLimits().then((next) => {
+      if (!cancelled) setLimits(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /**
+   * Stages a chosen video or document.
+   *
+   * Nothing is uploaded here. A file gets the same two steps a photo already had —
+   * see it first, then send it — which also leaves room to type a caption, and
+   * means picking the wrong file costs nothing. The upload starts on send, and its
+   * progress appears on the bubble in the conversation.
+   */
+  const handleBucketFile = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = ""; // so picking the same file twice still fires
+    if (!file) return;
+
+    const check = validateFile(file, limits);
+    if (!check.valid) {
+      toast.error(check.reason);
+      return;
+    }
+
+    // Replaces anything already staged: one file at a time keeps the composer
+    // honest about what pressing send will do.
+    setStagedFile((current) => {
+      if (current?.previewUrl) releaseLocalUrl(current.previewUrl);
+      return {
+        file,
+        kind: check.kind,
+        previewUrl: check.kind === "document" ? "" : createLocalUrl(file),
+      };
+    });
+  };
+
+  const clearStagedFile = () => {
+    setStagedFile((current) => {
+      if (current?.previewUrl) releaseLocalUrl(current.previewUrl);
+      return null;
+    });
+  };
+
+  /** What the attachment menu does with each choice. */
+  const handleAttachPick = (id) => {
+    setIsAttachOpen(false);
+    if (id === "gallery") {
+      fileInputRef.current?.click();
+      return;
+    }
+    if (id === "contact") {
+      setIsContactOpen(true);
+      return;
+    }
+    if (!limits.enabled) {
+      toast.error("File sharing is not set up on this server yet");
+      return;
+    }
+    if (id === "video") videoInputRef.current?.click();
+    if (id === "document") docInputRef.current?.click();
+  };
+
+  /** Sends a contact card. No upload — it is a reference to an account. */
+  const handleContactPick = async (user) => {
+    setIsContactOpen(false);
+    try {
+      const payload = { contact: { user: user._id } };
+      if (selectedGroup) {
+        await sendGroupMessage({ ...payload, replyTo: replyingToMessage?._id || null, mentions: [] });
+      } else {
+        await sendMessage(payload);
+      }
+      if (replyingToMessage) setReplyingToMessage(null);
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Could not share that contact");
+    }
+  };
+
   /** Writes whatever draft is waiting, for the chat it was typed in. */
   const flushDraft = () => {
     if (draftTimerRef.current) {
@@ -432,22 +538,21 @@ const MessageInput = () => {
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!text.trim() && imagePreviews.length === 0) return;
+    if (!text.trim() && imagePreviews.length === 0 && !stagedFile) return;
 
     haptic("tap");
 
     const messageText = text.trim();
     const currentImages = [...imagePreviews];
+    const currentStaged = stagedFile;
     const messageOneView = isOneView;
     const currentEditing = editingMessage;
 
     // A bare slash command is the picker's input, not a message. Sending it would
     // post the literal "/giphy" into the conversation.
-    if (gifCommand && imagePreviews.length === 0) return;
+    if (gifCommand && imagePreviews.length === 0 && !stagedFile) return;
 
-    const willUploadImages = imagePreviews.length > 0;
-
-    // Clear text & draft instantly, but keep previews visible during upload
+    // Clear text & draft instantly
     setText("");
     if (draftTimerRef.current) {
       clearTimeout(draftTimerRef.current);
@@ -457,11 +562,12 @@ const MessageInput = () => {
     if (selectedUser) {
       setDraft(selectedUser._id, "");
     }
-    if (!willUploadImages) {
-      setImagePreviews([]);
-      setIsOneView(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
+    // Cleared straight away, including for an upload still in flight: the picture
+    // is already in the conversation as a sending bubble, and leaving the
+    // thumbnails above the input showed it in two places at once.
+    setImagePreviews([]);
+    setIsOneView(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingSentRef.current = false;
@@ -471,7 +577,18 @@ const MessageInput = () => {
     setTimeout(() => setIsSendingAnimation(false), 250);
 
     try {
-      if (currentEditing) {
+      if (currentStaged) {
+        // The file goes to the conversation as a sending bubble; the typed text
+        // rides along as its caption.
+        setStagedFile(null);
+        if (replyingToMessage) setReplyingToMessage(null);
+        await sendAttachmentMessage({
+          file: currentStaged.file,
+          kind: currentStaged.kind,
+          text: messageText,
+          localUrl: currentStaged.previewUrl,
+        });
+      } else if (currentEditing) {
         // Checked ahead of selectedGroup: an edit is an edit in both DMs and
         // groups. With the group branch first, submitting an edit in a group
         // sent a brand new message instead, which is where the duplicates came
@@ -494,11 +611,8 @@ const MessageInput = () => {
         if (replyingToMessage) setReplyingToMessage(null);
       } else {
         if (currentImages.length > 0) {
-          // Use progress-enabled send for images so we can show upload progress and allow cancel
-          setIsUploading(true);
-          setUploadProgress(0);
-          const controller = new AbortController();
-          uploadAbortRef.current = controller;
+          // Progress and cancel live on the bubble in the conversation now, so
+          // nothing about the upload is held here.
           try {
             await useChatStore.getState().sendMessageWithProgress({
               text: messageText,
@@ -506,9 +620,6 @@ const MessageInput = () => {
               images: currentImages.length > 1 ? currentImages : [],
               isOneView: messageOneView,
               scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
-            }, {
-              onProgress: (p) => setUploadProgress(p),
-              signal: controller.signal
             });
             setScheduledAt("");
           } catch (err) {
@@ -519,9 +630,6 @@ const MessageInput = () => {
               toast.error('Failed to send');
             }
           } finally {
-            setIsUploading(false);
-            setUploadProgress(0);
-            uploadAbortRef.current = null;
             setImagePreviews([]);
             setIsOneView(false);
             if (fileInputRef.current) fileInputRef.current.value = "";
@@ -553,15 +661,6 @@ const MessageInput = () => {
       // Returning focus keeps it up until the user dismisses it themselves,
       // matching how sending a normal message behaves.
       inputRef.current?.focus();
-    }
-  };
-
-  const cancelUpload = () => {
-    if (uploadAbortRef.current) {
-      uploadAbortRef.current.abort();
-      uploadAbortRef.current = null;
-      setIsUploading(false);
-      setUploadProgress(0);
     }
   };
 
@@ -746,19 +845,6 @@ const MessageInput = () => {
                   alt={`Preview ${idx + 1}`}
                   className="object-cover w-24 h-24 rounded-xl"
                 />
-                {isUploading && (
-                  <div className="absolute inset-0 bg-black/30 rounded-lg flex items-end">
-                    <div className="w-full px-2 pb-2">
-                      <div className="h-1 bg-white/20 rounded-full overflow-hidden">
-                        <div className="h-1 bg-primary" style={{ width: `${uploadProgress}%` }} />
-                      </div>
-                      <div className="flex items-center justify-between text-[10px] text-white/90 mt-1">
-                        <span>{uploadProgress}%</span>
-                        <button onClick={cancelUpload} type="button" className="text-xs text-red-200 hover:text-red-300">Cancel</button>
-                      </div>
-                    </div>
-                  </div>
-                )}
                 <button
                   onClick={() => removeImage(idx)}
                   className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/55 backdrop-blur-sm
@@ -768,7 +854,7 @@ const MessageInput = () => {
                 >
                   <X className="size-3.5 text-white" />
                 </button>
-                {!isUploading && (
+                {(
                   <button
                     onClick={() => { haptic("tap"); setEditingIndex(idx); }}
                     className="absolute top-1 left-1 w-6 h-6 rounded-full bg-black/55 backdrop-blur-sm flex items-center justify-center hover:bg-black/75 transition-colors"
@@ -796,6 +882,61 @@ const MessageInput = () => {
               </div>
             ))}
           </div>
+        )}
+
+        {/* A staged video or document: seen before it is sent, exactly like a
+            photo, and not uploaded until the send button is pressed. */}
+        {stagedFile && (
+          <div className="relative flex items-center gap-3 px-3 py-2.5 mb-1 rounded-2xl s-chip">
+            {stagedFile.kind === "video" ? (
+              <video
+                src={stagedFile.previewUrl}
+                muted
+                playsInline
+                className="object-cover w-20 h-20 rounded-xl bg-black shrink-0"
+              />
+            ) : stagedFile.kind === "image" ? (
+              <img
+                src={stagedFile.previewUrl}
+                alt=""
+                className="object-cover w-20 h-20 rounded-xl shrink-0"
+              />
+            ) : (
+              <span className="grid w-20 h-20 rounded-xl place-items-center s-tile shrink-0">
+                <FileText size={22} className="text-primary" />
+              </span>
+            )}
+            <span className="flex-1 min-w-0">
+              <span className="block text-[12.5px] font-medium truncate text-base-content">
+                {stagedFile.file.name}
+              </span>
+              <span className="block text-[10.5px] mt-0.5 t-dim">
+                {formatBytes(stagedFile.file.size)} · ready to send
+              </span>
+              <span className="block text-[10.5px] mt-1 t-dim">
+                Add a caption, or press send
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={clearStagedFile}
+              className="icon-btn grid size-7 shrink-0 place-items-center rounded-full"
+              title="Remove"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        )}
+
+        {isAttachOpen && (
+          <AttachMenu onPick={handleAttachPick} onClose={() => setIsAttachOpen(false)} />
+        )}
+
+        {isContactOpen && (
+          <ContactPickerSheet
+            onPick={handleContactPick}
+            onClose={() => setIsContactOpen(false)}
+          />
         )}
 
         {/* GIF and sticker picker — floats above the composer, so nothing in the
@@ -875,15 +1016,19 @@ const MessageInput = () => {
             </div>
           ) : (
             <>
+              {/* The photo icon became a paperclip: photos are now one of four
+                  things that can be attached rather than the only one. Tapping it
+                  opens the menu; choosing Gallery from there still opens exactly
+                  the picker this button used to. */}
               <button
                 type="button"
                 className={`p-1 hover:bg-base-200 rounded-full transition-colors flex items-center justify-center ${
                   imagePreviews.length > 0 ? "text-emerald-500" : "hover:text-base-content"
                 }`}
-                onClick={() => fileInputRef.current?.click()}
-                title="Attach images (up to 5)"
+                onClick={() => setIsAttachOpen((open) => !open)}
+                title="Attach"
               >
-                <Image size={18} />
+                <Paperclip size={18} />
               </button>
 
               <input
@@ -893,6 +1038,23 @@ const MessageInput = () => {
                 className="hidden"
                 ref={fileInputRef}
                 onChange={handleImageChange}
+              />
+
+              {/* One input per bucket-backed kind, so the file dialog offers the
+                  right types instead of everything. */}
+              <input
+                type="file"
+                accept="video/*"
+                className="hidden"
+                ref={videoInputRef}
+                onChange={handleBucketFile}
+              />
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
+                className="hidden"
+                ref={docInputRef}
+                onChange={handleBucketFile}
               />
 
               {selectedGroup && (
@@ -993,13 +1155,13 @@ const MessageInput = () => {
             `}
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
-              if (!text.trim() && imagePreviews.length === 0 && !isSendingAnimation) {
+              if (!text.trim() && imagePreviews.length === 0 && !stagedFile && !isSendingAnimation) {
                 e.preventDefault();
                 startRecording();
               }
             }}
           >
-            {text.trim() || imagePreviews.length > 0 || isSendingAnimation ? (
+            {text.trim() || imagePreviews.length > 0 || stagedFile || isSendingAnimation ? (
               <Send 
                 size={16} 
                 className={`ml-0.5 transition-all duration-300 ease-in-out ${isSendingAnimation ? "translate-x-5 -translate-y-5 opacity-0 scale-50" : "translate-x-0 translate-y-0 opacity-100 scale-100"}`} 

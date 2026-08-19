@@ -5,6 +5,7 @@ import axiosInstance from "../lib/axios";
 import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image, Link2, EyeOff, ChevronRight } from "lucide-react";
 import ForwardModal from "./ForwardModal";
 import MediaGallerySheet from "./MediaGallerySheet";
+import MessageAttachment from "./MessageAttachment";
 import SocialLinksRow from "./SocialLinksRow";
 import { useNicknames, displayNameOf } from "../lib/contacts";
 import PollMessage from "./PollMessage";
@@ -422,6 +423,7 @@ const ChatContainer = () => {
     selectedUser,
     lastReadTimestamps,
     loadMoreMessages,
+    cancelAttachmentUpload,
     jumpToMessage,
     isViewingHistory,
     pendingScrollId,
@@ -439,6 +441,7 @@ const ChatContainer = () => {
     setLightboxImage,
     typingUsers,
     users,
+    setSelectedUser,
     isSelectionMode,
     selectedMessageIds,
     toggleMessageSelection,
@@ -707,6 +710,47 @@ const ChatContainer = () => {
       );
     }
 
+    // While a picture is uploading, the bubble is where the progress belongs. The
+    // composer used to hold the thumbnails and show it there instead, which meant a
+    // photo sent from a phone reported itself somewhere other than the conversation.
+    const sendingProgress =
+      message.isSending && typeof message.uploadProgress === "number"
+        ? message.uploadProgress
+        : null;
+
+    const withProgress = (children) =>
+      sendingProgress === null ? (
+        children
+      ) : (
+        <span className="relative block">
+          {children}
+          <span className="absolute inset-0 rounded-lg pointer-events-none bg-black/30" />
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              cancelAttachmentUpload(message.tempId);
+            }}
+            className="absolute grid -translate-x-1/2 -translate-y-1/2 rounded-full size-11 place-items-center left-1/2 top-1/2 bg-black/55 text-white"
+            title="Cancel"
+          >
+            <X size={18} />
+          </span>
+          <span className="absolute left-2 right-2 bottom-2.5 pointer-events-none">
+            <span className="block h-1 overflow-hidden rounded-full bg-white/25">
+              <span
+                className="block h-full transition-all duration-200 bg-white rounded-full"
+                style={{ width: `${sendingProgress}%` }}
+              />
+            </span>
+            <span className="block mt-1 text-[10px] font-semibold text-white/95 tabular-nums">
+              {sendingProgress}%
+            </span>
+          </span>
+        </span>
+      );
+
     return (
       <>
         {message.images && message.images.length > 0 ? (
@@ -729,14 +773,70 @@ const ChatContainer = () => {
             ))}
           </div>
         ) : message.image ? (
-          <SmoothImage
-            src={message.image}
-            alt="Attachment"
-            onClick={() => setLightboxImage(message.image)}
-            onLoaded={handleMediaLoad}
-            className="max-w-[220px] sm:max-w-[280px] max-h-[320px] w-auto object-cover rounded-xl mb-1.5 cursor-zoom-in hover:opacity-95 transition-opacity"
-          />
+          withProgress(
+            <SmoothImage
+              src={message.image}
+              alt="Attachment"
+              onClick={() => sendingProgress === null && setLightboxImage(message.image)}
+              onLoaded={handleMediaLoad}
+              className="max-w-[220px] sm:max-w-[280px] max-h-[320px] w-auto object-cover rounded-xl mb-1.5 cursor-zoom-in hover:opacity-95 transition-opacity"
+            />
+          )
         ) : null}
+        {(message.attachments || []).map((attachment, index) => (
+          <MessageAttachment
+            key={attachment.key || `${message.tempId}-${index}`}
+            messageId={message._id}
+            attachment={attachment}
+            onOpenImage={setLightboxImage}
+            progress={
+              // Only while this message is still being sent — a confirmed one has
+              // no progress and must not show a bar.
+              message.isSending && typeof message.uploadProgress === "number"
+                ? message.uploadProgress
+                : undefined
+            }
+            onCancel={
+              message.isSending ? () => cancelAttachmentUpload(message.tempId) : undefined
+            }
+          />
+        ))}
+
+        {message.contact?.user && (
+          <button
+            type="button"
+            onClick={() => {
+              // Opening the shared person's chat is the only useful thing to do
+              // with a contact card, and the sidebar may not list them yet, so the
+              // card's own details stand in until it does.
+              const existing = users?.find((u) => u._id === String(message.contact.user));
+              setSelectedUser(
+                existing || {
+                  _id: String(message.contact.user),
+                  fullName: message.contact.name,
+                  email: message.contact.email,
+                  profilePic: message.contact.profilePic,
+                }
+              );
+            }}
+            className="flex items-center gap-3 px-3 py-2.5 mb-1.5 rounded-xl s-chip max-w-[240px] text-left active:scale-[0.98] transition-transform"
+          >
+            <img
+              src={message.contact.profilePic || "/avatar.png"}
+              alt=""
+              className="object-cover rounded-full size-10 shrink-0"
+            />
+            <span className="flex-1 min-w-0">
+              <span className="block text-[12.5px] font-medium truncate text-base-content">
+                {message.contact.name || "Contact"}
+              </span>
+              <span className="block text-[10.5px] mt-0.5 truncate t-dim">
+                Tap to open chat
+              </span>
+            </span>
+          </button>
+        )}
+
         {message.voice && (
           <>
             <VoiceNote

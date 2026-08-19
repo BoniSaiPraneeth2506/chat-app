@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Group from "../models/group.model.js";
 import Message from "../models/message.model.js";
 import User from "../models/user.model.js";
@@ -5,6 +6,12 @@ import cloudinary from "../lib/cloudinary.js";
 import { io, getReceiverSocketId } from "../lib/socket.js";
 import { hideAnonymousAuthor } from "../lib/anonymity.js";
 import { isGiphyMediaUrl } from "../lib/giphy.js";
+import {
+  verifyAttachment,
+  publicUrlForKey,
+  safeDisplayName,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+} from "../lib/attachments.js";
 
 // Fields returned for each group member. Wider than before so a member's
 // profile can be shown inside the group without a second request per person —
@@ -138,7 +145,7 @@ export const getUserGroups = async (req, res) => {
       // a $lookup to do the same thing, for no gain at this size.
       const previews = await Message.find({ _id: { $in: newest.map((n) => n.messageId) } })
         .select(
-          "groupId senderId text image images voice poll isAnonymous isDeletedForEveryone createdAt"
+          "groupId senderId text image images voice poll attachments contact isAnonymous isDeletedForEveryone createdAt"
         )
         .populate("senderId", "fullName profilePic")
         .lean();
@@ -660,7 +667,7 @@ const isTrustedMediaUrl = (value) => {
 export const sendGroupMessage = async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { text, image, images, voice, replyTo, mentions, voiceTranscript, isAnonymous, clientId } = req.body;
+    const { text, image, images, voice, replyTo, mentions, voiceTranscript, isAnonymous, attachments, contact, clientId } = req.body;
     const senderId = req.user._id;
 
     const group = await Group.findById(groupId);
@@ -715,6 +722,56 @@ export const sendGroupMessage = async (req, res) => {
       }
     }
 
+    // Attachments and contact cards, on the same terms as a direct message: the
+    // bytes went straight to the bucket, so each key is confirmed to exist and
+    // match what was authorised, and a shared contact is resolved from its id here
+    // rather than taken as the client described it.
+    let verifiedAttachments = [];
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      if (attachments.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+        return res.status(400).json({
+          message: `You can attach up to ${MAX_ATTACHMENTS_PER_MESSAGE} files at once`,
+        });
+      }
+      for (const att of attachments) {
+        const check = await verifyAttachment({
+          key: att?.key,
+          kind: att?.kind,
+          size: att?.size,
+          mime: att?.mime,
+        });
+        if (!check.valid) return res.status(400).json({ message: check.reason });
+
+        verifiedAttachments.push({
+          kind: att.kind,
+          key: att.key,
+          url: publicUrlForKey(att.key),
+          name: safeDisplayName(att.name),
+          mime: check.mime,
+          size: check.size,
+          duration: Number.isFinite(att.duration) ? att.duration : undefined,
+          width: Number.isFinite(att.width) ? att.width : undefined,
+          height: Number.isFinite(att.height) ? att.height : undefined,
+          posterUrl: typeof att.posterUrl === "string" ? att.posterUrl : "",
+        });
+      }
+    }
+
+    let contactCard = undefined;
+    if (contact?.user) {
+      if (!mongoose.Types.ObjectId.isValid(String(contact.user))) {
+        return res.status(400).json({ message: "Invalid contact" });
+      }
+      const shared = await User.findById(contact.user).select("fullName email profilePic").lean();
+      if (!shared) return res.status(400).json({ message: "That contact no longer exists" });
+      contactCard = {
+        user: shared._id,
+        name: shared.fullName || "",
+        email: shared.email || "",
+        profilePic: shared.profilePic || "",
+      };
+    }
+
     let voiceUrl = "";
     if (voice && voice.startsWith("data:audio")) {
       const uploadResponse = await cloudinary.uploader.upload(voice, {
@@ -736,6 +793,8 @@ export const sendGroupMessage = async (req, res) => {
       mentions: validMentions,
       voiceTranscript: typeof voiceTranscript === "string" ? voiceTranscript.slice(0, 2000) : "",
       isAnonymous: anonymous,
+      attachments: verifiedAttachments.length > 0 ? verifiedAttachments : undefined,
+      contact: contactCard,
     });
 
     await newMessage.save();

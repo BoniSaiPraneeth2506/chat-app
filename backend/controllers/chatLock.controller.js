@@ -104,7 +104,7 @@ const lockedGroupPreviews = async (groups, viewerId) => {
   ]);
 
   const previews = await Message.find({ _id: { $in: newest.map((n) => n.messageId) } })
-    .select("groupId senderId text image images voice poll isAnonymous isDeletedForEveryone createdAt")
+    .select("groupId senderId text image images voice poll attachments contact isAnonymous isDeletedForEveryone createdAt")
     .populate("senderId", "fullName")
     .lean();
 

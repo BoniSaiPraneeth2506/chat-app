@@ -9,7 +9,7 @@ import { updateUserPrivacyState, updateTypingPrivacyState, disconnectRevokedSess
 import { sendPasswordResetOtp } from "../lib/mailer.js";
 import Message from "../models/message.model.js";
 import Group from "../models/group.model.js";
-import { assetUrlsOf, destroyAssets } from "../lib/mediaCleanup.js";
+import { assetUrlsOf, destroyAssets, attachmentKeysOf, destroyObjects } from "../lib/mediaCleanup.js";
 import { buildSession } from "../lib/deviceInfo.js";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -415,7 +415,10 @@ const deleteAccount = async (req, res) => {
         // Free the storage this user's own messages hold before dropping them.
         const sent = await Message.find({ senderId: userId }).select("image images voice");
         if (sent.length > 0) {
-            await destroyAssets(sent.flatMap(assetUrlsOf));
+            await Promise.all([
+                destroyAssets(sent.flatMap(assetUrlsOf)),
+                destroyObjects(sent.flatMap(attachmentKeysOf)),
+            ]);
             await Message.deleteMany({ senderId: userId });
         }
 

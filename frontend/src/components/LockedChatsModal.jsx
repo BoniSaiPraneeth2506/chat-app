@@ -154,6 +154,13 @@ const LockedChatsModal = () => {
     if (lastMessage.poll) return `📊 ${lastMessage.poll.question}`;
     if (lastMessage.voice) return "🎤 Voice message";
     if (lastMessage.image || lastMessage.images?.length) return "📷 Image";
+    if (lastMessage.contact?.name) return `👤 ${lastMessage.contact.name}`;
+    const attachment = lastMessage.attachments?.[0];
+    if (attachment) {
+      if (attachment.kind === "video") return "🎬 Video";
+      if (attachment.kind === "image") return "🖼️ Photo";
+      return `📄 ${attachment.name || "Document"}`;
+    }
     return lastMessage.text || fallbackText;
   };
 

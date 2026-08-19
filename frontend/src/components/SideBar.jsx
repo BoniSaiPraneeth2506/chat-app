@@ -390,6 +390,14 @@ const DoubleCheck = ({ className }) => (
   </svg>
 );
 
+/** The sidebar line for a message whose content is a file. */
+const previewForAttachment = (attachment) => {
+  if (!attachment) return "📎 Attachment";
+  if (attachment.kind === "video") return "🎬 Video";
+  if (attachment.kind === "image") return "🖼️ Photo";
+  return `📄 ${attachment.name || "Document"}`;
+};
+
 const SideBar = () => {
   const nicknames = useNicknames();
   const { 
@@ -815,7 +823,12 @@ const SideBar = () => {
                   </strong>
                   {latestMsg.isDeletedForEveryone
                     ? "This message was deleted"
-                    : latestMsg.poll ? `📊 ${latestMsg.poll.question}` : latestMsg.voice ? "🎤 Voice message" : latestMsg.image ? "📷 Image" : latestMsg.text}
+                    : latestMsg.poll ? `📊 ${latestMsg.poll.question}`
+                    : latestMsg.voice ? "🎤 Voice message"
+                    : latestMsg.image ? "📷 Image"
+                    : latestMsg.contact?.name ? `👤 ${latestMsg.contact.name}`
+                    : latestMsg.attachments?.length ? previewForAttachment(latestMsg.attachments[0])
+                    : latestMsg.text}
                 </span>
               ) : (
                 <span className="text-base-content/40 italic">Group created</span>
@@ -958,6 +971,10 @@ const SideBar = () => {
                   "🎤 Voice message"
                 ) : latestMessages[user._id].image ? (
                   "📷 Image"
+                ) : latestMessages[user._id].contact?.name ? (
+                  `👤 ${latestMessages[user._id].contact.name}`
+                ) : latestMessages[user._id].attachments?.length ? (
+                  previewForAttachment(latestMessages[user._id].attachments[0])
                 ) : (
                   latestMessages[user._id].text
                 )

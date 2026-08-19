@@ -69,6 +69,7 @@ import {
   removeFromOutbox,
 } from "../lib/db";
 import { isNetworkError } from "../lib/network";
+import { uploadAttachment, createLocalUrl, releaseLocalUrl } from "../lib/attachments";
 
 // Local cache keys are shared with db.js's per-conversation message store —
 // "dm:<userId>" keeps a DM's cache distinct from a group's ("group:<id>").
@@ -193,6 +194,10 @@ const buildForwardPayload = (message) => {
   }
   return payload;
 };
+
+// In-flight uploads, so the bubble's cancel button can reach the request that
+// belongs to it. Keyed by the temp id the optimistic message carries.
+const uploadControllers = new Map();
 
 let callStartTime = null;
 let pendingIceCandidates = [];
@@ -542,6 +547,133 @@ export const useChatStore = create((set, get) => ({
 
   isLoadingMore: false,
 
+  /** Stops an upload that is still running, from the bubble showing it. */
+  cancelAttachmentUpload: (tempId) => {
+    uploadControllers.get(tempId)?.abort();
+  },
+
+  /**
+   * Sends a large file, showing it in the conversation while it uploads.
+   *
+   * The bubble appears the moment the file is chosen and fills with progress in
+   * place — which is where a person looks for it, and what every messenger does.
+   * It used to be a card above the composer, so a video sent from a phone showed
+   * its progress somewhere the conversation wasn't.
+   *
+   * The local file is rendered directly rather than downloaded back once the
+   * upload finishes, so the bubble never flickers between the two.
+   */
+  sendAttachmentMessage: async ({ file, kind, text = "", localUrl: staged = "" }) => {
+    const authUser = useAuthStore.getState().authUser;
+    const { selectedUser } = get();
+    const selectedGroup = useGroupStore.getState().selectedGroup;
+    if (!authUser || (!selectedUser && !selectedGroup)) return false;
+
+    const tempId = "temp-file-" + Date.now();
+    const localUrl = staged || (kind === "document" ? "" : createLocalUrl(file));
+
+    // Shaped like a real message so every existing bubble path works unchanged.
+    const optimistic = {
+      _id: tempId,
+      tempId,
+      senderId: selectedGroup
+        ? { _id: authUser._id, fullName: authUser.fullName, profilePic: authUser.profilePic }
+        : authUser._id,
+      receiverId: selectedGroup ? null : selectedUser._id,
+      groupId: selectedGroup ? selectedGroup._id : undefined,
+      text: text || "",
+      attachments: [
+        { kind, name: file.name, mime: file.type, size: file.size, localUrl, pending: true },
+      ],
+      uploadProgress: 0,
+      isSending: true,
+      createdAt: new Date().toISOString(),
+    };
+
+    const inGroup = Boolean(selectedGroup);
+    const insert = () => {
+      if (inGroup) {
+        useGroupStore.setState((state) => ({
+          groupMessages: [...state.groupMessages, optimistic],
+        }));
+      } else {
+        set((state) => ({ messages: [...state.messages, optimistic] }));
+      }
+    };
+    const patch = (fields) => {
+      const apply = (list) =>
+        list.map((m) => (m.tempId === tempId ? { ...m, ...fields } : m));
+      if (inGroup) useGroupStore.setState((state) => ({ groupMessages: apply(state.groupMessages) }));
+      else set((state) => ({ messages: apply(state.messages) }));
+    };
+    const drop = () => {
+      const remove = (list) => list.filter((m) => m.tempId !== tempId);
+      if (inGroup) useGroupStore.setState((state) => ({ groupMessages: remove(state.groupMessages) }));
+      else set((state) => ({ messages: remove(state.messages) }));
+    };
+
+    insert();
+    set((state) => ({ scrollToBottomSignal: state.scrollToBottomSignal + 1 }));
+
+    const controller = new AbortController();
+    uploadControllers.set(tempId, controller);
+
+    try {
+      const attachment = await uploadAttachment({
+        file,
+        kind,
+        signal: controller.signal,
+        onProgress: (progress) => patch({ uploadProgress: progress }),
+      });
+
+      // Uploaded. The message itself carries only metadata.
+      const payload = { attachments: [attachment], clientId: tempId };
+      if (text) payload.text = text;
+      const res = inGroup
+        ? await axiosInstance.post(`/groups/${selectedGroup._id}/send`, payload)
+        : await axiosInstance.post(`/messages/send/${selectedUser._id}`, payload);
+
+      // The local file stays on the confirmed copy so the picture does not blink
+      // out and get fetched back from the bucket a moment later.
+      const confirmed = {
+        ...res.data,
+        tempId,
+        isSending: false,
+        uploadProgress: undefined,
+        attachments: (res.data.attachments || []).map((att, index) =>
+          index === 0 && localUrl ? { ...att, localUrl } : att
+        ),
+      };
+      const replace = (list) => list.map((m) => (m.tempId === tempId ? confirmed : m));
+      if (inGroup) useGroupStore.setState((state) => ({ groupMessages: replace(state.groupMessages) }));
+      else
+        set((state) => ({
+          messages: replace(state.messages),
+          latestMessages: selectedUser
+            ? { ...state.latestMessages, [selectedUser._id]: confirmed }
+            : state.latestMessages,
+        }));
+
+      if (inGroup) {
+        useGroupStore.setState((state) => ({
+          latestGroupMessages: { ...state.latestGroupMessages, [selectedGroup._id]: confirmed },
+        }));
+      }
+      return true;
+    } catch (error) {
+      drop();
+      releaseLocalUrl(localUrl);
+      if (error.message !== "aborted") {
+        toast.error(
+          error.response?.data?.message || error.message || "Could not send that file"
+        );
+      }
+      return false;
+    } finally {
+      uploadControllers.delete(tempId);
+    }
+  },
+
   // Set while the conversation is showing a window from the past rather than its
   // newest messages, so the view can offer a way back to the bottom.
   isViewingHistory: false,
@@ -802,8 +934,13 @@ export const useChatStore = create((set, get) => ({
       if (onProgress) onProgress(progress);
     }, 300);
 
-    // Use AbortController to allow cancellation
+    // Use AbortController to allow cancellation.
+    //
+    // Registered against the temp id as well, so the cancel button on the bubble
+    // can reach it. The composer used to own that button, which only worked while
+    // the thumbnails were still sitting above the input.
     const controller = new AbortController();
+    uploadControllers.set(tempId, controller);
     if (signal) {
       // When caller provides a signal, wire cancellation
       signal.addEventListener("abort", () => controller.abort());
@@ -819,6 +956,7 @@ export const useChatStore = create((set, get) => ({
       });
 
       clearInterval(progressTimer);
+      uploadControllers.delete(tempId);
       // Finalize progress
       set((s) => ({
         messages: s.messages.map((m) => m._id === tempId ? { ...res.data, tempId } : m),
@@ -831,6 +969,7 @@ export const useChatStore = create((set, get) => ({
       return res.data;
     } catch (error) {
       clearInterval(progressTimer);
+      uploadControllers.delete(tempId);
       // If aborted, remove optimistic message
       if (controller.signal.aborted || error.name === 'CanceledError' || error.message === 'canceled') {
         set((s) => ({ messages: s.messages.filter((m) => m._id !== tempId) }));
