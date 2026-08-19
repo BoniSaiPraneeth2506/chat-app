@@ -8,6 +8,7 @@ import {
   formatBytes,
   createLocalUrl,
   releaseLocalUrl,
+  captureVideoPoster,
 } from "../lib/attachments";
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
@@ -351,8 +352,20 @@ const MessageInput = () => {
         file,
         kind: check.kind,
         previewUrl: check.kind === "document" ? "" : createLocalUrl(file),
+        poster: "",
       };
     });
+
+    // A frame off the video, so the card and then the bubble show the clip rather
+    // than a black rectangle. Runs alongside rather than blocking the preview.
+    if (check.kind === "video") {
+      captureVideoPoster(file).then((poster) => {
+        if (!poster) return;
+        setStagedFile((current) =>
+          current && current.file === file ? { ...current, poster } : current
+        );
+      });
+    }
   };
 
   const clearStagedFile = () => {
@@ -587,6 +600,7 @@ const MessageInput = () => {
           kind: currentStaged.kind,
           text: messageText,
           localUrl: currentStaged.previewUrl,
+          posterUrl: currentStaged.poster || "",
         });
       } else if (currentEditing) {
         // Checked ahead of selectedGroup: an edit is an edit in both DMs and
@@ -889,12 +903,21 @@ const MessageInput = () => {
         {stagedFile && (
           <div className="relative flex items-center gap-3 px-3 py-2.5 mb-1 rounded-2xl s-chip">
             {stagedFile.kind === "video" ? (
-              <video
-                src={stagedFile.previewUrl}
-                muted
-                playsInline
-                className="object-cover w-20 h-20 rounded-xl bg-black shrink-0"
-              />
+              stagedFile.poster ? (
+                <img
+                  src={stagedFile.poster}
+                  alt=""
+                  className="object-cover w-20 h-20 rounded-xl bg-black shrink-0"
+                />
+              ) : (
+                <video
+                  src={stagedFile.previewUrl}
+                  muted
+                  playsInline
+                  preload="metadata"
+                  className="object-cover w-20 h-20 rounded-xl bg-black shrink-0"
+                />
+              )
             ) : stagedFile.kind === "image" ? (
               <img
                 src={stagedFile.previewUrl}
@@ -1145,10 +1168,10 @@ const MessageInput = () => {
           </button>
         ) : (
           <button
-            type={text.trim() || imagePreviews.length > 0 || isSendingAnimation ? "submit" : "button"}
+            type={text.trim() || imagePreviews.length > 0 || stagedFile || isSendingAnimation ? "submit" : "button"}
             className={`relative w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-md flex-shrink-0 overflow-hidden
               ${
-                text.trim() || imagePreviews.length > 0 || isSendingAnimation
+                text.trim() || imagePreviews.length > 0 || stagedFile || isSendingAnimation
                   ? "bg-primary text-primary-content hover:scale-105 active:scale-95"
                   : "bg-base-100 border hover:bg-base-200"
               }

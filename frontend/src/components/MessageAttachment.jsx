@@ -102,12 +102,21 @@ const MessageAttachment = ({ messageId, attachment, onOpenImage, progress, onCan
     if (isUploading) {
       return (
         <span className="relative block mb-1.5 w-[220px] sm:w-[280px] overflow-hidden rounded-xl bg-black">
-          <video
-            src={local || undefined}
-            muted
-            playsInline
-            className="w-full aspect-video object-cover opacity-80"
-          />
+          {attachment.posterUrl ? (
+            <img
+              src={attachment.posterUrl}
+              alt=""
+              className="object-cover w-full aspect-video opacity-80"
+            />
+          ) : (
+            <video
+              src={local || undefined}
+              muted
+              playsInline
+              preload="metadata"
+              className="w-full aspect-video object-cover opacity-80"
+            />
+          )}
           {uploadOverlay}
         </span>
       );
@@ -120,6 +129,7 @@ const MessageAttachment = ({ messageId, attachment, onOpenImage, progress, onCan
           autoPlay={!local}
           playsInline
           poster={attachment.posterUrl || undefined}
+          preload="metadata"
           className="mb-1.5 max-w-[260px] sm:max-w-[320px] max-h-[320px] rounded-xl bg-black"
         />
       );
@@ -130,13 +140,23 @@ const MessageAttachment = ({ messageId, attachment, onOpenImage, progress, onCan
         onClick={resolve}
         className="relative mb-1.5 w-[220px] sm:w-[280px] overflow-hidden rounded-xl bg-black/60 aspect-video grid place-items-center active:scale-[0.98] transition-transform"
       >
-        {attachment.posterUrl && (
+        {attachment.posterUrl ? (
           <img
             src={attachment.posterUrl}
-            alt=""
-            className="absolute inset-0 object-cover w-full h-full opacity-70"
+            alt={attachment.name || "Video"}
+            className="absolute inset-0 object-cover w-full h-full opacity-80"
           />
-        )}
+        ) : local ? (
+          // No captured frame — an older message, or a capture that failed. The
+          // local file can still supply one.
+          <video
+            src={local}
+            muted
+            playsInline
+            preload="metadata"
+            className="absolute inset-0 object-cover w-full h-full opacity-80"
+          />
+        ) : null}
         <span className="relative grid rounded-full size-12 place-items-center bg-black/55 text-white">
           {isLoading ? <Loader size={18} className="animate-spin" /> : <Play size={20} />}
         </span>

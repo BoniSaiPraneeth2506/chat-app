@@ -641,6 +641,22 @@ export const closeGroupPoll = async (req, res) => {
 
 // 9. Send Message to Group
 /**
+ * A client-supplied video poster, or nothing.
+ *
+ * This is the one place bytes are allowed into the database, so it is bounded on
+ * both shape and size: a small JPEG data URL and nothing else. Left unchecked, the
+ * field would accept any string of any length — an arbitrary remote URL that every
+ * viewer's browser would then fetch, or a payload large enough to bloat the
+ * document.
+ */
+const safePosterUrl = (value) => {
+  if (typeof value !== "string" || !value.startsWith("data:image/jpeg;base64,")) return "";
+  // ~80 KB of base64 is a generous ceiling for a 320px thumbnail.
+  if (value.length > 110_000) return "";
+  return value;
+};
+
+/**
  * Hosts an image may be referenced from rather than uploaded — our own image and
  * file storage, and GIPHY's media domains. Mirrors the direct-message path; see
  * the longer note there for why the host is checked rather than trusted.
@@ -752,7 +768,7 @@ export const sendGroupMessage = async (req, res) => {
           duration: Number.isFinite(att.duration) ? att.duration : undefined,
           width: Number.isFinite(att.width) ? att.width : undefined,
           height: Number.isFinite(att.height) ? att.height : undefined,
-          posterUrl: typeof att.posterUrl === "string" ? att.posterUrl : "",
+          posterUrl: safePosterUrl(att.posterUrl),
         });
       }
     }

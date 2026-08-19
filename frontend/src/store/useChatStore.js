@@ -563,7 +563,7 @@ export const useChatStore = create((set, get) => ({
    * The local file is rendered directly rather than downloaded back once the
    * upload finishes, so the bubble never flickers between the two.
    */
-  sendAttachmentMessage: async ({ file, kind, text = "", localUrl: staged = "" }) => {
+  sendAttachmentMessage: async ({ file, kind, text = "", localUrl: staged = "", posterUrl = "" }) => {
     const authUser = useAuthStore.getState().authUser;
     const { selectedUser } = get();
     const selectedGroup = useGroupStore.getState().selectedGroup;
@@ -583,7 +583,7 @@ export const useChatStore = create((set, get) => ({
       groupId: selectedGroup ? selectedGroup._id : undefined,
       text: text || "",
       attachments: [
-        { kind, name: file.name, mime: file.type, size: file.size, localUrl, pending: true },
+        { kind, name: file.name, mime: file.type, size: file.size, localUrl, posterUrl, pending: true },
       ],
       uploadProgress: 0,
       isSending: true,
@@ -627,7 +627,10 @@ export const useChatStore = create((set, get) => ({
       });
 
       // Uploaded. The message itself carries only metadata.
-      const payload = { attachments: [attachment], clientId: tempId };
+      const payload = {
+        attachments: [posterUrl ? { ...attachment, posterUrl } : attachment],
+        clientId: tempId,
+      };
       if (text) payload.text = text;
       const res = inGroup
         ? await axiosInstance.post(`/groups/${selectedGroup._id}/send`, payload)

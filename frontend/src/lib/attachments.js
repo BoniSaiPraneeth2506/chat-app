@@ -173,3 +173,70 @@ export const releaseLocalUrl = (url) => {
   liveObjectUrls.delete(url);
   URL.revokeObjectURL(url);
 };
+
+/**
+ * A still frame from a video, for the bubble to show before it plays.
+ *
+ * Nothing else can produce one: the bucket stores bytes and does no transcoding,
+ * so without this a video arrives with nothing to display and the bubble is a
+ * black rectangle — for the recipient always, and for the sender as soon as the
+ * page reloads and the local file is gone.
+ *
+ * Kept small deliberately. It travels as a data URL on the message, so it is the
+ * one place bytes do land in the database, and 320px of JPEG at moderate quality
+ * is a legible thumbnail in about twenty kilobytes.
+ */
+export const captureVideoPoster = (file) =>
+  new Promise((resolve) => {
+    if (!file || !file.type.startsWith("video/")) {
+      resolve("");
+      return;
+    }
+
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    let settled = false;
+
+    const finish = (poster) => {
+      if (settled) return;
+      settled = true;
+      URL.revokeObjectURL(url);
+      video.removeAttribute("src");
+      resolve(poster);
+    };
+
+    // A frame that never arrives must not hold the send back.
+    const timer = setTimeout(() => finish(""), 4000);
+
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    video.crossOrigin = "anonymous";
+
+    video.onloadeddata = () => {
+      // Not frame zero: the first frame of a phone recording is often black.
+      video.currentTime = Math.min(0.2, (video.duration || 1) / 2);
+    };
+
+    video.onseeked = () => {
+      try {
+        const scale = Math.min(1, 320 / (video.videoWidth || 320));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round((video.videoWidth || 320) * scale));
+        canvas.height = Math.max(1, Math.round((video.videoHeight || 180) * scale));
+        canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+        clearTimeout(timer);
+        finish(canvas.toDataURL("image/jpeg", 0.6));
+      } catch {
+        clearTimeout(timer);
+        finish("");
+      }
+    };
+
+    video.onerror = () => {
+      clearTimeout(timer);
+      finish("");
+    };
+
+    video.src = url;
+  });
