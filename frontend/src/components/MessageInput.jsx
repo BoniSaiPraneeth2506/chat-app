@@ -671,10 +671,13 @@ const MessageInput = () => {
     } catch (error) {
       console.error("Failed to send message:", error);
     } finally {
-      // Send moves focus to the button, which drops the keyboard on Android.
-      // Returning focus keeps it up until the user dismisses it themselves,
-      // matching how sending a normal message behaves.
-      inputRef.current?.focus();
+      const sentAFile = Boolean(currentStaged) || currentImages.length > 0;
+      if (!sentAFile) {
+        // Send moves focus to the button, which drops the keyboard on Android.
+        // Returning focus keeps it up until the user dismisses it themselves,
+        // matching how sending a normal message behaves.
+        inputRef.current?.focus();
+      }
     }
   };
 
