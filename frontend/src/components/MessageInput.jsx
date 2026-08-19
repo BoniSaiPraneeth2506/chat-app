@@ -305,11 +305,14 @@ const MessageInput = () => {
   const handleTextChange = (e) => {
     const val = e.target.value;
     setText(val);
-    setGifCommand(parseGifCommand(val));
+    const command = parseGifCommand(val);
+    setGifCommand(command);
     if (selectedUser) {
       // The id is captured now, so a draft still in flight when the user switches
-      // chats lands under the conversation it was actually typed in.
-      pendingDraftRef.current = { userId: selectedUser._id, text: val };
+      // chats lands under the conversation it was actually typed in. A command is
+      // stored as an empty draft rather than skipped, so it also clears whatever
+      // was there before — the composer no longer holds that text either.
+      pendingDraftRef.current = { userId: selectedUser._id, text: command ? "" : val };
       if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
       draftTimerRef.current = setTimeout(flushDraft, 350);
     }
