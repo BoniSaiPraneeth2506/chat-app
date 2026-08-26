@@ -1,6 +1,6 @@
 # Chatty — Real-Time MERN Chat Application
 
-A full-featured, WhatsApp-style real-time chat application built with **MongoDB, Express, React, and Node.js (MERN)**, using **Socket.IO** for real-time communication and **Cloudinary** for media storage.
+A full-featured, WhatsApp-style real-time chat application built with **MongoDB, Express, React, and Node.js (MERN)**, using **Socket.IO** for real-time communication, **Cloudflare R2 / Cloudinary** for media storage, and **Capacitor** for native Android.
 
 ---
 
@@ -16,22 +16,23 @@ A full-featured, WhatsApp-style real-time chat application built with **MongoDB,
 8. [Real-Time Events (Socket.IO)](#8-real-time-events-socketio)
 9. [Frontend State Management (Zustand Stores)](#9-frontend-state-management-zustand-stores)
 10. [Frontend Pages & Components](#10-frontend-pages--components)
-11. [Authentication & Security](#11-authentication--security)
-12. [Environment Variables](#12-environment-variables)
-13. [Setup & Installation](#13-setup--installation)
-14. [Build & Deployment](#14-build--deployment)
-15. [Known Issues / Notes](#15-known-issues--notes)
-16. [Mobile App (Capacitor / Android)](#16-mobile-app-capacitor--android)
+11. [Frontend Utilities & Libraries](#11-frontend-utilities--libraries)
+12. [Authentication & Security](#12-authentication--security)
+13. [Environment Variables](#13-environment-variables)
+14. [Setup & Installation](#14-setup--installation)
+15. [Build & Deployment](#15-build--deployment)
+16. [Known Issues / Notes](#16-known-issues--notes)
+17. [Mobile App (Capacitor / Android)](#17-mobile-app-capacitor--android)
 
 ---
 
 ## 1. Overview
 
-**Chatty** is a one-to-one real-time messaging application inspired by WhatsApp. It supports text, image, and voice messages, audio/video calling (WebRTC), message reactions, replies, edits, deletions, pinning, disappearing messages, contact management (favorites/archive/block), chat wallpapers, multiple UI themes, and read-receipt/online-status tracking.
+**Chatty** is a WhatsApp-inspired real-time messaging application supporting one-to-one and group chats, voice/video calling (WebRTC), scheduled and disappearing messages, polls, voice transcription, GIPHY integration, linked contact cards, chat lock (password/biometric), multi-account switching, and an offline-first IndexedDB cache. It runs as both a web SPA and a native Android app via Capacitor.
 
 The repository is a monorepo with two main folders:
 - `backend/` — Express REST API + Socket.IO server
-- `frontend/` — React (Vite) single-page application
+- `frontend/` — React (Vite) single-page application + Capacitor Android project
 
 A root `package.json` provides convenience scripts to install both apps and build the frontend for production serving via the backend.
 
@@ -44,14 +45,20 @@ A root `package.json` provides convenience scripts to install both apps and buil
 |---|---|
 | Node.js + Express 5 | HTTP server & REST API |
 | MongoDB + Mongoose | Database & ODM |
-| Socket.IO | Real-time bi-directional communication (messaging, calls, presence) |
-| JWT (`jsonwebtoken`) | Stateless authentication |
+| Socket.IO | Real-time bi-directional communication (messaging, calls, presence, groups) |
+| JWT (`jsonwebtoken`) | Stateless authentication with device session tracking |
 | bcryptjs | Password hashing |
-| Cloudinary | Image/voice-note cloud storage |
+| Cloudinary | Profile pictures, chat images, voice notes |
+| Cloudflare R2 | Large file attachments (video, documents) via presigned URLs |
+| Helmet | HTTP security headers (CSP, etc.) |
+| sanitize-html | HTML/JS stripping from message text |
 | cookie-parser | Reading JWT from HTTP-only cookies |
 | cors | Cross-origin request handling |
 | dotenv | Environment variable loading |
 | nodemon | Dev-time auto-restart |
+| AssemblyAI | Voice note transcription (optional) |
+| GIPHY API | GIF/sticker search proxy (optional) |
+| Brevo / Resend / SMTP | Password-reset email delivery (cascading fallback) |
 
 ### Frontend
 | Technology | Purpose |
@@ -60,12 +67,22 @@ A root `package.json` provides convenience scripts to install both apps and buil
 | Vite 7 | Build tool / dev server |
 | React Router DOM 7 | Client-side routing |
 | Zustand 5 | Lightweight global state management |
-| Axios | HTTP client |
+| Axios | HTTP client (with JWT interceptor) |
 | Socket.IO-client | Real-time client |
 | TailwindCSS 3 + DaisyUI 5 | Styling & themed UI components |
 | Lucide-react | Icon library |
 | React-hot-toast | Toast notifications |
-| Native WebRTC APIs | Peer-to-peer audio/video calling |
+| Native WebRTC APIs | Peer-to-peer audio/video calling (1-on-1 and group mesh) |
+| Dexie (IndexedDB) | Offline-first local message cache |
+| qrcode / jsqr | QR code generation and scanning |
+| react-oauth/google | Google Sign-In (web) |
+| Capacitor 8 | Native Android wrapper |
+| @capgo/capacitor-social-login | Native Android Google Sign-In |
+| @aparajita/capacitor-biometric-auth | Fingerprint/face unlock for chat lock |
+| @capawesome/capacitor-badge | Android launcher badge count |
+| @capacitor/app | Android back button handling |
+| @capacitor/filesystem | Native file save/share |
+| @capacitor/share | Native share sheet |
 
 ---
 
@@ -74,62 +91,130 @@ A root `package.json` provides convenience scripts to install both apps and buil
 ```
 chat-app/
 ├── package.json                  # Root scripts (build/start for combined deployment)
+├── DOCUMENTATION.md
+├── FEATURES.md
 ├── backend/
-│   ├── index.js                  # App entry point (Express + Socket.IO server bootstrap)
+│   ├── index.js                  # App entry point (Express + Socket.IO + Helmet + CORS)
 │   ├── controllers/
-│   │   ├── auth.controller.js    # Signup, login, logout, profile update, checkAuth
-│   │   └── message.controller.js # Messaging, reactions, calls, wallpapers, etc.
+│   │   ├── auth.controller.js    # Signup, login, logout, Google auth, profile update,
+│   │   │                         #   checkAuth, deleteAccount, forgotPassword, resetPassword,
+│   │   │                         #   session management (list/revoke)
+│   │   ├── message.controller.js # DMs: send, edit, delete, reactions, pin, block, call-log,
+│   │   │                         #   wallpaper, view-once, bulk delete, transcript, scheduled,
+│   │   │                         #   nickname, contact lookup, message info, export, shared media
+│   │   ├── group.controller.js   # Groups: CRUD, members, roles, messages, polls, invites,
+│   │   │                         #   welcome/rules, member notes
+│   │   ├── upload.controller.js  # R2 presigned upload/download URLs (video, image, document)
+│   │   ├── chatLock.controller.js # Chat lock: setup, unlock, password change, recovery, toggle
+│   │   └── giphy.controller.js   # GIPHY search/trending proxy
 │   ├── lib/
 │   │   ├── db.js                 # MongoDB connection
-│   │   ├── socket.js             # Socket.IO server, presence & signaling logic
+│   │   ├── socket.js             # Socket.IO server, presence, signaling, group calls, blocking
 │   │   ├── cloudinary.js         # Cloudinary SDK config
-│   │   └── utils.js              # JWT helper (generateToken)
+│   │   ├── origins.js            # CORS origin allowlist logic
+│   │   ├── utils.js              # JWT helper (generateToken) with session ID
+│   │   └── groupPermissions.js   # Group permission helpers (canDo, canManagePermissions, etc.)
 │   ├── middlewares/
-│   │   └── auth.middleware.js    # protectRoute — JWT verification middleware
+│   │   └── auth.middleware.js    # protectRoute — JWT verification + session validation
 │   ├── models/
-│   │   ├── user.model.js         # User schema
-│   │   └── message.model.js      # Message schema
+│   │   ├── user.model.js         # User schema (sessions, socialLinks, chatLock, nicknames, etc.)
+│   │   └── message.model.js      # Message schema (attachments[], poll, transcript, isOneView, etc.)
+│   │   (Group model is in models/group.model.js)
 │   ├── routes/
-│   │   ├── auth.route.js         # /api/auth/*
-│   │   └── message.route.js      # /api/messages/*
-│   ├── seeds/
-│   │   ├── user.seed.js          # Seeds ~15 dummy users
-│   │   ├── insert_7_dummy.js
-│   │   └── delete_dummy.js
-│   └── .env                      # Backend secrets (not committed)
+│   │   ├── auth.route.js         # /api/auth/* (signup, login, google, sessions, chat-lock, etc.)
+│   │   ├── message.route.js      # /api/messages/* (25+ endpoints)
+│   │   ├── group.route.js        # /api/groups/* (18 endpoints)
+│   │   ├── upload.route.js       # /api/uploads/* (limits, sign, url)
+│   │   └── giphy.route.js        # /api/giphy/*
+│   ├── jobs/
+│   │   ├── scheduler.js          # Scheduled message dispatcher + media purge for expired messages
+│   │   └── emailDigest.js        # Weekly summary and inactivity nudge emails
+│   └── seeds/
+│       ├── user.seed.js          # Seeds ~15 dummy users with @example.com emails
+│       ├── insert_7_dummy.js     # Insert 3 additional dummy users
+│       └── delete_dummy.js       # Delete all @example.com dummy users
 │
 └── frontend/
     ├── index.html
     ├── vite.config.js
     ├── tailwind.config.js / postcss.config.js
+    ├── capacitor.config.json     # Capacitor config (com.chatapp.mobile, SocialLogin providers)
     ├── .env.production
     └── src/
-        ├── main.jsx               # ReactDOM root + BrowserRouter
-        ├── App.jsx                # Route definitions, theming, global modals
+        ├── main.jsx              # ReactDOM root + BrowserRouter
+        ├── App.jsx               # Route table, theming, global modals, Capacitor back button,
+        │                         #   account chooser, lightbox, keyboard shortcuts
         ├── index.css
-        ├── constants/index.js     # THEME_COLORS + THEMES list (30+ themes)
+        ├── constants/
+        │   └── index.js          # THEME_COLORS (32 themes) + THEMES list
         ├── lib/
-        │   ├── axios.js           # Pre-configured Axios instance (JWT header injection)
-        │   └── utils.js           # formatMessageTime helper
+        │   ├── axios.js          # Pre-configured Axios instance (JWT header + session-revoked interceptor)
+        │   ├── utils.js          # formatMessageTime, buildChatLink, buildInviteLink, parseChatLink
+        │   ├── db.js             # Dexie IndexedDB cache (messages, conversationsMeta, outbox)
+        │   ├── network.js        # isNetworkError, subscribeOnlineStatus
+        │   ├── attachments.js    # File upload: sign, put-to-bucket, poster capture, local URLs
+        │   ├── accounts.js       # Multi-account localStorage (remember/forget/switch)
+        │   ├── badge.js          # Android launcher badge (Capacitor Badge plugin)
+        │   ├── biometrics.js     # Fingerprint/face auth for chat lock (Capacitor BiometricAuth)
+        │   ├── clipboard.js      # Copy text + multi-message clipboard formatting
+        │   ├── contacts.js       # Private per-contact nicknames (displayNameOf, hasNickname)
+        │   ├── download.js       # File save (web <a download> or native Filesystem + Share)
+        │   ├── groupPermissions.js # Client-side mirror of group permission logic
+        │   ├── haptics.js        # Haptic feedback patterns for touch devices
+        │   ├── members.js        # Group member presentation (join dates, activity labels, filters)
+        │   ├── secureScreen.js   # FLAG_SECURE for view-once media (Android native plugin)
+        │   ├── social.js         # Social link definitions (GitHub, Twitter, LinkedIn, YouTube, Portfolio)
+        │   └── attachments.js    # R2 presigned upload flow
         ├── store/
-        │   ├── useAuthStore.js    # Auth state + socket connection lifecycle
-        │   ├── useChatStore.js    # Messaging, calling (WebRTC), reactions, etc.
-        │   └── useThemeStore.js   # Theme, wallpaper, sound & privacy prefs (localStorage)
+        │   ├── useAuthStore.js   # Auth state, socket connection, multi-account, session management
+        │   ├── useChatStore.js   # DMs, messages, calling (WebRTC), reactions, forwarding, etc.
+        │   ├── useGroupStore.js  # Groups, group messages, group calls (mesh WebRTC), polls
+        │   ├── useThemeStore.js  # Theme, wallpaper, sound & privacy prefs (localStorage)
+        │   └── useChatLockStore.js # Chat lock: unlock, setup, recovery, toggle
         ├── pages/
-        │   ├── HomePage.jsx
-        │   ├── LoginPage.jsx
-        │   ├── SignUpPage.jsx
-        │   ├── SettingsPage.jsx
-        │   └── ProfilePage.jsx
+        │   ├── HomePage.jsx      # Main layout (SideBar + ChatContainer/NoChatSelected)
+        │   ├── LoginPage.jsx     # Login form + Google Sign-In + native SocialLogin
+        │   ├── SignUpPage.jsx    # Signup form + Google Sign-In + native SocialLogin
+        │   ├── SettingsPage.jsx  # Theme picker, wallpaper picker, sound/privacy toggles
+        │   ├── ProfilePage.jsx   # Profile editor, QR code, social links, banner upload
+        │   ├── LinkedDevicesPage.jsx  # Device session list + revoke
+        │   ├── BlockedUsersPage.jsx   # Blocked users list + unblock
+        │   ├── JoinGroupPage.jsx      # Group invite link handler
+        │   └── AboutPage.jsx          # App info page
         └── components/
-            ├── NavBar.jsx
-            ├── SideBar.jsx            # Contact list, search, filters, context menu
-            ├── ChatHeader.jsx         # Header w/ call buttons, search, wallpaper menu
-            ├── ChatContainer.jsx      # Message list, reactions, contact info panel
-            ├── MessageInput.jsx       # Text/image/voice composer, typing indicator
-            ├── CallModal.jsx          # WebRTC audio/video call UI
-            ├── NoChatSelected.jsx
-            ├── AuthImagePattern.jsx
+            ├── NavBar.jsx                # Top nav with settings/profile/linked-devices/about links
+            ├── SideBar.jsx               # Contact list, search, filters, context menu, unread badges
+            ├── ChatHeader.jsx            # Recipient info, call buttons, search, wallpaper, more menu
+            ├── ChatContainer.jsx         # Message list, reactions, pinned banner, contact info panel
+            ├── MessageInput.jsx          # Text/image/voice composer, typing indicator, reply/edit banners
+            ├── MessageAttachment.jsx     # Renders file attachments (video, image, document) from R2
+            ├── CallModal.jsx             # WebRTC 1-on-1 audio/video call UI
+            ├── GroupCallModal.jsx        # Multi-peer group call UI (mesh WebRTC)
+            ├── CreateGroupModal.jsx      # Create group: name, description, pic, members
+            ├── GroupDetailsModal.jsx     # Group info, members, settings, polls, invite links
+            ├── GroupMemberSheet.jsx      # Full member list with search/filter
+            ├── GroupWelcomeSheet.jsx     # Welcome/rules shown once per member
+            ├── LockedChatsModal.jsx      # Locked chats: password gate, locked conversation list
+            ├── ChatLockSettings.jsx      # Enable/disable/change password/recover chat lock
+            ├── LockPasswordPrompt.jsx    # Password entry prompt for chat lock
+            ├── ForwardModal.jsx          # Forward message(s) to contacts
+            ├── MessageInfoSheet.jsx      # Per-message read receipt / delivery info
+            ├── MediaGallerySheet.jsx     # Shared media grid for a conversation
+            ├── ImageEditorModal.jsx      # Crop/annotate image before sending
+            ├── AttachMenu.jsx            # Attachment type picker (image, video, document, GIF, poll)
+            ├── GifPicker.jsx             # GIPHY GIF/sticker search and selection
+            ├── PollMessage.jsx           # Renders poll messages (vote, close, results)
+            ├── CreatePollModal.jsx       # Create poll: question, options (2-12)
+            ├── VoiceNote.jsx             # Voice message player with waveform
+            ├── VoiceTranscript.jsx       # Displays AssemblyAI transcription for voice notes
+            ├── SchedulePicker.jsx        # Date/time picker for scheduled messages
+            ├── ProfileQrCard.jsx         # QR code card for profile/chat link sharing
+            ├── QrScannerModal.jsx        # Camera QR scanner for chat links
+            ├── ContactPickerSheet.jsx    # Contact selection sheet (for forwarding, sharing)
+            ├── SocialLinksRow.jsx        # Renders social link icons for a user
+            ├── OfflineBanner.jsx         # "You're offline" banner
+            ├── NoChatSelected.jsx        # Placeholder/welcome screen
+            ├── AuthImagePattern.jsx      # Decorative side panel for login/signup
             └── skeletons/
                 ├── SidebarSkeleton.jsx
                 └── MessageSkeleton.jsx
@@ -143,125 +228,248 @@ chat-app/
 ┌─────────────────┐        HTTPS/REST (JWT via cookie or Bearer)      ┌───────────────────────┐
 │                 │ ───────────────────────────────────────────────▶ │                       │
 │  React Frontend │                                                   │   Express REST API    │
-│   (Vite SPA)    │ ◀─────────────────────────────────────────────── │  (auth + messages)    │
-│                 │                                                   │                       │
+│   (Vite SPA)    │ ◀─────────────────────────────────────────────── │  (auth + messages +   │
+│                 │                                                   │   groups + uploads)   │
 │                 │        WebSocket (Socket.IO, transport=websocket) │                       │
 │                 │ ◀───────────────────────────────────────────────▶│   Socket.IO Server     │
-└─────────────────┘        (messages, presence, typing, calls, etc.)  └──────────┬────────────┘
-                                                                                    │
-                                                                          Mongoose ODM
-                                                                                    │
-                                                                          ┌─────────▼─────────┐
-                                                                          │      MongoDB       │
-                                                                          │ (Users, Messages)  │
-                                                                          └─────────────────────┘
-                            Media Upload (base64 → Cloudinary)
-┌─────────────────┐ ───────────────────────────────────────────────▶ ┌───────────────────────┐
-│  Express server  │                                                  │      Cloudinary        │
-└─────────────────┘ ◀─────────────────────────────────────────────── └───────────────────────┘
+└─────────────────┘        (messages, presence, typing, calls,       └──────────┬────────────┘
+                            group events, read receipts)                        │
+                                                                         Mongoose ODM
+                                                                               │
+                                                                         ┌─────▼──────┐
+                                                                         │  MongoDB   │
+                                                                         │(Users,Msgs,│
+                                                                         │  Groups)   │
+                                                                         └────────────┘
+Media Upload:
+  Cloudinary ← profile pics, chat images, voice notes
+  Cloudflare R2 ← large file attachments (video, documents) via presigned PUT URLs
 ```
 
-- The `backend/lib/socket.js` module creates its own `http.createServer(app)` and Socket.IO instance; `backend/index.js` imports `{ app, server }` from it and mounts REST routes onto the same Express `app`, then calls `server.listen()`. This way, one HTTP server handles both REST calls and WebSocket upgrades.
-- In production, the Express app also serves the built frontend (`frontend/dist`) as static files and handles SPA fallback routing (`app.get("/*", ...)`).
-- WebRTC (peer-to-peer audio/video) signaling (`offer`/`answer`/ICE candidates) is relayed through Socket.IO events; actual media streams flow directly between browsers (or via STUN/TURN when needed).
+- `backend/lib/socket.js` creates its own `http.createServer(app)` and Socket.IO instance; `backend/index.js` imports `{ app, server }` from it and mounts REST routes onto the same Express `app`, then calls `server.listen()`. One HTTP server handles both REST and WebSocket.
+- In production, the Express app serves the built frontend (`frontend/dist`) as static files and handles SPA fallback routing (`app.get("/{*splat}", ...)`).
+- WebRTC signaling (`offer`/`answer`/ICE candidates) is relayed through Socket.IO events; actual media flows directly between browsers (or via STUN/TURN for NAT traversal).
+- **Multi-device support**: `userSocketMap` is `userId -> Set<socketId>`. `getReceiverSocketId` returns a room name (`user_<id>`) that fans out to all of a user's connected devices.
+- **Group calls** use a mesh WebRTC topology: each participant connects to every other, with signaling relayed through Socket.IO group call rooms (`group_call_<id>`).
+- **File attachments** use a three-step flow: server signs a presigned PUT URL → browser uploads directly to R2 → message is sent with attachment metadata only.
 
 ---
 
 ## 5. Feature Set
 
-### Messaging
-- One-to-one text messaging with real-time delivery via Socket.IO
-- Image messages (uploaded to Cloudinary, client-side compressed before upload)
-- Voice messages (recorded via `MediaRecorder`, uploaded as Cloudinary video resource)
-- Message replies (quote another message)
-- Message editing (within 15 minutes of sending)
-- Message deletion ("Delete for me" / "Delete for everyone")
-- Message reactions (emoji, one reaction per user per message, toggled by re-clicking)
-- Message pinning (one pinned message per conversation, shown as a sticky banner)
-- Disappearing messages (off / 1h / 24h / 7d — implemented via Mongo `expires: 0` TTL field `deleteAt`)
-- In-chat message search with highlight
-- Infinite scroll / paginated message loading (`limit` & `skip` query params)
-- "Personal Notes" self-chat (chat with yourself for notes/drafts)
+### Authentication & Account Management
+- Email/password signup & login with bcrypt hashing
+- Google Sign-In (web via `@react-oauth/google`, Android via `@capgo/capacitor-social-login` native Credential Manager)
+- JWT stored in HTTP-only cookie + localStorage fallback (`Authorization: Bearer` header)
+- **Device session tracking**: each login creates a session with IP, user-agent, device info; sessions are listed, individually revocable, and revoking from another device kicks the session live via socket
+- **Multi-account switching**: up to 5 accounts saved on a device; switch without re-entering password; account chooser on logout
+- **Password reset**: 6-digit OTP sent via Brevo HTTPS API → Resend HTTPS API → SMTP fallback → dev console log
+- **Account deletion**: requires password or typed "DELETE" confirmation; cleans up sent messages, media, groups, blocked lists, nicknames
 
-### Presence & Read Status
-- Real-time online/offline user tracking (`getOnlineUsers` broadcast)
-- Per-user "online privacy" toggle to hide online status (`onlinePrivacy` field)
-- Last-seen timestamp tracking
-- Read receipts (single/double checkmarks), with optional privacy toggle to hide blue "read" ticks
-- Typing indicators
+### 1-on-1 Messaging
+- Real-time text delivery via Socket.IO with optimistic UI
+- **Image messages**: single or up to 5 per message (grid layout), client-side canvas compression before upload
+- **Voice messages**: recorded via `MediaRecorder`, uploaded to Cloudinary, with optional AssemblyAI transcription
+- **File attachments**: video, images, documents uploaded to Cloudflare R2 via presigned URLs with progress tracking and cancel support
+- **Linked contact cards**: share a user's profile as a tappable card
+- Message replies (quote with click-to-scroll)
+- Message editing (within 15 minutes, shows "edited" indicator)
+- Message deletion ("Delete for me" / "Delete for everyone")
+- **Bulk message deletion**: selection mode with checkboxes
+- **Message forwarding**: single or multi-select forward to multiple contacts with "Forwarded" flag
+- **Message reactions**: emoji picker (👍❤️😂😮😢🙏), one per user, toggle by re-clicking, double-click ❤️
+- **Message pinning**: one pinned message per conversation, sticky banner, auto-unpins previous
+- **Disappearing messages**: off / 1h / 24h / 7d via MongoDB TTL index (`deleteAt`, `expires: 600`); media purged by background job
+- **View-once messages**: self-destructing photos with "Opened" state, viewed tracking, `FLAG_SECURE` screenshot blocking on Android
+- **Scheduled messages**: schedule for future delivery, background scheduler polls every 10s, cancel pending
+- **Message drafts**: per-conversation auto-save/restore
+- **Link previews**: rich preview cards via microlink.io, YouTube embeds, direct video playback
+- In-chat message search with yellow highlight
+- Infinite scroll / paginated message loading (20 per page, `limit` & `skip`)
+- Jump-to-message by date (calendar view)
+- Date separators (Today / Yesterday / Weekday / Full date)
+- **Personal Notes**: self-chat for notes/drafts/links
+- Typing indicators (real-time, 1.5s debounce)
+- Read receipts (single/double checkmarks, blue ticks, privacy toggle)
+- Call log messages (completed/missed/declined with duration)
+- **Private contact nicknames**: rename contacts for yourself only, synced across devices
+
+### Group Chats
+- Create groups with name, description, group picture (Cloudinary)
+- **Group roles**: Admin, Moderator, Member
+- **Configurable permissions**: sendMessages, addMembers, editInfo, startCalls — each set to "everyone" or "admins"
+- Read-only mode (admin/moderator only can send)
+- Add/remove members, promote/demote roles
+- Group typing indicators
+- **Group polls**: create polls (2-12 options), vote, close, results display
+- **Anonymous questions**: post as anonymous in groups that allow it
+- **@mentions**: notify mentioned members, surface unread groups where you're mentioned
+- **Invite links**: generate/revoke shareable invite codes, preview before joining
+- **Welcome message & rules**: shown once per member, dismissible
+- **Member notes**: private notes about other group members (max 500 chars)
+- Group call logs
+- Group message search, infinite scroll, date separators
 
 ### Calling (WebRTC)
-- Voice and video calling using native WebRTC APIs (`RTCPeerConnection`)
-- Signaling (offer/answer/ICE candidates) relayed through Socket.IO
-- STUN/TURN servers configured (Google STUN + Metered.ca open relay TURN) for NAT traversal
+
+#### 1-on-1 Calls
+- Voice and video calling via native `RTCPeerConnection`
+- Signaling relayed through Socket.IO (`offer`/`answer`/ICE candidates)
+- STUN/TURN servers: Google STUN + Metered.ca open relay TURN
+- **Screen sharing**: `getDisplayMedia` → `replaceTrack` (video calls only, not on Android)
 - Call states: ringing, incoming, connected, ended
 - Minimizable/maximizable call UI overlay
-- Automatic call-log messages saved to the chat history (completed/missed/declined with duration)
+- Auto-downgrade to audio-only if camera busy
+- Call logs saved to chat history
+
+#### Group Calls (Mesh WebRTC)
+- Multi-peer voice/video calls
+- Signaling via Socket.IO (`startGroupCall`, `joinGroupCall`, `sendGroupSignal`, `leaveGroupCall`)
+- **Raise hand**: toggle flag, broadcast to all participants
+- **Mute all**: host can request everyone to mute (each client mutes itself)
+- Host can end call for everyone
+- Call duration tracking and call log messages
+- Permission-gated: `startCalls` permission controls who can initiate
 
 ### Contact Management
-- User search (server-side, by full name regex)
-- Favorites (star a contact) — stored client-side in `localStorage`
-- Archive a chat — stored client-side in `localStorage`
-- Pin a chat to top (max 2 pinned) — stored client-side in `localStorage`
-- Block / unblock users — stored server-side (`blockedUsers` array); blocked users cannot exchange messages
+- User search (server-side, regex with escaping)
+- **Favorites**: star contacts (server-synced via `toggleContactAction`)
+- **Archive chats**: archive/unarchive (server-synced)
+- **Pin chats**: pin up to 2 to top (server-synced)
+- Block / unblock users (server-side, enforced on message delivery AND socket relay)
 - Right-click / long-press context menu for contact quick actions
+- Filter chips: All / Groups / Unread / Favorites / Online
 - Clear chat history (soft-delete per-user via `deletedFor` array)
-- QR-code profile/chat-link sharing (`/chat-with/:userId` deep link)
+- **QR code profile/chat-link sharing** (`/chat-with/:userId` deep link)
+- **QR code scanner**: scan chat links from camera
+- Online status with green dot, last-seen timestamp tracking
+- Unread badges per contact
+
+### Chat Lock
+- Password-protected hidden conversations (DMs and groups)
+- Setup with password + security question for recovery
+- Unlock with password or **biometric authentication** (fingerprint/face on Android)
+- Toggle individual chats in/out of the locked set
+- Locked conversations hidden from sidebar until unlocked
+- Change password, recover via security question, disable entirely
 
 ### Customization
-- 30+ DaisyUI-inspired color themes (light, dark, dracula, synthwave, forest, etc.) with live CSS variable injection
-- Custom chat wallpapers per-conversation (color/gradient presets or custom uploaded image with adjustable dim/brightness level), synced to both participants
+- **32 color themes** (light, dark, cupcake, bumblebee, emerald, corporate, synthwave, retro, cyberpunk, valentine, halloween, garden, forest, aqua, lofi, pastel, fantasy, wireframe, black, luxury, dracula, cmyk, autumn, business, acid, lemonade, night, coffee, winter, dim, nord, sunset) with live CSS variable injection
+- **Chat wallpapers** per-conversation (color/gradient presets or custom uploaded image with adjustable dim/brightness level), synced to both participants in real-time
 - Notification sound toggle
-- Profile customization: full name, email, bio, website link, profile picture (Cloudinary upload)
+- Profile customization: full name, email, bio, website link, social links (GitHub, Twitter, LinkedIn, YouTube, Portfolio), profile picture, banner/cover image
 
-### Auth
-- Email/password signup & login
-- JWT stored in both an HTTP-only cookie and `localStorage` (fallback `Authorization: Bearer` header support for cross-site/mobile scenarios)
-- Protected routes via middleware
-- Session persistence via `checkAuth` on app load
+### Offline Support
+- **IndexedDB cache** via Dexie: messages, sidebar previews, conversation metadata
+- Cache-first rendering: conversations paint instantly from last sync while network confirms
+- **Outbox queue**: messages composed while offline are queued and auto-sent on reconnect
+- Per-user cache isolation: each account keeps its own Dexie database (`chatty_cache_<userId>`)
+- Cache wiped on logout for shared device safety
+- **Offline banner** shown when network is unreachable
+- Periodic re-probe: polls `checkAuth` every 10s while offline
+
+### Background Jobs
+- **Scheduled message dispatcher**: polls every 10s for due scheduled messages, delivers via Socket.IO
+- **Media purge**: polls every 20s for expired disappearing messages, frees Cloudinary/R2 assets before DB deletion (batch of 200)
+- **Email digest**: weekly summary + inactivity nudge, allowlisted to named email addresses
 
 ---
 
 ## 6. Data Models
 
 ### `User` (backend/models/user.model.js)
+
 | Field | Type | Notes |
 |---|---|---|
 | fullName | String | required |
 | email | String | required, unique |
-| password | String | hashed (bcrypt), min length 6 — **not required**: absent for Google-only accounts |
-| googleId | String | Google's `sub` claim, unique + sparse — present only for accounts that have signed in with Google |
-| profilePic | String | Cloudinary URL, default `""` |
-| bio | String | default `""` |
-| link | String | personal website/social link |
-| onlinePrivacy | Boolean | default `true` (visible online status) |
-| disappearingTimers | Map<String,String> | per-conversation timer setting (`off`/`1h`/`24h`/`7d`), keyed by other user's ID |
-| lastSeen | Date | updated on socket disconnect |
-| favorites | [ObjectId] (ref User) | *(legacy — mostly superseded by localStorage today)* |
-| archived | [ObjectId] (ref User) | *(legacy — mostly superseded by localStorage today)* |
-| blockedUsers | [ObjectId] (ref User) | users this user has blocked |
-| chatWallpapers | Map<String,String> | per-conversation wallpaper, keyed by other user's ID |
+| password | String | hashed (bcrypt), minlength 6 — optional for Google-only accounts |
+| googleId | String | unique, sparse — present only for Google-signed-in accounts |
+| profilePic | String | Cloudinary URL |
+| bannerCover | String | Profile banner image URL |
+| bio | String | |
+| link | String | Personal website/social link |
+| socialLinks | `{ github, twitter, linkedin, youtube, portfolio }` | Social profile URLs |
+| onlinePrivacy | Boolean | default true — hides online status |
+| typingPrivacy | Boolean | default true — hides typing indicator |
+| disappearingTimers | Map\<String, String\> | Per-conversation timer ("off"/"1h"/"24h"/"7d"), keyed by other user's ID |
+| lastSeen | Date | Updated on socket disconnect |
+| contactNicknames | Map\<String, String\> | Private per-contact renames, keyed by contact user ID |
+| lastReadAt | Map\<String, Date\> | Per-conversation read timestamp |
+| favorites | [ObjectId ref User] | Server-synced favorite contacts |
+| archived | [ObjectId ref User] | Server-synced archived chats |
+| pinnedChats | [ObjectId ref User] | Server-synced pinned chats (max 2) |
+| favoriteGroups | [ObjectId ref Group] | Server-synced favorite groups |
+| archivedGroups | [ObjectId ref Group] | Server-synced archived groups |
+| pinnedGroups | [ObjectId ref Group] | Server-synced pinned groups |
+| memberNotes | Map\<String, String\> | Private notes about group members |
+| chatLock | `{ enabled, passwordHash, securityQuestion, securityAnswerHash, updatedAt }` | Chat lock configuration |
+| lockedChats | [ObjectId ref User] | Users hidden behind chat lock |
+| lockedGroups | [ObjectId ref Group] | Groups hidden behind chat lock |
+| clearedChats | [ObjectId ref User] | Deleted DM conversation markers |
+| blockedUsers | [ObjectId ref User] | Users this account has blocked |
+| chatWallpapers | Map\<String, String\> | Per-conversation wallpaper, keyed by other user's ID |
+| resetPasswordOtp | String | Hashed OTP for password reset |
+| resetPasswordExpires | Date | OTP expiry |
+| lastDigestAt | Date | Last email digest sent |
+| lastNudgeAt | Date | Last inactivity nudge sent |
+| sessions | [sessionSchema] | Device sessions: `{ sid, ip, userAgent, browser, os, device, createdAt, lastActive }` |
 | timestamps | createdAt / updatedAt | auto |
 
 ### `Message` (backend/models/message.model.js)
+
 | Field | Type | Notes |
 |---|---|---|
 | senderId | ObjectId (ref User) | required |
-| receiverId | ObjectId (ref User) | required |
-| text | String | optional |
-| image | String | Cloudinary URL |
+| receiverId | ObjectId (ref User) | null for group messages |
+| groupId | ObjectId (ref Group) | null for DMs |
+| text | String | Sanitized (sanitize-html) |
+| image | String | Cloudinary URL (single image) |
+| images | [String] | Cloudinary URLs (multi-image, up to 5) |
 | voice | String | Cloudinary URL (audio, uploaded as `resource_type: video`) |
+| attachments | [attachmentSchema] | R2 files: `{ kind, key, url, name, mime, size, duration, width, height, posterUrl }` |
+| contact | `{ user, name, email, profilePic }` | Shared contact card |
 | isEdited | Boolean | default false |
 | isCallLog | Boolean | default false — marks a call-summary message |
-| callType | String | `"voice"` \| `"video"` |
+| callType | String | "voice" \| "video" |
 | callDuration | Number | seconds |
-| callStatus | String | `"completed"` \| `"missed"` \| `"declined"` |
-| deleteAt | Date | TTL index (`expires: 0`) — used for disappearing messages |
+| callStatus | String | "completed" \| "missed" \| "declined" |
+| deleteAt | Date | TTL index (`expires: 600`) — disappearing message expiry |
 | replyTo | ObjectId (ref Message) | nullable, populated on fetch |
-| reactions | [{ userId, emoji }] | one entry per reacting user |
-| deletedFor | [ObjectId] (ref User) | soft-delete list ("delete for me") |
+| reactions | [{ userId, emoji }] | One entry per reacting user |
+| deletedFor | [ObjectId (ref User)] | Soft-delete list ("delete for me") |
 | isDeletedForEveryone | Boolean | default false |
 | isPinned | Boolean | default false — only one true per conversation at a time |
+| mentions | [ObjectId (ref User)] | @mentioned users (group messages) |
+| voiceTranscript | String | Client-side captured transcript |
+| transcript | `{ text, status, language, assemblyTranscriptId, error, requestedAt }` | AssemblyAI transcription result |
+| isForwarded | Boolean | "Forwarded" flag |
+| isAnonymous | Boolean | Anonymous group question |
+| isOneView | Boolean | View-once self-destructing media |
+| viewedBy | [ObjectId (ref User)] | Users who viewed a one-view message |
+| scheduledAt | Date | Future delivery time |
+| scheduledStatus | String enum | "scheduled" \| "queued" \| "sent" \| "failed" |
+| scheduledBy | ObjectId (ref User) | User who scheduled it |
+| poll | pollSchema | `{ question, options: [{ text, votes: [userId] }], allowMultiple, isClosed }` |
+| timestamps | createdAt / updatedAt | auto |
+
+### Group (backend/models/group.model.js)
+
+| Field | Type | Notes |
+|---|---|---|
+| name | String | required |
+| description | String | |
+| groupPic | String | Cloudinary URL |
+| createdBy | ObjectId (ref User) | |
+| members | [{ user, role, joinedAt }] | role: "admin" \| "moderator" \| "member" |
+| isReadOnly | Boolean | legacy read-only flag |
+| permissions | `{ sendMessages, addMembers, editInfo, startCalls }` | "everyone" \| "admins" per action |
+| activeCall | `{ isActive, type, startedBy, participants }` | Runtime call state |
+| inviteCode | String | Shareable invite code |
+| welcomeMessage | String | Shown once per new member |
+| rules | String | Shown once per new member |
+| welcomeSeenBy | [ObjectId] | Members who dismissed the welcome sheet |
+| allowAnonymousQuestions | Boolean | |
 | timestamps | createdAt / updatedAt | auto |
 
 ---
@@ -274,142 +482,322 @@ Base URL: `/api` (e.g., `http://localhost:5001/api`)
 
 | Method | Path | Auth? | Description |
 |---|---|---|---|
-| POST | `/signup` | No | Create account. Body: `{ fullName, email, password }`. Returns user + sets JWT cookie + returns `token`. |
-| POST | `/login` | No | Log in. Body: `{ email, password }`. Returns user + sets JWT cookie + returns `token`. Rejects with a clear message if the account has no password (Google-only). |
-| POST | `/google` | No | Google Sign-In. Body: `{ idToken }` (a Google ID token from either the web GIS button or the native Android plugin). Verifies the token server-side, then finds by `googleId`, auto-links to an existing password account with the same verified email, or creates a new account — same session/JWT issuance as `/login`. |
-| POST | `/logout` | No | Clears JWT cookie. |
-| PUT | `/update-profile` | Yes | Update `fullName`, `email`, `bio`, `link`, `onlinePrivacy`, `messageTimer`, `profilePic` (base64 → Cloudinary upload). |
-| GET | `/check` | Yes | Returns the currently authenticated user (`req.user`). Used on app load to restore session. |
+| POST | `/signup` | No | Create account. Body: `{ fullName, email, password }`. Returns user + JWT. |
+| POST | `/login` | No | Log in. Body: `{ email, password }`. Returns user + JWT. |
+| POST | `/google` | No | Google Sign-In. Body: `{ idToken }`. Verifies token, finds-or-links-or-creates account. |
+| POST | `/logout` | No | Clears JWT cookie, removes current session from user. |
+| POST | `/forgot-password` | No | Body: `{ email }`. Sends 6-digit OTP via Brevo → Resend → SMTP. Dev mode returns OTP. |
+| POST | `/reset-password` | No | Body: `{ email, otp, newPassword }`. Validates OTP, updates password. |
+| PUT | `/update-profile` | Yes | Update fullName, email, bio, link, socialLinks, profilePic, bannerPic, onlinePrivacy, typingPrivacy, messageTimer. Images uploaded to Cloudinary. |
+| GET | `/check` | Yes | Returns currently authenticated user. |
+| DELETE | `/account` | Yes | Delete account. Body: `{ password }` or `{ confirm: "DELETE" }`. Cleans up messages, media, groups, blocks, nicknames. |
+| GET | `/sessions` | Yes | Lists all device sessions with `isCurrent` flag. |
+| POST | `/sessions/logout-others` | Yes | Revokes all sessions except the current one. |
+| DELETE | `/sessions/:sid` | Yes | Revokes a specific device session by session ID. |
+| GET | `/chat-lock` | Yes | Returns chat lock status (enabled, securityQuestion, lockedChats, lockedGroups). |
+| POST | `/chat-lock/setup` | Yes | Enable chat lock. Body: `{ password, securityQuestion, securityAnswer }`. |
+| POST | `/chat-lock/unlock` | Yes | Verify password, returns locked DMs and groups with previews. |
+| POST | `/chat-lock/password` | Yes | Change lock password. Body: `{ currentPassword, newPassword }`. |
+| POST | `/chat-lock/recover` | Yes | Reset via security answer. Body: `{ securityAnswer, newPassword }`. |
+| POST | `/chat-lock/disable` | Yes | Disable lock. Body: `{ password }`. |
+| POST | `/chat-lock/toggle/:id` | Yes | Add/remove a conversation from the lock. Body: `{ type: "user" \| "group" }`. |
 
 ### Message Routes — `/api/messages` (`backend/routes/message.route.js`)
 
-| Method | Path | Auth? | Description |
-|---|---|---|---|
-| GET | `/users` | Yes | List sidebar contacts. Supports `?search=<name>` (regex search across all users) or returns chatted users + up to 4 seeded "discover" users. |
-| GET | `/:id` | Yes | Get messages with user `:id`. Supports `?limit=&skip=` pagination (sorted ascending when no limit, descending+reversed when paginated). Response header `X-Pinned-Message` contains the currently pinned message (if any) as URI-encoded JSON. |
-| POST | `/send/:id` | Yes | Send a message to user `:id`. Body: `{ text?, image?, voice?, replyTo? }`. Blocks send if either party has blocked the other. Applies `disappearingTimers` setting to compute `deleteAt`. Emits `newMessage` socket event to receiver. |
-| POST | `/disappearing/:id` | Yes | Set disappearing-message timer for conversation with `:id`. Body: `{ timer }` (`off`/`1h`/`24h`/`7d`). Updates both users' maps; emits `disappearingTimerUpdate` to the other party. |
-| POST | `/reaction/:id` | Yes | Toggle an emoji reaction on message `:id`. Body: `{ emoji }`. Emits `messageReaction` to the other party. |
-| POST | `/action/:id` | Yes | Toggle `favorite` or `archive` state for contact `:id` (server-side legacy list). Body: `{ action }`. |
-| PUT | `/edit/:id` | Yes | Edit message `:id` text (only by sender, within 15 minutes). Body: `{ text }`. Emits `messageEdited`. |
-| POST | `/block/:id` | Yes | Toggle block status on user `:id`. Returns `{ user, isBlocked }`. |
-| POST | `/call-log` | Yes | Persist a call-summary message. Body: `{ receiverId, callType, callDuration, callStatus }`. |
-| PUT | `/pin/:id` | Yes | Toggle pin status of message `:id` (auto-unpins any previously pinned message in that conversation). Emits `messagePinned`. |
-| POST | `/wallpaper/:id` | Yes | Set shared chat wallpaper with user `:id`. Body: `{ wallpaper }` (color id, image URL, or base64 image w/ optional `#dim=<0-80>` suffix). Uploads base64 images to Cloudinary. Emits `chatWallpaperUpdate`. |
-| DELETE | `/:id` | Yes | Delete message `:id`. Body: `{ type: "me" | "everyone" }`. "everyone" only allowed by original sender; emits `messageDeleted`. |
-| DELETE | `/clear/:id` | Yes | Clear entire chat history with user `:id` (adds current user to `deletedFor` on all matching messages). |
+| Method | Path | Description |
+|---|---|---|
+| GET | `/users` | List sidebar contacts. Supports `?search=<name>`. Returns chatted users + seed users, with unread counts, latest messages, read ticks. Excludes locked/cleared chats. |
+| GET | `/blocked` | Returns populated list of blocked users. |
+| GET | `/export/:id` | Export entire conversation with user `:id` as JSON. |
+| GET | `/info/:id` | Per-message delivery/read info. |
+| GET | `/contact/:id` | Single contact lookup by id (for QR deep links). |
+| GET | `/media/:id` | Shared media list for conversation with user `:id`. |
+| GET | `/dates/:id` | Days with messages for the chat calendar. Accepts `?tz=` offset. |
+| GET | `/:id` | Get messages with user `:id`. Supports `?limit=&skip=` pagination, `?around=<messageId>` window. Response header `X-Pinned-Message` has pinned message. |
+| POST | `/send/:id` | Send DM. Body: `{ text?, image?, images?, voice?, attachments?, replyTo?, isForwarded?, isOneView?, scheduledAt?, clientId?, contact? }`. Validates blocks, uploads media, sets `deleteAt`, emits `newMessage`. |
+| POST | `/disappearing/:id` | Set disappearing timer. Body: `{ timer }` ("off"/"1h"/"24h"/"7d"). Updates both users, emits `disappearingTimerUpdate`. |
+| POST | `/reaction/:id` | Toggle emoji reaction. Body: `{ emoji }`. Emits `messageReaction`. |
+| POST | `/action/:id` | Toggle favorite/archive/pin. Body: `{ action, scope }`. Enforces max 2 pins. Emits `accountListsUpdated`. |
+| PUT | `/edit/:id` | Edit message text (sender only, within 15 min). Body: `{ text }`. Emits `messageEdited`. |
+| POST | `/block/:id` | Toggle block status. Returns `{ user, blockedUsers, isBlocked }`. |
+| POST | `/call-log` | Persist call summary. Body: `{ receiverId, callType, callDuration, callStatus }`. |
+| PUT | `/pin/:id` | Toggle pin (auto-unpins previous). Emits `messagePinned`. |
+| POST | `/wallpaper/:id` | Set shared wallpaper. Body: `{ wallpaper }`. Uploads base64 to Cloudinary if needed. Emits `chatWallpaperUpdate`. |
+| POST | `/view-once/:id` | Mark one-view message as viewed. Emits `messageViewed`. |
+| POST | `/:id/transcribe` | Request AssemblyAI transcription. Atomic claim prevents double-billing. |
+| POST | `/delete-bulk` | Bulk delete. Body: `{ messageIds, type }` ("me" or "everyone"). |
+| DELETE | `/:id` | Delete message. Body: `{ type }` ("me" or "everyone"). |
+| DELETE | `/clear/:id` | Clear entire chat history (adds to `deletedFor` on all matching messages). |
+| POST | `/schedule/cancel/:id` | Cancel a pending scheduled message. |
+| POST | `/nickname/:id` | Set private nickname for a contact. Body: `{ nickname }`. |
 
-**Authentication for all protected routes** is handled by `protectRoute` middleware (`backend/middlewares/auth.middleware.js`), which reads the JWT from the `jwt` cookie or `Authorization: Bearer <token>` header, verifies it, loads the user (`req.user`), and calls `next()`.
+### Group Routes — `/api/groups` (`backend/routes/group.route.js`)
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/` | Create group. Body: `{ name, description?, groupPic?, members }`. Creator becomes admin. |
+| GET | `/` | List user's groups with last message previews. Excludes locked groups. |
+| GET | `/invite/:code` | Public preview of group invite (name, description, pic, member count). |
+| POST | `/invite/:code/join` | Join group via invite code. |
+| GET | `/:groupId` | Full group details with populated members. |
+| PUT | `/:groupId` | Update group (name, description, groupPic, isReadOnly, permissions, welcomeMessage, rules, allowAnonymousQuestions). |
+| POST | `/:groupId/members` | Add members. Body: `{ members: [userId] }`. |
+| POST | `/:groupId/invite` | Generate invite code. |
+| DELETE | `/:groupId/invite` | Revoke invite code. |
+| DELETE | `/:groupId/members/:memberId` | Remove member or self-leave. |
+| PUT | `/:groupId/roles` | Update member role. Body: `{ memberId, role }`. |
+| GET | `/:groupId/messages` | Paginated group messages. Supports `limit`, `skip`, `around`. |
+| POST | `/:groupId/welcome-seen` | Mark welcome/rules as seen by current user. |
+| POST | `/:groupId/members/:memberId/note` | Set private note about a member. Body: `{ note }`. |
+| POST | `/:groupId/send` | Send group message. Body: `{ text?, image?, images?, voice?, attachments?, replyTo?, clientId?, isAnonymous?, mentions? }`. |
+| POST | `/:groupId/polls` | Create poll. Body: `{ question, options, allowMultiple? }`. 2-12 options. |
+| POST | `/:groupId/polls/:messageId/vote` | Vote on poll. Body: `{ optionIndex }`. Toggles vote. |
+| POST | `/:groupId/polls/:messageId/close` | Close poll (creator, admin, or moderator). |
+
+### Upload Routes — `/api/uploads` (`backend/routes/upload.route.js`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/limits` | Returns attachment rules (maxBytes, types, label per kind). |
+| POST | `/sign` | Validates file, returns presigned PUT URL for R2. Body: `{ kind, mime, size, fileName }`. |
+| GET | `/url` | Returns signed GET URL for an attachment. Params: `messageId`, `key`. |
+
+### GIPHY Routes — `/api/giphy` (`backend/routes/giphy.route.js`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | Search/trending GIPHY. Params: `?q=<query>` or `?type=stickers`. Returns 503 if not configured. |
 
 ---
 
 ## 8. Real-Time Events (Socket.IO)
 
-Socket connection URL: same origin as backend, established with `query: { userId }` and `transports: ["websocket"]`.
+Socket connection URL: same origin as backend, established with `auth: { token }` and `transports: ["websocket"]`.
 
 ### Client → Server
+
 | Event | Payload | Purpose |
 |---|---|---|
-| `markAsRead` | `{ senderId, receiverId }` | Notify sender that receiver has read their messages |
-| `typing` | `{ receiverId, isTyping }` | Broadcast typing indicator |
-| `callUser` | `{ userToCall, signalData, from, type }` | Initiate WebRTC call (send SDP offer) |
-| `answerCall` | `{ signal, to }` | Answer a call (send SDP answer) |
-| `endCall` | `{ to }` | Terminate an active/ringing call |
-| `iceCandidate` | `{ candidate, to }` | Relay ICE candidates for NAT traversal |
+| `markAsRead` | `{ senderId, receiverId }` | Read receipt — receiverId must match authenticated user |
+| `markGroupAsRead` | `{ groupId }` | Record that group was read (updates `lastReadAt`) |
+| `typing` | `{ receiverId, isTyping }` | Typing indicator (suppressed if `typingPrivacy` is off) |
+| `callUser` | `{ userToCall, signalData, from, type }` | Initiate 1-on-1 WebRTC call (from must match auth user) |
+| `answerCall` | `{ signal, to }` | Answer a 1-on-1 call |
+| `endCall` | `{ to }` | Terminate 1-on-1 call |
+| `iceCandidate` | `{ candidate, to }` | Relay ICE candidates |
+| `joinGroupRoom` | `groupId` | Join Socket.IO room `group_<id>` |
+| `leaveGroupRoom` | `groupId` | Leave group room |
+| `groupTyping` | `{ groupId, isTyping }` | Group typing indicator |
+| `startGroupCall` | `{ groupId, type, groupName }` | Start group call (permission-checked) |
+| `joinGroupCall` | `{ groupId, user }` | Join group call room `group_call_<id>` |
+| `sendGroupSignal` | `{ toSocketId, signal, fromUser }` | Relay group call WebRTC signal |
+| `endGroupCall` | `{ groupId }` | Host ends group call for everyone |
+| `leaveGroupCall` | `{ groupId }` | Leave group call |
+| `groupRaiseHand` | `{ groupId, raised }` | Toggle raise hand in group call |
+| `groupMuteAll` | `{ groupId }` | Host requests all participants to mute |
 
 ### Server → Client
+
 | Event | Payload | Purpose |
 |---|---|---|
-| `getOnlineUsers` | `string[]` (user IDs) | Broadcast current online users (respecting `onlinePrivacy`) |
-| `newMessage` | `Message` | New message delivered in real time |
-| `messagesRead` | `{ userId }` | Confirms recipient read the sender's messages |
-| `disappearingTimerUpdate` | `{ userId, timer }` | Notifies the other party the disappearing-message timer changed |
+| `getOnlineUsers` | `string[]` (user IDs) | Broadcast online users (respects `onlinePrivacy`) |
+| `newMessage` | `Message` | New DM delivered in real time |
+| `messagesRead` | `{ userId, readAt }` | Sender's messages were read (readAt is server timestamp) |
+| `disappearingTimerUpdate` | `{ userId, timer }` | Timer changed by other party |
+| `userOffline` | `{ userId, lastSeen }` | User went offline |
 | `typing` | `{ senderId, isTyping }` | Relayed typing indicator |
-| `messageReaction` | `{ messageId, reactions }` | Reaction added/removed/changed |
-| `messageDeleted` | `{ messageId, isDeletedForEveryone }` | Message deleted for everyone |
-| `messageEdited` | `Message` | Updated message content |
-| `messagePinned` | `Message` | Pin/unpin state changed |
-| `chatWallpaperUpdate` | `{ updatedBy, wallpaper }` | Wallpaper changed for shared conversation |
-| `callUser` | `{ signal, from, type }` | Incoming call notification (with SDP offer) |
-| `callAccepted` | `{ signal }` | Callee accepted (with SDP answer) |
-| `callEnded` | — | Call was ended/rejected by the other party |
+| `messageReaction` | `{ messageId, reactions }` | Reaction updated |
+| `messageDeleted` | `{ messageId, isDeletedForEveryone }` | Message deleted |
+| `messageEdited` | `Message` | Message content edited |
+| `messagePinned` | `Message` | Pin state changed |
+| `messageTranscript` | `{ messageId, transcript }` | Voice note transcription result |
+| `messageViewed` | `{ messageId, viewedBy }` | View-once message was viewed |
+| `chatWallpaperUpdate` | `{ updatedBy, wallpaper }` | Wallpaper changed |
+| `accountListsUpdated` | `{ favorites, archived, pinnedChats, lockedChats, ... }` | Cross-device sync of lists |
+| `sessionRevoked` | — | This device's session was revoked elsewhere |
+| `callUser` | `{ signal, from, type }` | Incoming 1-on-1 call |
+| `callAccepted` | `{ signal }` | Call accepted |
+| `callEnded` | — | Call ended |
+| `callFailed` | `{ reason }` | Call could not reach recipient |
 | `iceCandidate` | `{ candidate }` | Relayed ICE candidate |
-
-Presence tracking is maintained in-memory on the server via `userSocketMap` (`{ userId: socketId }`) and `privateUsersSet` (users who opted out of visible online status). On disconnect, `lastSeen` is persisted to MongoDB and updated online-user list is broadcast.
+| `newGroupMessage` | `Message` | New group message |
+| `groupCreated` | `Group` | New group created |
+| `groupUpdated` | `Group` | Group settings changed |
+| `groupTyping` | `{ groupId, userId, isTyping }` | Group typing indicator |
+| `groupMessageReaction` | `{ messageId, reactions }` | Group message reaction |
+| `groupMessageEdited` | `Message` | Group message edited |
+| `removedFromGroup` | `{ groupId }` | You were removed from a group |
+| `groupCallStarted` | `{ groupId, type, groupName, startedBy }` | Group call started |
+| `allGroupCallParticipants` | `[{ socketId, userId }]` | Existing call participants (sent to joiner) |
+| `groupCallUserJoined` | `{ socketId, user }` | New peer joined group call |
+| `groupCallSignalReceived` | `{ fromSocketId, signal, fromUser }` | WebRTC signal from another peer |
+| `groupUserLeftCall` | `{ socketId, userId }` | Peer left group call |
+| `groupCallEnded` | `{ groupId, duration, endedBy, startedBy, type }` | Group call ended |
+| `groupHandRaised` | `{ userId, socketId, raised }` | Raise/lower hand in call |
+| `groupMuteAllRequested` | `{ by }` | Host requested all to mute |
+| `rateLimited` | `{ action, message }` | Socket action was throttled |
 
 ---
 
 ## 9. Frontend State Management (Zustand Stores)
 
 ### `useAuthStore` (`frontend/src/store/useAuthStore.js`)
-Manages authentication state and the Socket.IO connection lifecycle.
-- State: `authUser`, `isSigningUp`, `isLoggingIn`, `isUpdatingProfile`, `isCheckingAuth`, `onlineUsers`, `socket`
-- Actions: `checkAuth`, `signUp`, `login`, `logOut`, `updateProfile`, `connectSocket`, `disconnectSocket`
-- On successful auth, stores JWT token in `localStorage` (backup to the HTTP-only cookie) and opens the Socket.IO connection.
+Manages authentication state, socket connection, multi-account, and session lifecycle.
+- **State**: `authUser`, `isSigningUp`, `isLoggingIn`, `isUpdatingProfile`, `isCheckingAuth`, `isOffline`, `onlineUsers`, `socket`, `sessions`, `savedAccounts`, `accountChooserOpen`, `switchingTo`
+- **Actions**: `checkAuth`, `signUp`, `login`, `loginWithGoogle`, `logOut`, `updateProfile`, `deleteAccount`, `forgotPassword`, `resetPassword`, `connectSocket`, `disconnectSocket`, `getSessions`, `revokeSession`, `revokeOtherSessions`, `switchAccount`, `forgetSavedAccount`
+- On successful auth, stores JWT in localStorage, opens Socket.IO connection.
+- On connect, flushes outbox (offline-queued messages).
+- `subscribeOnlineStatus` keeps `isOffline` in sync; periodic 10s re-probe while offline.
 
-### `useChatStore` (`frontend/src/store/useChatStore.js`)
-The largest store — manages messages, contacts, reactions, calling (WebRTC), and UI-adjacent chat state.
-- Core chat state: `messages`, `users`, `selectedUser`, `latestMessages`, `unreadCounts`, `lastReadTimestamps`, `hasMoreMessages`, `pinnedMessage`
-- UI state: `isRecipientProfileOpen`, `messageSearchQuery`, `replyingToMessage`, `editingMessage`, `showArchivedOnly`, `profilePreviewUser`, `lightboxImage`
-- Calling state: `callState` (`null`/`ringing`/`incoming`/`connected`), `callType`, `callPartner`, `isCaller`, `isCallMinimized`, `localStream`, `remoteStream`, `peerConnection`, `incomingSignal`
-- Key actions:
-  - `getUsers(search)` — fetch sidebar contacts + latest message per contact
-  - `getMessages(userId)` / `loadMoreMessages(userId)` — paginated fetch, emits `markAsRead`
-  - `sendMessage(data)`, `editMessage`, `deleteMessage`, `clearChatHistory`
-  - `toggleReaction`, `togglePinMessage`, `toggleBlockUser`, `toggleContactAction`
-  - `setDisappearingTimer`, `sendTypingStatus`, `setConversationWallpaper`
-  - `subscribeToMessages()` / `unsubscribeFromMessages()` — registers/cleans up all Socket.IO listeners
-  - `startCall`, `acceptCall`, `rejectCall`, `endCall` — full WebRTC negotiation using `RTCPeerConnection`, `getUserMedia`, STUN/TURN ICE servers, with pending ICE candidate queueing until remote description is set
+### `useChatStore` (`frontend/src/store/useChatStore.js`) — ~2088 lines
+The largest store — manages DMs, messages, calling, reactions, forwarding, and chat UI state.
+- **Core state**: `messages`, `users`, `selectedUser`, `latestMessages`, `unreadCounts`, `lastReadTimestamps`, `hasMoreMessages`, `pinnedMessage`
+- **UI state**: `isRecipientProfileOpen`, `messageSearchQuery`, `replyingToMessage`, `editingMessage`, `forwardingMessage`, `showArchivedOnly`, `profilePreviewUser`, `lightboxImage`, `lightboxSecure`, `isSelectionMode`, `selectedMessageIds`, `drafts`, `isViewingHistory`, `pendingScrollId`
+- **Calling state**: `callState`, `callType`, `callPartner`, `isCaller`, `isCallMinimized`, `localStream`, `remoteStream`, `peerConnection`, `incomingSignal`, `isScreenSharing`, `screenStream`
+- **Key actions**: `getUsers`, `getMessages`, `loadMoreMessages`, `sendMessage`, `sendAttachmentMessage`, `sendMessageWithProgress`, `editMessage`, `deleteMessage`, `deleteMessagesBulk`, `clearChatHistory`, `toggleReaction`, `togglePinMessage`, `toggleBlockUser`, `toggleContactAction`, `setDisappearingTimer`, `sendTypingStatus`, `setConversationWallpaper`, `setContactNickname`, `forwardMessage`, `forwardMessages`, `startCall`, `acceptCall`, `rejectCall`, `endCall`, `startScreenShare`, `stopScreenShare`, `subscribeToMessages`, `unsubscribeFromMessages`, `flushOutbox`, `jumpToMessage`, `getMessageDates`, `viewOneViewMessage`, `requestTranscript`, `getMessageInfo`, `cancelScheduledMessage`
+
+### `useGroupStore` (`frontend/src/store/useGroupStore.js`) — ~1094 lines
+Groups, group messages, group calls, polls.
+- **State**: `groups`, `selectedGroup`, `groupMessages`, `latestGroupMessages`, `unreadGroupCounts`, `mentionedGroups`, `groupTypingUsers`, `groupPreview`, modals, group call state (`activeGroupCall`, `groupRemoteStreams`, `raisedHands`, `peerConnectionsRef`)
+- **Key actions**: `getGroups`, `getGroupMessages`, `sendGroupMessage`, `createGroup`, `updateGroup`, `addGroupMembers`, `removeGroupMember`, `updateMemberRole`, `createGroupPoll`, `voteGroupPoll`, `closeGroupPoll`, `createGroupInvite`, `revokeGroupInvite`, `joinGroupByInvite`, `startOrJoinGroupCall`, `endGroupCall`, `leaveGroupCall`, `toggleRaiseHand`, `muteAllParticipants`, `subscribeToGroupEvents`, `unsubscribeFromGroupEvents`, `flushOutbox`
 
 ### `useThemeStore` (`frontend/src/store/useThemeStore.js`)
-Persists UI preferences to `localStorage`:
-- `theme` (one of 30+ named themes)
-- `wallpaper` (chat background preset/custom)
+Persists UI preferences to localStorage:
+- `theme` (one of 32 named themes)
+- `wallpaper` (chat background preset)
 - `soundEnabled` (message notification sound)
 - `privacyReadReceipts` (show/hide blue read ticks)
+
+### `useChatLockStore` (`frontend/src/store/useChatLockStore.js`)
+Chat lock session state (not persisted across reloads):
+- **State**: `isModalOpen`, `view` ("locked"/"open"/"recover"), `isUnlocked`, `lockedUsers`, `lockedGroups`, `returnToLocked`
+- **Actions**: `openModal`, `closeModal`, `unlock`, `setup`, `changePassword`, `recover`, `disable`, `toggleChat`, `releaseChat`, `enterLockedChat`, `resumeLockedList`
 
 ---
 
 ## 10. Frontend Pages & Components
 
 ### Pages
-- **LoginPage / SignUpPage** — auth forms with `AuthImagePattern` decorative side panel
-- **HomePage** — main chat layout combining `SideBar` + `ChatContainer`/`NoChatSelected`; manages mobile back-button behavior via `history.pushState`
-- **SettingsPage** — theme picker grid, wallpaper picker, sound/privacy toggles, live chat preview
-- **ProfilePage** — avatar upload, editable profile fields, online-privacy toggle, QR code deep-link sharing (`/chat-with/:userId`)
+- **LoginPage / SignUpPage** — Auth forms with `AuthImagePattern` decorative panel, Google Sign-In button (hidden on native platform), native `SocialLogin` button for Android, forgot-password flow
+- **HomePage** — Main chat layout combining `SideBar` + `ChatContainer`/`NoChatSelected`; manages mobile back-button behavior via `history.pushState`; handles locked chat return flow
+- **SettingsPage** — Theme picker grid (32 themes), wallpaper picker, sound toggle, privacy toggles, live chat preview
+- **ProfilePage** — Avatar upload, banner upload, editable profile fields, social links editor, online-privacy toggle, typing-privacy toggle, QR code deep-link sharing, chat lock settings
+- **LinkedDevicesPage** — Device session list with IP, browser, OS, device info; revoke individual or all other sessions
+- **BlockedUsersPage** — List of blocked users with unblock button
+- **JoinGroupPage** — Handles `/join/:code` invite links, previews group, joins
+- **AboutPage** — App info
 
 ### Key Components
-- **NavBar** — top navigation with links to Settings/Profile and Logout (with confirmation modal)
-- **SideBar** — contact list with search, filter chips (All/Unread/Favorites/Online), pinned/favorite/archived indicators, "Personal Notes" self-chat entry, right-click/long-press context menu (pin/star/archive/delete chat), read-receipt ticks
-- **ChatHeader** — recipient info (avatar/name/online/last-seen/typing), call buttons, in-chat search toggle, "more options" dropdown (wallpaper picker with custom upload + dim slider, block/unblock)
-- **ChatContainer** — scrollable message list with infinite-scroll-up pagination, pinned-message banner, per-message hover action bar (react/reply/edit/pin/delete), reaction pills, call-log entries, recipient contact-info side panel (bio, link, disappearing-message selector, join date)
-- **MessageInput** — text input, image picker (client-side canvas compression before upload), voice recording (`MediaRecorder`), typing-indicator debounce, reply/edit banners
-- **CallModal** — full-screen and minimized WebRTC call UI (mute/camera toggle, ringtone playback, call duration timer, PiP local video for video calls)
-- **NoChatSelected** — placeholder/welcome screen
-- **Skeletons** (`SidebarSkeleton`, `MessageSkeleton`) — loading placeholders
+- **NavBar** — Top navigation with links to Settings, Profile, Linked Devices, About, and Logout (with confirmation modal)
+- **SideBar** — Contact list with search, filter chips (All/Groups/Unread/Favorites/Online), pinned/favorite/archived indicators, "Personal Notes" self-chat, group entries, right-click/long-press context menu, unread badges, draft indicator
+- **ChatHeader** — Recipient info (avatar/name/online/last-seen/typing), voice/video call buttons, in-chat search, "more options" dropdown (wallpaper picker with custom upload + dim slider, block/unblock, shared media, chat lock toggle)
+- **ChatContainer** — Scrollable message list with infinite-scroll-up pagination, pinned-message banner, per-message hover action bar (react/reply/forward/edit/pin/delete), reaction pills, call-log entries, date separators, recipient contact-info side panel, mention highlighting, message selection mode
+- **MessageInput** — Text input, image picker (client-side canvas compression), voice recording (`MediaRecorder`), typing-indicator debounce, reply/edit banners, attachment menu (image/video/document/GIF/poll/contact), schedule picker, send button
+- **MessageAttachment** — Renders file attachments: video player with poster, image viewer, document download button; uses presigned R2 URLs
+- **CallModal** — Full-screen and minimized 1-on-1 WebRTC call UI (mute/camera toggle, ringtone, timer, PiP local video, screen share)
+- **GroupCallModal** — Multi-peer group call UI with participant grid, raise hand, mute-all (host), end call (host), leave call
+- **CreateGroupModal** — Group creation: name, description, picture, member picker
+- **GroupDetailsModal** — Group info, member list, settings (permissions, read-only), polls, invite link management, welcome/rules editor
+- **LockedChatsModal** — Password gate → locked conversation list → open locked chats; biometric prompt on Android
+- **ForwardModal** — Multi-contact picker for forwarding messages
+- **MessageInfoSheet** — Per-message delivery/read receipt details
+- **MediaGallerySheet** — Grid of shared images/videos in a conversation
+- **ImageEditorModal** — Pre-send image cropping and annotation
+- **AttachMenu** — Bottom sheet: image, video, document, GIF, poll, contact card
+- **GifPicker** — GIPHY search/browse for GIFs and stickers
+- **PollMessage** — Renders poll with vote buttons, results bar, close button
+- **CreatePollModal** — Create poll form: question, options (2-12), multiple-choice toggle
+- **VoiceNote** — Audio player with waveform visualization for voice messages
+- **VoiceTranscript** — Displays request/display transcript for voice notes
+- **SchedulePicker** — Date/time picker for scheduling message delivery
+- **ProfileQrCard** — QR code card for profile sharing
+- **QrScannerModal** — Camera viewfinder for scanning chat link QR codes
+- **NoChatSelected** — Placeholder/welcome screen
+- **OfflineBanner** — Fixed banner when network is unreachable
 
 ### Global UI in `App.jsx`
-- Route table (`/`, `/login`, `/signup`, `/settings`, `/profile`, `/chat-with/:userId`, wildcard redirect)
-- `ChatRedirectHandler` — resolves a deep-linked `/chat-with/:userId` route into an open conversation
+- Route table (`/`, `/login`, `/signup`, `/settings`, `/profile`, `/linked-devices`, `/blocked`, `/about`, `/join/:code`, `/chat-with/:userId`, wildcard redirect)
+- `LoginRoute` — Supports `?add=1` for adding a second account without logging out
+- `ChatRedirectHandler` — Resolves `/chat-with/:userId` deep links into open conversations
+- `PendingChatRedirect` — Remembers QR link target for post-login redirect
 - Theme CSS variables applied to `:root` from `THEME_COLORS`
-- Global modals: profile picture preview popup, full-screen image lightbox
+- Global modals: profile picture preview popup, group avatar preview popup, full-screen image lightbox, account chooser, account switch transition overlay
+- Capacitor back button handler (dismiss modals → close chat → navigate back → exit app)
+- Global keyboard shortcuts (Ctrl/Cmd+K search, Ctrl/Cmd+Enter send, / search, Escape close modal)
+- Launcher badge count (Android, updated from unread counts)
+- FLAG_SECURE management for view-once media
+- Group welcome sheet
 
 ---
 
-## 11. Authentication & Security
+## 11. Frontend Utilities & Libraries
 
-- Passwords hashed with `bcryptjs` (salt rounds = 10) before storage; plaintext never persisted.
-- JWT signed with `process.env.JWT_SECRET`, 7-day expiry, delivered via:
-  - An `httpOnly` cookie named `jwt` (primary — `sameSite`/`secure` configured per `NODE_ENV`)
-  - Also returned in the response body and stored in `localStorage`, sent as `Authorization: Bearer <token>` header on subsequent requests (fallback for cross-origin/mobile scenarios where cookies may be blocked)
-- `protectRoute` middleware validates the token (cookie first, then header), loads the user, and rejects with 401 on failure.
-- CORS (`backend/lib/origins.js`) is wide open in development. In production it allows: `localhost:5173`/`localhost:5001`, any origin listed in the `ALLOWED_ORIGIN`/`FRONTEND_URL` env vars (comma-separated), and any `https://*.onrender.com` origin. **The Capacitor Android app's origin (`https://localhost`) must be added to `ALLOWED_ORIGIN`** or the native app's API calls get rejected — see [§16](#16-mobile-app-capacitor--android).
-- **Google Sign-In** (`googleAuth` in `auth.controller.js`) verifies the client-supplied ID token server-side via `google-auth-library` against `GOOGLE_CLIENT_ID`, then finds-or-links-or-creates the user and issues the same session/JWT as password login. No separate session type — a Google-authenticated user is indistinguishable from a password one once logged in, except `password` may be unset.
-- Blocking logic is enforced server-side in `sendMessage` — checks both parties' `blockedUsers` arrays before allowing message delivery.
+### `lib/axios.js`
+Pre-configured Axios instance with JWT `Authorization` header injection and a response interceptor that detects session revocation (`401` + "Session has been logged out") and triggers `handleSessionRevoked()`.
+
+### `lib/db.js`
+IndexedDB cache via Dexie. One database per user (`chatty_cache_<userId>`). Tables: `messages`, `conversationsMeta`, `outbox`. All functions are non-throwing (silent fallback on unavailable storage).
+
+### `lib/network.js`
+`isNetworkError(error)` — true when `error.response` is missing (DNS/timeout/offline). `subscribeOnlineStatus(callback)` — listens to browser online/offline events.
+
+### `lib/attachments.js`
+Three-step R2 upload: `signUpload` (presigned PUT) → `putToBucket` (XHR with progress) → return metadata. `captureVideoPoster` extracts a JPEG thumbnail for video bubbles. Object URL lifecycle management (`createLocalUrl`/`releaseLocalUrl`).
+
+### `lib/accounts.js`
+Multi-account localStorage manager. Max 5 saved accounts. `rememberAccount`, `forgetAccount`, `getAccountToken`, `listAccounts`.
+
+### `lib/biometrics.js`
+Android biometric auth for chat lock. Stores lock password in localStorage keyed by user ID, gated behind `BiometricAuth.authenticate()`. Falls back to device PIN.
+
+### `lib/clipboard.js`
+Clipboard write with legacy `execCommand` fallback. `messagesToClipboardText` formats single or multi-message copy (with sender prefix).
+
+### `lib/contacts.js`
+`useNicknames` hook and `displayNameOf(user, nicknames)` for private per-contact renames.
+
+### `lib/download.js`
+Web: `<a download>` click. Android: `Filesystem.writeFile` + `Share.share()` system sheet.
+
+### `lib/groupPermissions.js`
+Client-side mirror of server group permission logic. `canDo(group, role, action)`, `levelFor(group, action)`.
+
+### `lib/haptics.js`
+`haptic(pattern)` — vibration patterns (tap, longPress, impact, double, success, reject) on touch devices only.
+
+### `lib/members.js`
+Group member helpers: `formatJoinDate`, `activityLabel`, `isOnlineNow`, `filterMembers` (search + filter chips).
+
+### `lib/secureScreen.js`
+Android `FLAG_SECURE` toggle via native plugin. Blocks screenshots while view-once media is open.
+
+### `lib/social.js`
+Social platform definitions (GitHub, Twitter, LinkedIn, YouTube, Portfolio) with icons, colors, placeholders, and `getFilledSocialLinks(user)`.
+
+### `lib/utils.js`
+`formatMessageTime`, `getPublicAppUrl`, `buildChatLink`, `buildInviteLink`, `parseChatLink`.
 
 ---
 
-## 12. Environment Variables
+## 12. Authentication & Security
+
+- Passwords hashed with `bcryptjs` (salt rounds = 10); plaintext never persisted.
+- JWT signed with `process.env.JWT_SECRET`, 7-day expiry, includes `sid` (session ID). Delivered via:
+  - `httpOnly` cookie named `jwt` (`sameSite`/`secure` per `NODE_ENV`)
+  - Response body + localStorage, sent as `Authorization: Bearer <token>` header
+- `protectRoute` middleware validates token (header first, then cookie), loads user, validates session if `sid` present, throttles `lastActive` refresh to once per 60s.
+- CORS (`backend/lib/origins.js`): wide open in development. In production: `localhost:5173`/`localhost:5001`, any origin in `ALLOWED_ORIGIN`/`FRONTEND_URL` env vars, any `https://*.onrender.com` origin.
+- **Helmet**: Content-Security-Policy with directives for Cloudinary, R2, and allowed origins.
+- **Google Sign-In**: ID token verified server-side via `google-auth-library`. On Android, native Credential Manager (`@capgo/capacitor-social-login`) instead of browser redirect (Google blocks OAuth from WebViews).
+- **Blocking**: enforced server-side in `sendMessage` AND on socket relay (typing, calls, read receipts). Block list cached in-memory for 30s.
+- **HTML sanitization**: `sanitize-html` strips all HTML/JS from message text.
+- **Input validation**: image/voice type whitelists + size caps, regex escaping for search (ReDoS prevention), R2 attachment verification after upload.
+- **Spoofing protection**: server validates `from`/`receiverId` against authenticated user on socket events.
+- **Session management**: each login creates a device session; sessions can be listed and individually revoked; revoking sends `sessionRevoked` event to kick the device live.
+
+---
+
+## 13. Environment Variables
 
 ### Backend (`backend/.env`)
 ```env
@@ -421,52 +809,58 @@ CLOUDINARY_CLOUD_NAME=<cloudinary cloud name>
 CLOUDINARY_API_KEY=<cloudinary api key>
 CLOUDINARY_API_SECRET=<cloudinary api secret>
 
-# Google Sign-In — same Web OAuth client the frontend uses (see below).
-# GOOGLE_CLIENT_SECRET isn't actually used by the ID-token-verification flow
-# this app uses, but keep it set alongside the Client ID regardless.
+# Google Sign-In
 GOOGLE_CLIENT_ID=<google web oauth client id>.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=<google web oauth client secret>
 
-# Extra origins allowed by CORS in production, comma-separated — must include
-# the Capacitor Android app's origin (https://localhost) once you build it,
-# and your deployed frontend URL if it isn't on *.onrender.com.
+# CORS origins (comma-separated)
 ALLOWED_ORIGIN=https://localhost,capacitor://localhost,<your deployed frontend URL>
 
-# Password reset email — Brevo HTTPS API (preferred; a single verified sender
-# address is enough, no domain required)
+# Password reset email (cascading: Brevo → Resend → SMTP → console)
 BREVO_API_KEY=<brevo api key>
 EMAIL_FROM=<verified sender, e.g. Chatty <you@gmail.com>>
-
-# Password reset email — Resend HTTPS API (tried after Brevo; needs a verified domain
-# to reach arbitrary recipients)
 RESEND_API_KEY=<resend api key>
-
-# Password reset email — SMTP fallback (blocked on Render's free tier)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=<smtp user>
 SMTP_PASS=<smtp app password>
-```
-Reset codes are sent through the first configured provider — Brevo, then Resend — falling back to SMTP. Hosts such as Render's free tier block outbound SMTP ports 25/465/587, so an HTTP provider is required there. With none configured, the code is logged to the server console instead (dev only).
 
-### Frontend (`frontend/.env.production` — and optionally `.env.development`)
+# Optional: Cloudflare R2 for file attachments
+R2_ACCOUNT_ID=<r2 account id>
+R2_ACCESS_KEY_ID=<r2 access key>
+R2_SECRET_ACCESS_KEY=<r2 secret key>
+R2_BUCKET_NAME=<r2 bucket name>
+R2_PUBLIC_URL=<r2 public url>
+
+# Optional: GIPHY
+GIPHY_API_KEY=<giphy api key>
+
+# Optional: AssemblyAI for voice transcription
+ASSEMBLYAI_API_KEY=<assemblyai api key>
+
+# Optional: Email digest recipients (comma-separated)
+DIGEST_RECIPIENTS=email1@example.com,email2@example.com
+```
+
+### Frontend (`frontend/.env.production`)
 ```env
 VITE_API_URL=https://your-backend-domain.com/api
-
-# Google Sign-In — the Web OAuth client ID (not the secret; this is safe to
-# ship in the client bundle). Same value the backend's GOOGLE_CLIENT_ID uses.
 VITE_GOOGLE_CLIENT_ID=<google web oauth client id>.apps.googleusercontent.com
+VITE_PUBLIC_APP_URL=https://your-domain.com
 ```
-If `VITE_API_URL` is not set, the frontend defaults to `http://localhost:5001/api` in dev mode, or `/api` (same-origin) in production — supporting the combined single-server deployment model.
+If `VITE_API_URL` is not set, the frontend defaults to `http://localhost:5001/api` in dev mode, or `/api` (same-origin) in production.
 
 ---
 
-## 13. Setup & Installation
+## 14. Setup & Installation
 
 ### Prerequisites
 - Node.js (v18+ recommended)
 - A MongoDB database (local or Atlas)
-- A Cloudinary account (for image/voice uploads)
+- A Cloudinary account (for images/voice)
+- (Optional) Cloudflare R2 for file attachments
+- (Optional) GIPHY API key for GIF/sticker support
+- (Optional) AssemblyAI API key for voice transcription
 
 ### Steps
 
@@ -480,7 +874,7 @@ cd backend
 npm install
 
 # 3. Configure environment variables
-# create backend/.env with the variables listed in section 12
+# create backend/.env with the variables listed in section 13
 
 # 4. Install frontend dependencies
 cd ../frontend
@@ -504,7 +898,7 @@ The frontend dev server proxies API calls to `http://localhost:5001/api` (config
 
 ---
 
-## 14. Build & Deployment
+## 15. Build & Deployment
 
 The root `package.json` provides a combined build/start flow suitable for single-service hosts (e.g., Render):
 
@@ -513,45 +907,40 @@ npm run build   # installs backend + frontend deps, builds frontend into fronten
 npm run start   # starts the backend, which serves frontend/dist in production
 ```
 
-In production (`NODE_ENV=production`), `backend/index.js`:
-```js
-app.use(express.static(path.join(__dirname, "../frontend/dist")));
-app.get("/*", (req, res) => {
-  res.sendFile(path.join(__dirname, "../frontend", "dist", "index.html"));
-});
-```
-serves the compiled React app and handles SPA client-side routing fallback, while `/api/*` routes remain handled by Express.
+In production (`NODE_ENV=production`), `backend/index.js` serves the compiled React app and handles SPA client-side routing fallback, while `/api/*` routes remain handled by Express.
 
 ---
 
-## 15. Known Issues / Notes
+## 16. Known Issues / Notes
 
-- `favorites`/`archived` fields exist on the `User` model and have a dedicated `/action/:id` endpoint, but the current `SideBar` UI actually manages favorites/archive/pin state via **`localStorage`** rather than these server fields — meaning these preferences are currently device-specific rather than synced across devices/sessions.
-- `getUsersForSidebar` returns chatted users plus up to 4 "discover" users whose email matches `@example.com` (i.e., seeded dummy accounts) when no search query is provided — intended to showcase the app with sample contacts.
-- Disappearing messages rely on a MongoDB TTL index (`deleteAt`, `expires: 0`) — requires MongoDB's background TTL monitor (runs every ~60s), so deletion isn't instantaneous.
-- WebRTC calling requires camera/microphone permissions and works best when both peers can establish a direct or TURN-relayed connection; the configured public TURN server (`openrelay.metered.ca`) is a free/shared service suitable for testing, not guaranteed for production-scale reliability.
-- The `backend/package.json` lists `"chat-app": "file:.."` as a dependency — a local self-reference likely left over from monorepo scaffolding; it has no functional effect but could be removed for clarity.
+- Rate limiting infrastructure exists (`socketAllow` in `socket.js`) but is currently **disabled** (always returns `true`). The `rateLimit.middleware.js` file exists but is not applied to any route.
+- `useChatStore` (~2088 lines) and `useGroupStore` (~1094 lines) are large stores that could benefit from splitting. Cross-store circular dependencies are handled via dynamic `import()` at call time.
+- The backend's `backend/package.json` and the frontend's `frontend/package.json` both list `"chat-app": "file:.."` as a dependency — a local self-reference from monorepo scaffolding with no functional effect.
+- Disappearing messages rely on a MongoDB TTL index (`deleteAt`, `expires: 600`). The background media purge job runs every 20s to free Cloudinary/R2 assets before DB deletion.
+- WebRTC calling requires camera/microphone permissions. The configured TURN server (`openrelay.metered.ca`) is a free shared service suitable for testing, not guaranteed for production-scale reliability.
+- Screen sharing (`getDisplayMedia`) is not available in the Android WebView; the UI hides the control on mobile.
+- The offline IndexedDB cache (`lib/db.js`) is non-throwing — if IndexedDB is unavailable (Safari private browsing, quota exceeded), the app degrades gracefully to network-only.
 
 ---
 
-## 16. Mobile App (Capacitor / Android)
+## 17. Mobile App (Capacitor / Android)
 
-The Android app is **not a separate codebase** — it's the same React frontend (`frontend/`), wrapped by [Capacitor](https://capacitorjs.com) and running inside a native WebView. `frontend/android/` is the native Android project; it's committed to the repo, so it doesn't need to be regenerated from scratch, just kept in sync.
+The Android app is **not a separate codebase** — it's the same React frontend (`frontend/`), wrapped by Capacitor and running inside a native WebView. `frontend/android/` is the native Android project; it's committed to the repo, so it doesn't need to be regenerated from scratch, just kept in sync.
 
-### 16.1 Prerequisites
+### 17.1 Prerequisites
 
 - **Node.js** (same as the web app).
-- **Android Studio** (for the SDK, platform tools, and an emulator if you want one) — install the SDK platforms/build-tools it prompts for.
-- **A JDK compatible with Gradle 8.11** — a *system-wide* very new JDK (e.g. JDK 25/26) will fail with `Unsupported class file major version`. The simplest fix, since Android Studio ships its own: point `JAVA_HOME` at Android Studio's bundled JBR for any Gradle command:
+- **Android Studio** (for the SDK, platform tools, and an emulator if you want one).
+- **A JDK compatible with Gradle 8.11** — point `JAVA_HOME` at Android Studio's bundled JBR:
   ```powershell
   $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
   $env:Path = "$env:JAVA_HOME\bin;$env:Path"
   ```
   (macOS/Linux: `Android Studio.app/Contents/jbr/Contents/Home`, or `/opt/android-studio/jbr`.)
 - `adb` on your `PATH` (comes with the SDK's `platform-tools`).
-- A device or emulator with **USB debugging enabled** (Settings → Developer Options), or an AVD created in Android Studio.
+- A device or emulator with USB debugging enabled.
 
-### 16.2 First-time setup
+### 17.2 First-time setup
 
 ```bash
 cd frontend
@@ -562,7 +951,7 @@ npx cap sync android          # copies dist/ into the native project,
                               # (re)registers plugins
 ```
 
-### 16.3 The edit → rebuild → run loop
+### 17.3 The edit → rebuild → run loop
 
 Every time you change frontend source and want to see it in the Android app:
 
@@ -572,50 +961,65 @@ npm run build          # 1. rebuild the web bundle into dist/
 npx cap sync android   # 2. copy dist/ + plugin config into android/
 
 cd android
-# Windows (PowerShell), pointing at the JBR JDK as above:
+# Windows (PowerShell), pointing at the JBR JDK:
 .\gradlew.bat assembleDebug --console=plain
-# macOS/Linux:
-./gradlew assembleDebug
 
 # APK lands at android/app/build/outputs/apk/debug/app-debug.apk
-
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am force-stop com.chatapp.mobile
 adb shell monkey -p com.chatapp.mobile -c android.intent.category.LAUNCHER 1
 ```
 
-If you only changed `frontend/android/*` (native config, manifest, gradle files) and not the web source, you can skip the `npm run build`/`cap sync` steps and just re-run Gradle.
+If you only changed `frontend/android/*` (native config, manifest, gradle files) and not the web source, skip `npm run build`/`cap sync` and just re-run Gradle.
 
-`frontend/capacitor.config.json` controls the app ID (`com.chatapp.mobile`), display name, and which native plugin providers are bundled (`SocialLogin.providers` — only `google` is enabled; `facebook`/`apple`/`twitter` are disabled to keep the APK smaller and avoid Facebook's `AD_ID` permission).
+### 17.4 Capacitor Plugins
 
-### 16.4 Google Sign-In on Android
+| Plugin | Purpose |
+|---|---|
+| `@capacitor/core` | Core Capacitor runtime |
+| `@capacitor/android` | Android platform |
+| `@capacitor/app` | App lifecycle, back button listener |
+| `@capacitor/filesystem` | Native file save for exports |
+| `@capacitor/share` | Native share sheet for file sharing |
+| `@capgo/capacitor-social-login` | Native Android Google Sign-In (Credential Manager) |
+| `@aparajita/capacitor-biometric-auth` | Fingerprint/face unlock for chat lock |
+| `@capawesome/capacitor-badge` | Android launcher badge count |
+| Native `SecureScreen` plugin | FLAG_SECURE for view-once media (custom, in `android/app/src/...`) |
 
-The app uses **Android's native Credential Manager** (via `@capgo/capacitor-social-login`) instead of a browser-redirect OAuth flow, because **Google blocks OAuth sign-in from embedded WebViews** (`Error 403: disallowed_useragent`) — this is why the web GIS "Sign in with Google" button (`LoginPage.jsx`/`SignUpPage.jsx`) is explicitly hidden when `Capacitor.isNativePlatform()` is true, and a separate native button calls `SocialLogin.login(...)` instead.
+`frontend/capacitor.config.json` controls the app ID (`com.chatapp.mobile`), display name, and which plugin providers are bundled (`SocialLogin.providers` — only `google` enabled; `facebook`/`apple`/`twitter` disabled).
 
-Getting this working from a fresh clone needs one extra piece of Google Cloud Console config beyond the Web client the backend already uses:
+### 17.5 Google Sign-In on Android
 
-1. In the **same** Google Cloud project as your Web OAuth client, create a second OAuth client of type **Android**.
+The app uses Android's native Credential Manager (via `@capgo/capacitor-social-login`) instead of a browser-redirect OAuth flow, because **Google blocks OAuth sign-in from embedded WebViews** (`Error 403: disallowed_useragent`).
+
+Setup:
+1. In the same Google Cloud project as your Web OAuth client, create a second OAuth client of type **Android**.
 2. Package name: `com.chatapp.mobile`.
-3. SHA-1 fingerprint of whichever keystore signs the build you're installing:
+3. SHA-1 fingerprint of the signing keystore:
    ```bash
-   # Debug builds (the default from `assembleDebug` above):
    keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android
-   # look for the "SHA1:" line
    ```
-   A release build needs its own SHA-1 registered from its own keystore (and again from Play App Signing's certificate, if distributed via Play Store) — the debug SHA-1 above only authorizes debug-signed installs.
-4. That's it on the Google Cloud side — the Android client isn't referenced anywhere in code (no client ID/secret to paste in). Its mere existence (tied to package name + SHA-1) is what authorizes the app to use Sign-In; the actual ID token returned to the app is still requested against the **Web** Client ID (`VITE_GOOGLE_CLIENT_ID`, passed as `webClientId` in `SocialLogin.initialize(...)`), so it's verified by the exact same `/auth/google` backend endpoint the web flow uses. No backend changes needed for the mobile app specifically.
-5. `frontend/src/pages/LoginPage.jsx` / `SignUpPage.jsx` call `SocialLogin.login({ provider: 'google', options: {} })` — **do not** pass a `scopes` option here; the plugin throws `"You CANNOT use scopes without modifying the main activity"` unless `MainActivity` is customized for it, and it isn't needed — `email`/`profile`/`email_verified` are already in the default ID token.
+4. The Android client isn't referenced in code — its existence (tied to package name + SHA-1) authorizes the app. The ID token is requested against the **Web** Client ID (`VITE_GOOGLE_CLIENT_ID`), verified by the same `/auth/google` backend endpoint.
+5. Do **not** pass a `scopes` option to `SocialLogin.login()` — the plugin throws `"You CANNOT use scopes without modifying the main activity"`.
 
-### 16.5 Troubleshooting notes (things that actually came up)
+### 17.6 Native Android Features
 
-- **`Unsupported class file major version 70`** building with Gradle → your `JAVA_HOME` is pointing at too new a JDK. Use Android Studio's bundled JBR (§16.1).
-- **`Duplicate class kotlin.collections.jdk8.CollectionsJDK8Kt ...`** (or similar `kotlin-stdlib-jdk7`/`jdk8` conflicts) → different native plugins pull in different Kotlin stdlib versions. Already fixed via a `configurations.all { exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7' / 'kotlin-stdlib-jdk8' }` block in `android/app/build.gradle`; if a new plugin reintroduces this, that's the fix.
-- **`Dependency 'androidx.browser:browser:...' requires compileSdk 36 / AGP 8.9.1+`** → bump `compileSdkVersion` in `android/variables.gradle` and the `com.android.tools.build:gradle` classpath version in `android/build.gradle` accordingly (already done once this repo added `@capgo/capacitor-social-login`; a future plugin bump may ask for this again).
-- **Google API calls from the app return CORS errors / "Not allowed by CORS"** → the backend's `ALLOWED_ORIGIN` env var doesn't include `https://localhost` (the Capacitor Android app's origin). Add it and **redeploy** — on Render specifically, changing an env var and just *restarting* the service does **not** pick up the new value; it needs an actual redeploy (a restart reuses the previous env snapshot).
-- **`[28444] Developer console is not set up correctly`** (native Google Sign-In) → the installed APK's signing certificate SHA-1, package name, or `webClientId` doesn't match what's registered in Google Cloud Console. Check Logcat for `GoogleProvider` — it logs the exact `package`, `signingSha1`, and `webClientId` the app is using, to diff against the Android OAuth client's config.
-- **A phone connected via USB shows as `unauthorized` in `adb devices`** → check the phone's screen for the "Allow USB debugging?" prompt and accept it; it can take a couple of seconds to appear.
-- **The app doesn't reflect a code change** → you edited frontend source but skipped `npm run build` and/or `npx cap sync android` before rebuilding with Gradle — the native project only sees whatever is in `frontend/dist/` at the last sync, not live source.
+- **Back button handling**: `CapacitorApp.addListener('backButton', ...)` in `App.jsx` — dismisses modals → closes open chat → navigates back → exits app
+- **Launcher badge**: `@capawesome/capacitor-badge` updates the unread count on the app icon (Android only)
+- **Secure screen**: Custom `SecureScreen` plugin sets `FLAG_SECURE` when view-once media is open
+- **Biometric auth**: `@aparajita/capacitor-biometric-auth` for chat lock unlock with fingerprint/face (with device PIN fallback)
+- **File sharing**: `@capacitor/filesystem` + `@capacitor/share` for saving/sharing exported chats
 
-### 16.6 Offline behavior
+### 17.7 Offline Behavior
 
-The frontend also has an offline-first cache (`frontend/src/lib/db.js`, IndexedDB via Dexie) that applies on both the web and the Android app equally — chats/messages paint instantly from the last sync while the network confirms in the background, sends made while offline queue and auto-flush on reconnect, and the whole cache for an account is wiped on logout. This is app code, not Capacitor-specific, so there's nothing extra to configure for it — it's mentioned here only because it's most noticeable on mobile.
+The frontend has an offline-first cache (`frontend/src/lib/db.js`, IndexedDB via Dexie) that applies on both the web and the Android app equally — chats/messages paint instantly from the last sync while the network confirms in the background, sends made while offline queue and auto-flush on reconnect, and the whole cache for an account is wiped on logout. This is app code, not Capacitor-specific, so there's nothing extra to configure for it.
+
+### 17.8 Troubleshooting
+
+- **`Unsupported class file major version 70`** → `JAVA_HOME` is pointing at too new a JDK. Use Android Studio's bundled JBR (§17.1).
+- **`Duplicate class kotlin.collections.jdk8.CollectionsJDK8Kt`** → Kotlin stdlib version conflicts. Fixed via `configurations.all { exclude }` in `android/app/build.gradle`.
+- **`Dependency 'androidx.browser:browser:...' requires compileSdk 36`** → Bump `compileSdkVersion` in `android/variables.gradle`.
+- **CORS errors from the app** → Backend `ALLOWED_ORIGIN` doesn't include `https://localhost`. Add it and **redeploy** (not just restart on Render).
+- **`Developer console is not set up correctly`** (native Google Sign-In) → APK's SHA-1, package name, or `webClientId` doesn't match Google Cloud Console. Check Logcat for `GoogleProvider` logs.
+- **Phone shows as `unauthorized` in `adb devices`** → Accept the "Allow USB debugging?" prompt on the phone.
+- **App doesn't reflect code changes** → Skipped `npm run build` and/or `npx cap sync android` before Gradle rebuild.

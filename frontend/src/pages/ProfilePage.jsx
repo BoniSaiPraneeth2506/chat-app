@@ -12,6 +12,7 @@ import {
 import SocialLinksRow from "../components/SocialLinksRow";
 import ProfileQrCard from "../components/ProfileQrCard";
 import QrScannerModal from "../components/QrScannerModal";
+import AvatarCropModal from "../components/AvatarCropModal";
 
 // Shared surface treatment.
 //
@@ -47,6 +48,7 @@ const ProfilePage = () => {
   const [isUploadingBanner, setIsUploadingBanner] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [cropImgSrc, setCropImgSrc] = useState(null);
   const [formData, setFormData] = useState({
     fullName: authUser?.fullName || "",
     email: authUser?.email || "",
@@ -62,14 +64,18 @@ const ProfilePage = () => {
     if (!file) return;
 
     const reader = new FileReader();
-
     reader.readAsDataURL(file);
-
-    reader.onload = async () => {
-      const base64Image = reader.result;
-      setSelectedImg(base64Image);
-      await updateProfile({ profilePic: base64Image });
+    reader.onload = () => {
+      setCropImgSrc(reader.result);
     };
+    // Allow re-picking the same file.
+    e.target.value = "";
+  };
+
+  const handleCropComplete = async (croppedBase64) => {
+    setCropImgSrc(null);
+    setSelectedImg(croppedBase64);
+    await updateProfile({ profilePic: croppedBase64 });
   };
 
   const handleBannerUpload = async (e) => {
@@ -512,11 +518,17 @@ const ProfilePage = () => {
             toast("That's your own chat link");
             return;
           }
-          // Reuse the existing deep-link route so a scan behaves exactly like
-          // opening a shared link — it resolves the user and opens the chat.
           navigate(`/chat-with/${userId}`);
         }}
       />
+
+      {cropImgSrc && (
+        <AvatarCropModal
+          src={cropImgSrc}
+          onCrop={handleCropComplete}
+          onCancel={() => setCropImgSrc(null)}
+        />
+      )}
     </div>
   );
 };

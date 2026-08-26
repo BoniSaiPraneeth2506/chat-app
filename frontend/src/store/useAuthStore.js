@@ -398,6 +398,10 @@ const useAuthStore=create((set,get)=>({
       const res = await axiosInstance.put("/auth/update-profile", data);
       set({ authUser: res.data });
       persistAuthSnapshot(res.data);
+      // Sync updated name/pic into the saved-accounts switcher so the
+      // account picker reflects changes without a re-login.
+      rememberAccount(res.data, localStorage.getItem("token"));
+      get().refreshSavedAccounts();
       toast.success("Profile updated successfully");
     } catch (error) {
       console.log("error in update profile:", error);
