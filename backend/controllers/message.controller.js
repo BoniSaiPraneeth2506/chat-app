@@ -122,75 +122,49 @@ const updateChatStreaks = async (userIdA, userIdB) => {
     const today = utcDayKey();
     const yesterday = yesterdayKey();
 
-    const bulk = User.bulkWrite([
-      ...buildStreakOps(userIdA, userIdB, today, yesterday),
-      ...buildStreakOps(userIdB, userIdA, today, yesterday),
-    ], { ordered: false });
+    const computeStreak = (existing) => {
+      const prev = existing?.count || 0;
+      const lastDay = existing?.lastActiveDay || "";
+      const longest = existing?.longestStreak || 0;
 
-    // Fire-and-forget — we don't await the result on the hot path.
-    await bulk;
-  } catch {
-    // Silently ignored — streaks are cosmetic, not critical.
+      let count;
+      if (lastDay === today) {
+        count = prev;
+      } else if (lastDay === yesterday) {
+        count = prev + 1;
+      } else {
+        count = 1;
+      }
+      return { count, lastActiveDay: today, longestStreak: Math.max(longest, count) };
+    };
+
+    const [userA, userB] = await Promise.all([
+      User.findById(userIdA).select("chatStreaks"),
+      User.findById(userIdB).select("chatStreaks"),
+    ]);
+
+    if (!userA || !userB) return;
+
+    const streakA = userA.chatStreaks?.get?.(userIdB.toString()) || userA.chatStreaks?.get?.(userIdB) || {};
+    const streakB = userB.chatStreaks?.get?.(userIdA.toString()) || userB.chatStreaks?.get?.(userIdA) || {};
+
+    const newStreakA = computeStreak(streakA);
+    const newStreakB = computeStreak(streakB);
+
+    userA.chatStreaks.set(userIdB.toString(), newStreakA);
+    userB.chatStreaks.set(userIdA.toString(), newStreakB);
+
+    await Promise.all([userA.save(), userB.save()]);
+
+    const toObj = (v) => v && typeof v === "object" ? { count: v.count || 0, longestStreak: v.longestStreak || 0, lastActiveDay: v.lastActiveDay || "" } : null;
+
+    const sockA = getReceiverSocketId(userIdA);
+    const sockB = getReceiverSocketId(userIdB);
+    if (sockA) io.to(sockA).emit("streakUpdate", { partnerId: userIdB, streak: toObj(newStreakA) });
+    if (sockB) io.to(sockB).emit("streakUpdate", { partnerId: userIdA, streak: toObj(newStreakB) });
+  } catch (err) {
+    console.error("updateChatStreaks error:", err);
   }
-};
-
-const buildStreakOps = (ownerId, partnerId, today, yesterday) => {
-  const field = `chatStreaks.${partnerId}`;
-  return [
-    {
-      updateOne: {
-        filter: { _id: ownerId },
-        update: [
-          {
-            $set: {
-              [`${field}.lastActiveDay`]: today,
-              [`${field}.count`]: {
-                $let: {
-                  vars: { prev: `$${field}.count`, lastDay: `$${field}.lastActiveDay` },
-                  in: {
-                    $switch: {
-                      branches: [
-                        { case: { $eq: ["$$lastDay", today] }, then: "$$prev" },
-                        { case: { $eq: ["$$lastDay", yesterday] }, then: { $add: [{ $ifNull: ["$$prev", 0] }, 1] } },
-                      ],
-                      default: 1,
-                    },
-                  },
-                },
-              },
-              [`${field}.longestStreak`]: {
-                $let: {
-                  vars: {
-                    newCount: {
-                      $switch: {
-                        branches: [
-                          {
-                            case: { $eq: [`$${field}.lastActiveDay`, today] },
-                            then: `$${field}.count`,
-                          },
-                          {
-                            case: { $eq: [`$${field}.lastActiveDay`, yesterday] },
-                            then: { $add: [{ $ifNull: [`$${field}.count`, 0] }, 1] },
-                          },
-                        ],
-                        default: 1,
-                      },
-                    },
-                  },
-                  in: {
-                    $max: [
-                      { $ifNull: [`$${field}.longestStreak`, 0] },
-                      "$$newCount",
-                    ],
-                  },
-                },
-              },
-            },
-          },
-        ],
-      },
-    },
-  ];
 };
 
 /** Validate image data URI: type whitelist + size cap */

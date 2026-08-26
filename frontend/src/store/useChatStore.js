@@ -1074,6 +1074,7 @@ export const useChatStore = create((set, get) => ({
     socket.off("callAccepted");
     socket.off("callEnded");
     socket.off("iceCandidate");
+    socket.off("streakUpdate");
 
     // Emit read receipt for current active chat immediately if any
     const { selectedUser } = get();
@@ -1150,6 +1151,23 @@ export const useChatStore = create((set, get) => ({
           }
         }));
       }
+    });
+
+    // Real-time streak updates from the backend after each message.
+    socket.on("streakUpdate", ({ partnerId, streak }) => {
+      if (!partnerId) return;
+      useAuthStore.setState((state) => {
+        if (!state.authUser) return state;
+        return {
+          authUser: {
+            ...state.authUser,
+            chatStreaks: {
+              ...(state.authUser.chatStreaks || {}),
+              [partnerId]: streak,
+            },
+          },
+        };
+      });
     });
 
     // Account-level lists changed on another of this user's devices: pins,
