@@ -780,14 +780,15 @@ const sendMessage = async (req, res) => {
       };
     }
 
-    const timer = sender?.disappearingTimers?.get(receiverId) || "off";
+    const timer = sender?.disappearingTimers?.get(receiverId) || sender?.messageTimer || "off";
 
     let deleteAt = undefined;
     if (timer !== "off") {
       const durationMap = {
         "1h": 60 * 60 * 1000,
         "24h": 24 * 60 * 60 * 1000,
-        "7d": 7 * 24 * 60 * 60 * 1000
+        "7d": 7 * 24 * 60 * 60 * 1000,
+        "30d": 30 * 24 * 60 * 60 * 1000,
       };
       const ms = durationMap[timer];
       if (ms) {
@@ -878,7 +879,7 @@ const setDisappearingTimer = async (req, res) => {
     const { timer } = req.body; // "off", "1h", "24h", "7d"
     const senderId = req.user._id;
 
-    if (!["off", "1h", "24h", "7d"].includes(timer)) {
+    if (!["off", "1h", "24h", "7d", "30d"].includes(timer)) {
       return res.status(400).json({ message: "Invalid timer value" });
     }
 

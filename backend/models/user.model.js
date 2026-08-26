@@ -114,6 +114,14 @@ const userSchema=new mongoose.Schema({
         type:Boolean,
         default:true
     },
+    // Global disappearing-message default for new conversations.
+    // Per-chat overrides live in `disappearingTimers`; this is the fallback
+    // when no per-chat timer is set.
+    messageTimer:{
+        type:String,
+        enum:["off","1h","24h","7d","30d"],
+        default:"off"
+    },
     disappearingTimers:{
         type:Map,
         of:String,

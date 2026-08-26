@@ -1,4 +1,4 @@
-import { Send, LogOut, AlertTriangle } from "lucide-react";
+import { Send, LogOut, AlertTriangle, Timer } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useThemeStore } from '../store/useThemeStore';
 import { useEffect, useState } from 'react';
@@ -82,11 +82,12 @@ const SettingsPage = () => {
     setPrivacyReadReceipts 
   } = useThemeStore();
 
-  const { authUser, logOut, deleteAccount } = useAuthStore();
+  const { authUser, logOut, deleteAccount, updateProfile } = useAuthStore();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [deleteDraft, setDeleteDraft] = useState(null); // null = dialog closed
   const [isDeleting, setIsDeleting] = useState(false);
   const navigate = useNavigate();
+  const [messageTimer, setMessageTimer] = useState(authUser?.messageTimer || "off");
 
   const handleLogoutConfirm = () => {
     setShowLogoutConfirm(false);
@@ -224,6 +225,47 @@ const SettingsPage = () => {
                   section of its own, since that is where someone looks for it. */}
               <ChatLockSettings />
             </div>
+          </div>
+        </div>
+
+        {/* Disappearing Messages — global default for all new conversations.
+            Per-chat overrides are set from the chat header, same as WhatsApp. */}
+        <div className="space-y-4 pt-6 border-t" style={{ borderColor: 'var(--color-base-300)' }}>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <Timer className="w-4 h-4 opacity-60" />
+              <h3 className="font-semibold text-base">Disappearing Messages</h3>
+            </div>
+            <p className="text-xs opacity-75">Messages in new chats will disappear after the selected time</p>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {[
+              { value: "off", label: "Off", desc: "Never" },
+              { value: "1h", label: "1 hour", desc: "" },
+              { value: "24h", label: "24 hours", desc: "" },
+              { value: "7d", label: "7 days", desc: "" },
+              { value: "30d", label: "30 days", desc: "" },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                onClick={async () => {
+                  setMessageTimer(opt.value);
+                  await updateProfile({ messageTimer: opt.value });
+                }}
+                className={`flex flex-col items-start p-3.5 rounded-xl border transition-all text-left ${
+                  messageTimer === opt.value
+                    ? "border-primary bg-primary/10"
+                    : "hover:bg-base-200/50"
+                }`}
+                style={{
+                  borderColor: messageTimer === opt.value ? 'var(--color-primary)' : 'var(--color-base-300)',
+                }}
+              >
+                <span className="text-sm font-medium">{opt.label}</span>
+                {opt.desc && <span className="text-[10px] opacity-50 mt-0.5">{opt.desc}</span>}
+              </button>
+            ))}
           </div>
         </div>
 
