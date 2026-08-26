@@ -2,6 +2,7 @@ import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
 import { useEffect, useMemo, useRef, useLayoutEffect, useState } from "react";
 import axiosInstance from "../lib/axios";
+import toast from "react-hot-toast";
 import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image, Link2, EyeOff, ChevronRight } from "lucide-react";
 import ForwardModal from "./ForwardModal";
 import MediaGallerySheet from "./MediaGallerySheet";
@@ -1556,6 +1557,27 @@ const ChatContainer = () => {
                 <div className="mt-2.5">
                   <SocialLinksRow user={selectedUser} variant="icons" emptyText="" />
                 </div>
+
+                {/* Chat streak — Snapchat-style fire + count */}
+                {selectedUser._id !== authUser._id && (() => {
+                  const streak = authUser?.chatStreaks?.[selectedUser._id];
+                  if (!streak || !streak.count) return null;
+                  const isHot = streak.count >= 3;
+                  return (
+                    <div className={`mt-3 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold
+                      ${isHot
+                        ? "bg-gradient-to-r from-orange-500/15 via-amber-500/15 to-yellow-500/15 text-orange-500"
+                        : "bg-base-200 text-base-content/70"
+                      }`}
+                    >
+                      <span className={isHot ? "animate-pulse" : ""}>&#x1F525;</span>
+                      <span>{streak.count} day streak</span>
+                      {streak.longestStreak > streak.count && (
+                        <span className="text-[10px] opacity-50 ml-0.5">(best {streak.longestStreak})</span>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
@@ -1679,7 +1701,38 @@ const ChatContainer = () => {
                   <option value="1h">1 Hour</option>
                   <option value="24h">24 Hours</option>
                   <option value="7d">7 Days</option>
+                  <option value="30d">30 Days</option>
                 </select>
+              </div>
+            )}
+
+            {/* Per-contact read receipt hiding */}
+            {selectedUser._id !== authUser._id && (
+              <div className="flex items-center justify-between p-3.5 rounded-2xl bg-base-200">
+                <div className="space-y-0.5">
+                  <span className="text-xs font-semibold text-base-content">Hide read receipts</span>
+                  <p className="text-[10px] text-base-content/50">
+                    {authUser?.readReceiptsHidden?.[selectedUser._id]
+                      ? `${selectedUser.fullName || "This contact"} won't see blue ticks from you`
+                      : `${selectedUser.fullName || "This contact"} sees when you read their messages`}
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  className="toggle toggle-primary toggle-sm"
+                  checked={Boolean(authUser?.readReceiptsHidden?.[selectedUser._id])}
+                  onChange={async (e) => {
+                    const hidden = e.target.checked;
+                    try {
+                      const res = await axiosInstance.put(`/auth/read-receipts/${selectedUser._id}`, { hidden });
+                      useAuthStore.setState({
+                        authUser: { ...authUser, readReceiptsHidden: res.data.readReceiptsHidden },
+                      });
+                    } catch {
+                      toast.error("Could not update read receipt setting");
+                    }
+                  }}
+                />
               </div>
             )}
 

@@ -270,6 +270,27 @@ const userSchema=new mongoose.Schema({
     sessions:{
         type:[sessionSchema],
         default:[]
+    },
+    // Daily chat streaks: keyed by the other user's id. Each entry tracks
+    // the current consecutive-day count, the date of the last message, and
+    // the longest streak ever reached — same mechanic as Snapchat.
+    chatStreaks:{
+        type:Map,
+        of:new mongoose.Schema({
+            count:{ type:Number, default:0 },
+            lastActiveDay:{ type:String, default:"" },
+            longestStreak:{ type:Number, default:0 }
+        },{ _id:false }),
+        default:new Map()
+    },
+    // Per-contact read receipt hiding: keyed by the other user's id. When
+    // true, the server suppresses the `messagesRead` socket event for that
+    // sender so their blue ticks never update — even if the global
+    // privacyReadReceipts toggle is on.
+    readReceiptsHidden:{
+        type:Map,
+        of:Boolean,
+        default:new Map()
     }
 },{timestamps:true}
 )

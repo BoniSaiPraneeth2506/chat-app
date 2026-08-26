@@ -1,5 +1,5 @@
 import express from "express";
-import { checkAuth, login, logout, signup, googleAuth, updateProfile, deleteAccount, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions } from "../controllers/auth.controller.js";
+import { checkAuth, login, logout, signup, googleAuth, updateProfile, deleteAccount, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions, toggleReadReceiptsHidden } from "../controllers/auth.controller.js";
 import protectRoute from "../middlewares/auth.middleware.js";
 import {
   setupChatLock,
@@ -44,5 +44,8 @@ router.post('/chat-lock/password',protectRoute,changeChatLockPassword)
 router.post('/chat-lock/recover',protectRoute,recoverChatLock)
 router.post('/chat-lock/disable',protectRoute,disableChatLock)
 router.post('/chat-lock/toggle/:id',protectRoute,toggleChatLocked)
+
+// Per-contact read receipt hiding
+router.put('/read-receipts/:userId',protectRoute,toggleReadReceiptsHidden)
 
 export default router

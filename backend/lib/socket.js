@@ -262,6 +262,21 @@ io.on("connection", async (socket) => {
             }
         }
 
+        // Per-contact read receipt hiding: if the sender has hidden read
+        // receipts from this receiver, suppress the blue tick event.
+        if (senderId) {
+            try {
+                const senderDoc = await User.findById(senderId).select("readReceiptsHidden").lean();
+                const hiddenMap = senderDoc?.readReceiptsHidden;
+                const isHidden = hiddenMap instanceof Map
+                    ? hiddenMap.get(String(receiverId))
+                    : hiddenMap?.[String(receiverId)];
+                if (isHidden) return; // sender doesn't want to see blue ticks
+            } catch {
+                // If the lookup fails, fall through and send the receipt.
+            }
+        }
+
         const senderSocketId = getReceiverSocketId(senderId);
         if (senderSocketId && !(await isBlockedBetween(userId, senderId))) {
             io.to(senderSocketId).emit("messagesRead", {

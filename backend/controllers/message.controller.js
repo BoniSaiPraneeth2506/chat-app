@@ -97,6 +97,102 @@ const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const sanitizeText = (text) =>
   sanitizeHtml(text, { allowedTags: [], allowedAttributes: {} });
 
+// ── Chat Streak Helper ────────────────────────────────────────────────────────
+//
+// Snapchat-style daily streaks between two DM contacts. Both users' maps are
+// updated atomically so the count is consistent regardless of who sent the
+// message. A streak continues if both users message on consecutive calendar
+// days (UTC); it resets to 1 if a day is missed.
+
+const utcDayKey = (date = new Date()) =>
+  date.toISOString().slice(0, 10); // "YYYY-MM-DD"
+
+const yesterdayKey = () => {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - 1);
+  return utcDayKey(d);
+};
+
+/**
+ * Updates the streak between sender and receiver on both users' documents.
+ * Best-effort: a failure here must never block the message from being delivered.
+ */
+const updateChatStreaks = async (userIdA, userIdB) => {
+  try {
+    const today = utcDayKey();
+    const yesterday = yesterdayKey();
+
+    const bulk = User.bulkWrite([
+      ...buildStreakOps(userIdA, userIdB, today, yesterday),
+      ...buildStreakOps(userIdB, userIdA, today, yesterday),
+    ], { ordered: false });
+
+    // Fire-and-forget — we don't await the result on the hot path.
+    await bulk;
+  } catch {
+    // Silently ignored — streaks are cosmetic, not critical.
+  }
+};
+
+const buildStreakOps = (ownerId, partnerId, today, yesterday) => {
+  const field = `chatStreaks.${partnerId}`;
+  return [
+    {
+      updateOne: {
+        filter: { _id: ownerId },
+        update: [
+          {
+            $set: {
+              [`${field}.lastActiveDay`]: today,
+              [`${field}.count`]: {
+                $let: {
+                  vars: { prev: `$${field}.count`, lastDay: `$${field}.lastActiveDay` },
+                  in: {
+                    $switch: {
+                      branches: [
+                        { case: { $eq: ["$$lastDay", today] }, then: "$$prev" },
+                        { case: { $eq: ["$$lastDay", yesterday] }, then: { $add: [{ $ifNull: ["$$prev", 0] }, 1] } },
+                      ],
+                      default: 1,
+                    },
+                  },
+                },
+              },
+              [`${field}.longestStreak`]: {
+                $let: {
+                  vars: {
+                    newCount: {
+                      $switch: {
+                        branches: [
+                          {
+                            case: { $eq: [`$${field}.lastActiveDay`, today] },
+                            then: `$${field}.count`,
+                          },
+                          {
+                            case: { $eq: [`$${field}.lastActiveDay`, yesterday] },
+                            then: { $add: [{ $ifNull: [`$${field}.count`, 0] }, 1] },
+                          },
+                        ],
+                        default: 1,
+                      },
+                    },
+                  },
+                  in: {
+                    $max: [
+                      { $ifNull: [`$${field}.longestStreak`, 0] },
+                      "$$newCount",
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+    },
+  ];
+};
+
 /** Validate image data URI: type whitelist + size cap */
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 const MAX_IMG_BYTES = 8_000_000; // ~6 MB actual after base64
@@ -848,6 +944,12 @@ const sendMessage = async (req, res) => {
     // new to read. Anything already hidden stays hidden — only the row returns.
     await User.updateOne({ _id: senderId }, { $pull: { clearedChats: receiverId } });
     await User.updateOne({ _id: receiverId }, { $pull: { clearedChats: senderId } });
+
+    // Snapchat-style daily streaks: update both users' counters. Best-effort,
+    // so a failure here never blocks the message.
+    if (receiverId) {
+      updateChatStreaks(senderId, receiverId).catch(() => {});
+    }
 
     // Delivered to the recipient and to the sender's own other devices.
     //

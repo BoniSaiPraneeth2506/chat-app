@@ -135,6 +135,11 @@ const sanitizeUser = (user) => ({
   lockedGroups: user.lockedGroups || [],
   lastSeen: user.lastSeen,
   messageTimer: user.messageTimer,
+  // Chat streaks — only the signed-in user's own streak map is sent, so the
+  // frontend can look up streak counts when viewing another user's profile.
+  chatStreaks: mapToObject(user.chatStreaks),
+  // Per-contact read receipt hiding — which contacts don't get blue ticks.
+  readReceiptsHidden: mapToObject(user.readReceiptsHidden),
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
 });
@@ -616,4 +621,35 @@ const revokeOtherSessions = async (req, res) => {
     }
 };
 
-export { signup, login, logout, googleAuth, updateProfile, checkAuth, deleteAccount, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions };
+/**
+ * Toggles per-contact read receipt hiding for a specific user.
+ *
+ * When enabled, the receiver's `messagesRead` socket event is suppressed for
+ * this sender — so their blue ticks never update, even if the global
+ * privacyReadReceipts toggle is on.
+ */
+const toggleReadReceiptsHidden = async (req, res) => {
+  try {
+    const { userId: targetId } = req.params;
+    const { hidden } = req.body;
+    if (!targetId) return res.status(400).json({ message: "User ID is required" });
+
+    const currentUserId = req.user._id;
+    if (targetId === currentUserId.toString()) {
+      return res.status(400).json({ message: "Cannot change settings for yourself" });
+    }
+
+    await User.updateOne(
+      { _id: currentUserId },
+      { $set: { [`readReceiptsHidden.${targetId}`]: Boolean(hidden) } }
+    );
+
+    const updatedUser = await User.findById(currentUserId);
+    res.status(200).json({ readReceiptsHidden: mapToObject(updatedUser.readReceiptsHidden) });
+  } catch (err) {
+    console.error("Error in toggleReadReceiptsHidden:", err.message);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export { signup, login, logout, googleAuth, updateProfile, checkAuth, deleteAccount, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions, toggleReadReceiptsHidden };

@@ -88,6 +88,8 @@ const SettingsPage = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const navigate = useNavigate();
   const [messageTimer, setMessageTimer] = useState(authUser?.messageTimer || "off");
+  const [onlinePrivacy, setOnlinePrivacy] = useState(authUser?.onlinePrivacy !== false);
+  const [typingPrivacy, setTypingPrivacy] = useState(authUser?.typingPrivacy !== false);
 
   const handleLogoutConfirm = () => {
     setShowLogoutConfirm(false);
@@ -218,6 +220,42 @@ const SettingsPage = () => {
                   className="toggle toggle-primary toggle-sm"
                   checked={privacyReadReceipts}
                   onChange={(e) => setPrivacyReadReceipts(e.target.checked)}
+                />
+              </div>
+
+              {/* Online Status Privacy */}
+              <div className="flex items-center justify-between p-3.5 rounded-xl border transition-all"
+                   style={{ backgroundColor: 'var(--color-base-200)/30', borderColor: 'var(--color-base-300)' }}>
+                <div className="space-y-0.5">
+                  <span className="text-xs font-semibold">Show Online Status</span>
+                  <p className="text-[10px] opacity-70">Let others see when you're active</p>
+                </div>
+                <input
+                  type="checkbox"
+                  className="toggle toggle-primary toggle-sm"
+                  checked={onlinePrivacy}
+                  onChange={async (e) => {
+                    setOnlinePrivacy(e.target.checked);
+                    await updateProfile({ onlinePrivacy: e.target.checked });
+                  }}
+                />
+              </div>
+
+              {/* Typing Indicator Privacy */}
+              <div className="flex items-center justify-between p-3.5 rounded-xl border transition-all"
+                   style={{ backgroundColor: 'var(--color-base-200)/30', borderColor: 'var(--color-base-300)' }}>
+                <div className="space-y-0.5">
+                  <span className="text-xs font-semibold">Show Typing Status</span>
+                  <p className="text-[10px] opacity-70">Let others see when you're typing</p>
+                </div>
+                <input
+                  type="checkbox"
+                  className="toggle toggle-primary toggle-sm"
+                  checked={typingPrivacy}
+                  onChange={async (e) => {
+                    setTypingPrivacy(e.target.checked);
+                    await updateProfile({ typingPrivacy: e.target.checked });
+                  }}
                 />
               </div>
 

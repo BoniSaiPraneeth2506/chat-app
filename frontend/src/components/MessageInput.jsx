@@ -244,12 +244,14 @@ const MessageInput = () => {
     addImageFiles(Array.from(e.target.files));
   };
 
-  // Ctrl/Cmd+V of an image anywhere in the chat attaches it as a preview.
+  // Ctrl/Cmd+V of files anywhere in the chat: images go to the image tray,
+  // videos and documents are staged for send (one at a time, same as the
+  // attachment menu).
   const handlePaste = (e) => {
-    const files = Array.from(e.clipboardData?.files || []).filter((f) => f.type.startsWith("image/"));
+    const files = Array.from(e.clipboardData?.files || []);
     if (files.length === 0) return;
     e.preventDefault();
-    addImageFiles(files);
+    routeDroppedFiles(files);
   };
 
   const handleDragOver = (e) => {
@@ -262,7 +264,48 @@ const MessageInput = () => {
     if (!e.dataTransfer?.types?.includes("Files")) return;
     e.preventDefault();
     setIsDraggingFiles(false);
-    addImageFiles(Array.from(e.dataTransfer.files));
+    routeDroppedFiles(Array.from(e.dataTransfer.files));
+  };
+
+  /**
+   * Routes pasted or dropped files to the right place: images are batched
+   * into the image tray (up to 5), while a video or document replaces
+   * whatever is already staged.
+   */
+  const routeDroppedFiles = (files) => {
+    if (files.length === 0) return;
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    const others = files.filter((f) => !f.type.startsWith("image/"));
+
+    if (images.length > 0) addImageFiles(images);
+
+    if (others.length > 0 && limits.enabled) {
+      const file = others[others.length - 1];
+      const check = validateFile(file, limits);
+      if (!check.valid) {
+        toast.error(check.reason);
+        return;
+      }
+      setStagedFile((current) => {
+        if (current?.previewUrl) releaseLocalUrl(current.previewUrl);
+        return {
+          file,
+          kind: check.kind,
+          previewUrl: check.kind === "document" ? "" : createLocalUrl(file),
+          poster: "",
+        };
+      });
+      if (check.kind === "video") {
+        captureVideoPoster(file).then((poster) => {
+          if (!poster) return;
+          setStagedFile((current) =>
+            current && current.file === file ? { ...current, poster } : current
+          );
+        });
+      }
+    } else if (others.length > 0 && !limits.enabled) {
+      toast.error("File sharing is not set up on this server yet");
+    }
   };
 
   // Paste and drag-and-drop are window level so the whole chat window is a drop target.
@@ -283,7 +326,7 @@ const MessageInput = () => {
       window.removeEventListener("dragleave", onDragLeave);
       window.removeEventListener("drop", handleDrop);
     };
-  }, [imagePreviews, isBlocked, isReadOnlyRestricted]);
+  }, [imagePreviews, isBlocked, isReadOnlyRestricted, limits]);
 
   const compressImage = (base64, quality = 0.6) => {
     const img = document.createElement("img");
@@ -786,9 +829,9 @@ const MessageInput = () => {
       {isDraggingFiles && (
         <div className="fixed inset-0 z-[130] flex items-center justify-center backdrop-blur-sm pointer-events-none">
           <div className="flex flex-col items-center gap-2 px-8 py-6 border-2 border-dashed border-primary rounded-2xl bg-base-100 shadow-xl">
-            <Image size={28} className="text-primary" />
-            <span className="text-sm font-semibold">Drop images to attach</span>
-            <span className="text-xs">Up to 5 images per message</span>
+            <Paperclip size={28} className="text-primary" />
+            <span className="text-sm font-semibold">Drop files to attach</span>
+            <span className="text-xs">Images, videos, or documents</span>
           </div>
         </div>
       )}
