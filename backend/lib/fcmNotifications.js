@@ -1,5 +1,6 @@
 import DeviceToken from "../models/deviceToken.model.js";
 import User from "../models/user.model.js";
+import Message from "../models/message.model.js";
 import { getMessagingService } from "./firebaseAdmin.js";
 import { isUserViewingConversation } from "./socket.js";
 
@@ -58,11 +59,83 @@ function describeContent(message = {}) {
   return "New message";
 }
 
+// The number of recent messages we list inside a single grouped notification.
+// Bounded so the card never grows unbounded; a trailing count line covers the rest.
+const GROUPED_BODY_MAX = 4;
+
+/**
+ * Build a WhatsApp-style grouped body for a conversation push.
+ *
+ * Instead of showing only the newest message, we read the recipient's unread
+ * messages for this conversation (reusing the same lastReadAt map the sidebar
+ * badges and email digest rely on) and list the most recent few, followed by a
+ * running total. Combined with the `tag` grouping this turns many per-message
+ * cards into a single card per conversation that shows all the unseen messages.
+ *
+ * `key` is the conversation handle — the partner's user id for a DM, the group
+ * id for a group. Returns { body, count }.
+ */
+async function buildGroupedBody({
+  recipient,
+  key,
+  senderId,
+  isGroup = false,
+}) {
+  const readAtMap = recipient?.lastReadAt;
+  const readVal =
+    readAtMap instanceof Map ? readAtMap.get(String(key)) : readAtMap?.[String(key)];
+  const since = readVal ? new Date(readVal) : new Date(0);
+
+  const base = {
+    deletedFor: { $ne: recipient?._id },
+    isDeletedForEveryone: { $ne: true },
+    createdAt: { $gt: since },
+  };
+
+  // One query that fetches both the unread count and the most recent messages.
+  const [count, latest] = await Promise.all([
+    isGroup
+      ? Message.countDocuments({ groupId: key, ...base })
+      : Message.countDocuments({ receiverId: recipient?._id, senderId: key, groupId: null, ...base }),
+    (isGroup
+      ? Message.find({ groupId: key, ...base })
+          .sort({ createdAt: 1 })
+          .limit(GROUPED_BODY_MAX)
+          .select("text image images voice attachments contact poll senderId isAnonymous")
+          .populate("senderId", "fullName")
+      : Message.find({ receiverId: recipient?._id, senderId: key, groupId: null, ...base })
+          .sort({ createdAt: 1 })
+          .limit(GROUPED_BODY_MAX)
+          .select("text image images voice attachments contact poll senderId")),
+  ]);
+
+  // The push carries the latest single message; show it even if the read-mark
+  // query can't see it yet (the message is saved before push fires).
+  const lines = latest.map((m) => {
+    let line = describeContent(m);
+    if (isGroup) {
+      const label = m.isAnonymous
+        ? "Anonymous"
+        : m.senderId?.fullName || "Someone";
+      line = `${label}: ${line}`;
+    }
+    return line;
+  });
+
+  const total = Math.max(count, 1, lines.length);
+  const suffix = `${total} new message${total === 1 ? "" : "s"}`;
+  const text = [
+    ...lines,
+    ...(total > lines.length ? [suffix] : []),
+  ].join("\n");
+
+  return { body: text, count: total };
+}
+
 /**
  * Whether the `sender` is muted/blocked from pushing to `recipient`.
  * Returns true when push should be suppressed for this conversation.
- */
-async function shouldSuppressForRecipient({ recipient, senderId, type, conversationId }) {
+ */async function shouldSuppressForRecipient({ recipient, senderId, type, conversationId }) {
   // Global push opt-out.
   if (recipient?.notificationPrefs?.pushEnabled === false) return true;
 
@@ -128,9 +201,25 @@ export async function sendPushNotification({
   const tokenList = tokens.map((t) => t.token);
 
   // Titles/bodies by notification type.
+  const isConversationPush = ["chat_message", "reply", "reaction", "group_message", "mention"].includes(type);
   let title = senderName || "ChatApp";
   let body = describeContent(messageContent);
-  if (type === "group_message") {
+  if (isConversationPush) {
+    // WhatsApp-style: one grouped card listing all unseen messages for this
+    // conversation (DM partner or group), not just the latest. Falls back to the
+    // simple single-message body if aggregation finds nothing.
+    try {
+      const grouped = await buildGroupedBody({
+        recipient,
+        key: conversationId,
+        senderId,
+        isGroup: type === "group_message" || type === "mention",
+      });
+      if (grouped?.body) body = grouped.body;
+    } catch (err) {
+      console.error("[push] buildGroupedBody error:", err.message);
+    }
+  } else if (type === "group_message") {
     title = conversationId ? `${senderName || "Someone"}` : senderName || "ChatApp";
     body = (messageContent?.text ? preview(messageContent.text) : describeContent(messageContent)) || "New message in group";
   } else if (type === "mention") {
