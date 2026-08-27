@@ -41,6 +41,10 @@ function preview(text) {
 
 function describeContent(message = {}) {
   const c = message;
+  // Text always wins: a card may carry text alongside media/contact, and the
+  // user wants to read what was sent, not a type label.
+  const text = preview(c.text);
+  if (text) return text;
   if (c.image) return "📷 Photo";
   if (Array.isArray(c.images) && c.images.length) return "📷 Photo";
   if (c.voice) return "🎤 Voice message";
@@ -48,11 +52,10 @@ function describeContent(message = {}) {
     const kinds = c.attachments.map((a) => a?.kind).filter(Boolean);
     return kinds.includes("video") ? "📹 Video" : "📎 Attachment";
   }
-  if (c.contact) return "👤 Contact";
-  if (c.contact?.name) return `👤 ${c.contact.name}`;
+  if (c.contact?.name) return `📇 ${c.contact.name}`;
+  if (c.contact) return "📇 Contact";
   if (c.poll && c.poll.question) return "📊 Poll";
-  const text = preview(c.text);
-  return text || "New message";
+  return "New message";
 }
 
 /**

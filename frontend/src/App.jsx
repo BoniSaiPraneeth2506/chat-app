@@ -185,6 +185,11 @@ const App = () => {
   // is the real record (welcomeSeenBy); this only stops the sheet reappearing in
   // the instant before that write is reflected locally.
   const [welcomeDismissed, setWelcomeDismissed] = useState([]);
+  // A notification tap that arrived before the app finished booting (cold start
+  // from the drawer). Holds the target until authUser + socket are ready, then
+  // routes — otherwise the tap is lost while checkAuth is still running.
+  const pendingPushRef = React.useRef(null);
+  const [pushPendingTick, setPushPendingTick] = useState(0);
   const { 
     subscribeToMessages, 
     unsubscribeFromMessages,
@@ -282,13 +287,25 @@ const App = () => {
   }, [authUserId, socket, subscribeToMessages, unsubscribeFromMessages]);
 
   // ── Push notifications (Android / FCM) ─────────────────────────────────────
-  // A notification tap routes to the exact conversation. DMs reuse the existing
-  // deep-link route (it hands off through setSelectedUser); groups are opened
-  // directly by id since no `/chat-with/` route exists for them.
+  // A notification tap is stored (never navigated immediately) so a cold start
+  // from the drawer doesn't lose it: routing happens once authUser + socket are
+  // confirmed ready below. DMs reuse the existing deep-link route (hands off
+  // through setSelectedUser); groups are opened directly by id.
   const handlePushTap = React.useCallback((data) => {
     const type = data?.type;
     const conversationId = data?.conversationId;
     if (!conversationId) return;
+    pendingPushRef.current = { type, conversationId };
+    setPushPendingTick((t) => t + 1);
+  }, []);
+
+  // Process a stored tap once the session is ready.
+  useEffect(() => {
+    if (!authUser) return;
+    const pending = pendingPushRef.current;
+    if (!pending) return;
+    pendingPushRef.current = null;
+    const { type, conversationId } = pending;
 
     if (type === "group_message" || type === "mention") {
       const groupStore = useGroupStore.getState();
@@ -312,7 +329,7 @@ const App = () => {
     } else {
       navigate(`/chat-with/${conversationId}`);
     }
-  }, [navigate]);
+  }, [authUser, pushPendingTick, navigate]);
 
   // Install the FCM native listeners once and turn on push when signed in.
   useEffect(() => {
