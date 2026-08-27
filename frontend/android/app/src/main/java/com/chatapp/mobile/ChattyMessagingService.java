@@ -4,16 +4,12 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import androidx.core.app.NotificationCompat;
-import androidx.core.app.NotificationManagerCompat;
 import com.capacitorjs.plugins.pushnotifications.PushNotificationsPlugin;
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
 import java.util.ArrayList;
 import java.util.List;
-import org.json.JSONArray;
-import org.json.JSONObject;
 
 /**
  * Custom Firebase cloud-messaging service that renders WhatsApp-style GROUPED
@@ -21,24 +17,20 @@ import org.json.JSONObject;
  *
  * Android's native notification-group feature is what produces the behaviour the
  * user wants: one card per conversation with a stacked (overlapping) small icon
- * and a count badge, which expands on tap into the individual unseen messages.
- * The FCM message API cannot produce this, so we build it here at the OS level.
+ * and a count badge, which expands into the individual unseen messages. The FCM
+ * message API cannot produce this, so we build it here at the OS level.
  *
  * - Foreground (app open): delegate to Capacitor so its web pushNotificationReceived
  *   event drives the existing in-app/local-notification flow untouched.
- * - Background / killed: accumulate the conversation's unseen messages in
- *   SharedPreferences and post Android group notifications:
- *     • a child notification per message (the rows revealed when the group opens)
- *     • a group summary (the collapsed card) carrying the small icon, a setNumber
- *       count, and an InboxStyle list of the messages.
+ * - Background / killed: render Android group notifications from the backend's
+ *   fully-aggregated message body — a child notification per message (the rows
+ *   revealed when the group opens) plus a group summary (the collapsed card)
+ *   carrying the stacked small icon, a setNumber count, and an InboxStyle list.
  *   Tapping the summary opens the conversation via a PendingIntent that keeps the
  *   FCM data (including google.message_id) so Capacitor's existing tap-navigation
  *   keeps working.
  */
 public class ChattyMessagingService extends FirebaseMessagingService {
-
-    private static final String PREFS = "chatty_notification_stack";
-    private static final String KEY_STACK = "stack"; // JSON: { conversationId: {title, lines:[..]} }
 
     // How many per-message child rows to keep/render; older ones are dropped so
     // the group never grows unbounded.
@@ -107,25 +99,32 @@ public class ChattyMessagingService extends FirebaseMessagingService {
 
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
 
-        // Maintain a per-conversation stack of message lines so repeated pushes
-        // accumulate into one expandable group.
-        Entry entry = pushLine(this, conversationId, title, body);
-        List<String> lines = entry.lines;
-        int count = lines.size();
+        // The backend sends a fully-aggregated multi-line body per push: one line
+        // per unseen message plus a trailing "N new messages" count. We render
+        // that list directly and REPLACE the conversation's group on every push
+        // (no accumulation), so the card always reflects the authoritative set of
+        // unseen messages — badge count, expandable list and collapsed preview.
+        ParsedBody parsed = parseBody(body);
+        List<String> lines = parsed.lines;
+        int count = parsed.count;
 
         // Group key shared by summary + children (this is what makes them collapse).
         String group = "conv_" + conversationId;
         // Content intent: opens the conversation and preserves Capacitor tap routing.
         PendingIntent contentIntent = buildContentIntent(msg);
 
+        // Drop any children this conversation posted previously so a fresh push
+        // with a different number of rows never leaves stale ones behind.
+        for (int i = 0; i < MAX_CHILDREN; i++) {
+            nm.cancel(group, stableId(conversationId + ":" + i));
+        }
+
         // One child per message row, revealed when the group card is expanded.
-        // Children share the group key but are not summaries, so tapping a row
-        // auto-cancels just that row.
         for (int i = 0; i < lines.size(); i++) {
             int childId = stableId(conversationId + ":" + i);
             NotificationCompat.Builder child = new NotificationCompat.Builder(this, channelId)
                 .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentTitle(entry.title)
+                .setContentTitle(title)
                 .setContentText(lines.get(i))
                 .setGroup(group)
                 .setAutoCancel(true)
@@ -141,10 +140,13 @@ public class ChattyMessagingService extends FirebaseMessagingService {
         inbox.setSummaryText(count + " new messages");
 
         int summaryId = stableId(conversationId);
+        // Collapsed card shows the LATEST message (WhatsApp-style), with the total
+        // as the setNumber badge and the full list available on expansion.
+        String collapsedText = lines.isEmpty() ? "New message" : lines.get(lines.size() - 1);
         NotificationCompat.Builder summary = new NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(entry.title)
-            .setContentText(count + " new messages")
+            .setContentTitle(title)
+            .setContentText(collapsedText)
             .setGroup(group)
             .setGroupSummary(true)
             .setNumber(count)
@@ -152,6 +154,33 @@ public class ChattyMessagingService extends FirebaseMessagingService {
             .setAutoCancel(true)
             .setContentIntent(contentIntent);
         nm.notify(group, summaryId, summary.build());
+    }
+
+    // Splits a backend body into message lines and a count. The count comes from
+    // the trailing "N new messages" line (authoritative unread total); otherwise
+    // it falls back to the number of lines.
+    private static ParsedBody parseBody(String body) {
+        List<String> lines = new ArrayList<>();
+        int count = 0;
+        if (body != null) {
+            String[] parts = body.split("\\n");
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+) new message[s]?").matcher(body);
+            boolean hasCountLine = m.find();
+            if (hasCountLine) {
+                count = Integer.parseInt(m.group(1));
+            }
+            for (String part : parts) {
+                String t = part.trim();
+                if (t.isEmpty()) continue;
+                if (t.matches("\\d+ new message[s]?")) continue;
+                lines.add(t);
+            }
+        }
+        if (count <= 0) count = lines.size();
+        ParsedBody out = new ParsedBody();
+        out.lines = lines;
+        out.count = count;
+        return out;
     }
 
     // Builds a PendingIntent that launches MainActivity with all the FCM extras
@@ -166,77 +195,19 @@ public class ChattyMessagingService extends FirebaseMessagingService {
         return PendingIntent.getActivity(this, 0, intent, flags);
     }
 
-    // ── Per-conversation stack in SharedPreferences ──────────────────────────
-
-    private static synchronized Entry pushLine(Context context, String conversationId, String title, String body) {
-        // Merge the incoming body (may itself be multi-line from the grouped
-        // backend body) into individual message lines.
-        String[] incoming = (body == null ? "" : body).split("\\n");
-        List<String> newLines = new ArrayList<>();
-        for (String s : incoming) {
-            if (s != null && !s.trim().isEmpty()) {
-                String t = s.trim();
-                // Skip a trailing "N new messages" summary line already shown by
-                // the card itself so it doesn't appear duplicated as a row.
-                if (t.matches("\\d+ new message[s]?")) continue;
-                newLines.add(t);
-            }
-        }
-
-        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        try {
-            String raw = prefs.getString(KEY_STACK, "{}");
-            JSONObject stack = new JSONObject(raw);
-            JSONObject entry = stack.optJSONObject(conversationId);
-            String loadedTitle = title;
-            List<String> lines = new ArrayList<>();
-            if (entry != null) {
-                loadedTitle = entry.optString("title", title);
-                JSONArray arr = entry.optJSONArray("lines");
-                if (arr != null) {
-                    for (int i = 0; i < arr.length(); i++) lines.add(arr.getString(i));
-                }
-            }
-            lines.addAll(newLines);
-            int start = Math.max(0, lines.size() - MAX_CHILDREN);
-            List<String> trimmed = new ArrayList<>(lines.subList(start, lines.size()));
-
-            entry = new JSONObject();
-            entry.put("title", loadedTitle);
-            entry.put("lines", new JSONArray(trimmed));
-            stack.put(conversationId, entry);
-            prefs.edit().putString(KEY_STACK, stack.toString()).apply();
-
-            Entry out = new Entry();
-            out.title = loadedTitle;
-            out.lines = trimmed;
-            return out;
-        } catch (Exception e) {
-            Entry out = new Entry();
-            out.title = title;
-            out.lines = newLines;
-            return out;
-        }
-    }
-
     /**
-     * Clears the stacked notifications for one conversation (called when the app
-     * opens that chat so the group disappears, like WhatsApp).
+     * Clears the grouped notifications for one conversation (called when the app
+     * opens that chat so the card disappears, like WhatsApp). Clears only this
+     * conversation's group — other conversations' notifications are untouched.
      */
     public static void clearConversation(Context context, String conversationId) {
         if (conversationId == null || context == null) return;
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         String group = "conv_" + conversationId;
-        nm.cancelAll();
-        // Drop the persisted stack for this conversation.
-        try {
-            SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-            String raw = prefs.getString(KEY_STACK, "{}");
-            JSONObject stack = new JSONObject(raw);
-            stack.remove(conversationId);
-            prefs.edit().putString(KEY_STACK, stack.toString()).apply();
-        } catch (Exception ignored) {
+        for (int i = 0; i < MAX_CHILDREN; i++) {
+            nm.cancel(group, stableId(conversationId + ":" + i));
         }
+        nm.cancel(group, stableId(conversationId));
     }
 
     private static int stableId(String key) {
@@ -247,8 +218,8 @@ public class ChattyMessagingService extends FirebaseMessagingService {
         return h == 0 ? 1 : h;
     }
 
-    private static class Entry {
-        String title;
+    private static class ParsedBody {
         List<String> lines;
+        int count;
     }
 }
