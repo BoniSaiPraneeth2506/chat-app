@@ -153,6 +153,13 @@ export async function sendPushNotification({
 
   const channelId = CHANNEL_BY_TYPE[type] || "messages";
 
+  // Android groups notifications by `tag`: every FCM notification carrying the
+  // same tag replaces the previous one instead of stacking a new card. Using the
+  // conversation id as the tag gives WhatsApp/Instagram-style behavior — all the
+  // unseen messages from one conversation collapse into a single card that shows
+  // the most recent one, rather than one card per message.
+  const conversationTag = String(conversationId || "");
+
   const message = {
     notification: silent
       ? undefined
@@ -162,7 +169,7 @@ export async function sendPushNotification({
         },
     data: {
       type: type || "chat_message",
-      conversationId: String(conversationId || ""),
+      conversationId: conversationTag,
       messageId: String(messageId || ""),
       senderId: String(senderId || ""),
       channelId,
@@ -175,9 +182,10 @@ export async function sendPushNotification({
     android: {
       priority: "high",
       notification: silent
-        ? { channelId }
+        ? { channelId, tag: conversationTag }
         : {
             channelId,
+            tag: conversationTag,
             clickAction: "OPEN_CONVERSATION",
           },
     },

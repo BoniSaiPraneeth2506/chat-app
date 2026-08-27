@@ -10,6 +10,7 @@
 
 import { Capacitor } from "@capacitor/core";
 import { PushNotifications } from "@capacitor/push-notifications";
+import { LocalNotifications } from "@capacitor/local-notifications";
 import axiosInstance from "./axios.js";
 
 // The server references these channel ids in every payload (CHANNEL_BY_TYPE),
@@ -69,20 +70,70 @@ export function initPushListeners(onTap) {
     console.error("[push] registration error:", err?.error || err);
   });
 
-  // Foreground receipt. The native plugin shows the system notification for
-  // FCM pushes automatically. The server already suppresses the push entirely
-  // when any device is viewing that conversation, so nothing extra is needed
-  // here — this handler exists mainly for observability.
+  // Foreground receipt. The Capacitor push plugin does NOT reliably surface a
+  // tap from its own foreground notification (known limitation), so when the
+  // message arrives while the app is open we re-display it ourselves as a
+  // tappable local notification. This keeps a single notification per message:
+  // in the background/killed state the OS shows the FCM notification directly
+  // (handled below by pushNotificationActionPerformed); in the foreground we
+  // show our local copy and route taps via localNotificationActionPerformed.
   PushNotifications.addListener("pushNotificationReceived", (notification) => {
     const data = notification?.data || {};
     if (data.silent === "true") return;
+    showForegroundLocalNotification(notification);
   });
 
-  // Tap on a delivered notification → route to the conversation.
+  // Tap on a delivered notification while the app was in the background/killed
+  // state (the OS-created one) → route to the conversation.
   PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
     const data = action?.notification?.data || {};
     if (typeof tapHandler === "function") tapHandler(data);
   });
+
+  // Tap on the foreground local notification we created → route to the
+  // conversation.
+  LocalNotifications.addListener("localNotificationActionPerformed", (action) => {
+    const extra = action?.notification?.extra || {};
+    if (typeof tapHandler === "function") tapHandler(extra);
+  });
+}
+
+// Re-create the incoming FCM message as a local notification so that tapping it
+// in the foreground actually fires a tap event (see initPushListeners).
+async function showForegroundLocalNotification(notification) {
+  try {
+    const data = notification?.data || {};
+    const title = notification?.title || data?.title || "ChatApp";
+    const body = notification?.body || data?.body || "New message";
+    const channelId = data?.channelId || "messages";
+
+    // Derive a stable numeric id from the CONVERSATION (not the message) so
+    // successive foreground messages from the same conversation replace the
+    // previous card instead of stacking one per message — mirroring the tag
+    // grouping used on the backend/background path.
+    let id = 0;
+    const raw = String(data?.conversationId || (data?.senderId || "") + ":" + data?.type);
+    for (let i = 0; i < raw.length; i++) id = (id + raw.charCodeAt(i)) % 2147483647;
+    if (!id) id = Date.now() % 2147483647;
+
+    const perm = await LocalNotifications.requestPermissions();
+    if (perm.display !== "granted") return;
+
+    await LocalNotifications.schedule({
+      notifications: [
+        {
+          id,
+          title,
+          body,
+          channelId,
+          sound: "default",
+          extra: data,
+        },
+      ],
+    });
+  } catch (err) {
+    console.error("[push] foreground local notification error:", err.message);
+  }
 }
 
 /**
