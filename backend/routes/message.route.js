@@ -24,7 +24,8 @@ import {
   getBlockedUsers,
   exportChat,
   getMessageInfo,
-  requestTranscript
+  requestTranscript,
+  getCallHistory
 } from "../controllers/message.controller.js";
 // rate limiting removed: middleware import intentionally omitted
 
@@ -37,6 +38,7 @@ router.get('/info/:id',protectRoute,getMessageInfo)
 router.get('/contact/:id',protectRoute,getContactById)
 router.get('/media/:id',protectRoute,getSharedMedia)
 router.get('/dates/:id',protectRoute,getMessageDates)
+router.get('/call-history', protectRoute, getCallHistory)
 router.get('/:id',protectRoute,getMessages)
 // per-user message send limiter: 20 messages per 10 seconds (cost=1)
 router.post('/send/:id', protectRoute, sendMessage)

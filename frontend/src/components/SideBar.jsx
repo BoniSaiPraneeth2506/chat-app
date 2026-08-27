@@ -360,13 +360,15 @@ import { useChatStore } from "../store/useChatStore";
 import useAuthStore from "../store/useAuthStore";
 import { useGroupStore } from "../store/useGroupStore";
 import SidebarSkeleton from "./skeletons/SidebarSkeleton";
-import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus, Lock } from "lucide-react";
+import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus, Lock, MessageSquare, RefreshCw } from "lucide-react";
 import { useNicknames, displayNameOf } from "../lib/contacts";
 import { formatMessageTime } from "../lib/utils";
 import toast from "react-hot-toast";
 import { haptic } from "../lib/haptics";
 import { useChatLockStore } from "../store/useChatLockStore";
 import LockPasswordPrompt from "./LockPasswordPrompt";
+import UpdatesTab from "./UpdatesTab";
+import { useUpdatesStore } from "../store/useUpdatesStore";
 import { isBiometryAvailable, verifyBiometry, hasStoredLockSecret, readLockSecret } from "../lib/biometrics";
 
 // Mirrors MAX_PINNED_CHATS in backend/controllers/message.controller.js.
@@ -428,6 +430,8 @@ const SideBar = () => {
     subscribeToGroupEvents,
     unsubscribeFromGroupEvents
   } = useGroupStore();
+
+  const activeTab = useUpdatesStore((s) => s.activeTab);
 
   const { onlineUsers, authUser } = useAuthStore();
 
@@ -1023,11 +1027,47 @@ const SideBar = () => {
 
   return (
     <aside
-      className={`flex flex-col h-full transition-all duration-300 border-r border-base-300 bg-base-100 w-full
+      className={`flex flex-col h-full bg-base-100 w-full min-w-0 overflow-hidden border-r border-base-300 lg:border-r-0
         ${selectedUser || selectedGroup ? "hidden lg:flex" : "flex"}
       `}
     >
-      <div className="w-full pt-3 px-4 pb-3.5">
+      {/* Desktop vertical rail + content row. The rail sits on the left edge
+          like WhatsApp; on mobile the tab bar moves to the bottom. */}
+      <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden">
+        {/* Desktop: vertical tab rail on the left edge of the sidebar */}
+        <div className="hidden lg:flex flex-col items-center flex-shrink-0 w-14 py-2 z-10 border-r border-base-300 bg-base-100">
+          {([
+            { id: "chats", Icon: MessageSquare },
+            { id: "updates", Icon: RefreshCw },
+          ]).map((t) => {
+            const isActive = activeTab === t.id;
+            const Icon = t.Icon;
+            return (
+              <button
+                key={t.id}
+                onClick={() => useUpdatesStore.getState().setActiveTab(t.id)}
+                title={t.id === "chats" ? "Chats" : "Updates"}
+                className={`flex items-center justify-center w-11 h-11 rounded-xl transition-colors select-none mx-1 ${
+                  isActive
+                    ? "text-primary bg-base-200"
+                    : "text-base-content/60 hover:text-base-content hover:bg-base-200/70"
+                }`}
+              >
+                <Icon
+                  size={20}
+                  strokeWidth={isActive ? 2.4 : 2}
+                  className={isActive ? "text-primary" : ""}
+                />
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Tab content */}
+        <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
+        {activeTab === "chats" ? (
+          <>
+      <div className="w-full pt-3 px-4 pb-3.5 flex-shrink-0">
         {/* Search Bar & New Group Action */}
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
@@ -1171,6 +1211,37 @@ const SideBar = () => {
             )}
           </>
         )}
+      </div>
+          </>
+          ) : (
+            <UpdatesTab />
+          )}
+        </div>
+      </div>
+
+      {/* Mobile: bottom tab bar (hidden on desktop) */}
+      <div className="flex lg:hidden items-stretch flex-shrink-0 border-t border-base-300 bg-base-100 pb-[env(safe-area-inset-bottom)] z-10">
+        {([
+          { id: "chats", label: "Chats", Icon: MessageSquare },
+          { id: "updates", label: "Updates", Icon: RefreshCw },
+        ]).map((t) => {
+          const isActive = activeTab === t.id;
+          const Icon = t.Icon;
+          return (
+            <button
+              key={t.id}
+              onClick={() => useUpdatesStore.getState().setActiveTab(t.id)}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 transition-colors select-none ${
+                isActive
+                  ? "text-primary"
+                  : "text-base-content/60 hover:text-base-content"
+              }`}
+            >
+              <Icon size={20} strokeWidth={isActive ? 2.4 : 2} />
+              <span className="text-xs font-semibold">{t.label}</span>
+            </button>
+          );
+        })}
       </div>
 
       {lockPrompt && (

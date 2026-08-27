@@ -8,6 +8,7 @@ import messageRoutes from './routes/message.route.js'
 import groupRoutes from './routes/group.route.js'
 import uploadRoutes from './routes/upload.route.js'
 import giphyRoutes from "./routes/giphy.route.js";
+import statusRoutes from "./routes/status.route.js";
 import connectDB from './lib/db.js';
 import path from "path";
 import fs from "fs";
@@ -15,6 +16,7 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors'
 import { app, server } from './lib/socket.js';
 import { startScheduler, startMediaPurge } from './jobs/scheduler.js';
+import { startStatusCleanup } from './jobs/statusCleanup.js';
 import { startEmailDigest } from './jobs/emailDigest.js';
 import { getAllowedOrigins, isOriginAllowed } from './lib/origins.js';
 
@@ -102,6 +104,7 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/giphy', giphyRoutes);
+app.use('/api/status', statusRoutes);
 
 app.get('/', (req, res) => {
   res.send("api is working");
@@ -142,6 +145,8 @@ server.listen(PORT, () => {
   startScheduler();
   // Reclaim Cloudinary storage from expired disappearing messages
   startMediaPurge();
+  // Delete expired statuses and their B2 media
+  startStatusCleanup();
   // Weekly summary and inactivity nudge, allowlisted to named addresses
   startEmailDigest();
 });

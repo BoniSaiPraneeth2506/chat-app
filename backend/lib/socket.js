@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import User from '../models/user.model.js';
 import Message from '../models/message.model.js';
 import Group from '../models/group.model.js';
+import Status from '../models/status.model.js';
 import { isOriginAllowed } from './origins.js';
 import { canDo } from './groupPermissions.js';
 
@@ -555,6 +556,41 @@ io.on("connection", async (socket) => {
                 try { Group.findByIdAndUpdate(groupId, { $set: { 'activeCall.isActive': false, 'activeCall.participants': [] } }).catch(()=>{}); } catch (e) {}
             }
         }
+    });
+
+    // ── Status: viewer opened a status ──────────────────────────────────────
+    socket.on("status:viewing", async ({ statusId }) => {
+        if (!statusId) return;
+        try {
+            const status = await Status.findById(statusId).select("user").lean();
+            if (!status) return;
+            if (status.user.toString() === userId.toString()) return;
+            const ownerSocketId = getReceiverSocketId(status.user.toString());
+            if (ownerSocketId) {
+                io.to(ownerSocketId).emit("status:viewerUpdate", {
+                    statusId,
+                    viewerId: userId,
+                    isLive: true,
+                });
+            }
+        } catch {}
+    });
+
+    socket.on("status:stopViewing", async ({ statusId }) => {
+        if (!statusId) return;
+        try {
+            const status = await Status.findById(statusId).select("user").lean();
+            if (!status) return;
+            if (status.user.toString() === userId.toString()) return;
+            const ownerSocketId = getReceiverSocketId(status.user.toString());
+            if (ownerSocketId) {
+                io.to(ownerSocketId).emit("status:viewerUpdate", {
+                    statusId,
+                    viewerId: userId,
+                    isLive: false,
+                });
+            }
+        } catch {}
     });
 
     // ── Disconnect ──────────────────────────────────────────────────────────

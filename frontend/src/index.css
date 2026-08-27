@@ -235,6 +235,9 @@
 }
 .cg-scroll-x::-webkit-scrollbar { display: none; }
 
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
 @media (prefers-reduced-motion: reduce) {
   .cg-fade, .cg-sheet, .cg-dialog, .cg-switch,
   .cg-step, .cg-step-back, .cg-chip, .cg-check {

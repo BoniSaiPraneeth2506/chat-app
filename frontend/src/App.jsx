@@ -71,6 +71,9 @@ import { useChatLockStore } from './store/useChatLockStore'
 import AboutPage from './pages/AboutPage'
 import GroupCallModal from './components/GroupCallModal'
 import CallModal from './components/CallModal'
+import StatusViewer from './components/StatusViewer'
+import CreateStatusSheet from './components/CreateStatusSheet'
+import StatusViewersSheet from './components/StatusViewersSheet'
 import { useGroupStore } from './store/useGroupStore'
 import { App as CapacitorApp } from '@capacitor/app'
 import OfflineBanner from './components/OfflineBanner'
@@ -706,6 +709,9 @@ const App = () => {
       )}
       <GroupCallModal />
       <OfflineBanner />
+      <StatusViewer />
+      <CreateStatusSheet />
+      <StatusViewersSheet />
     </div>
   );
 };

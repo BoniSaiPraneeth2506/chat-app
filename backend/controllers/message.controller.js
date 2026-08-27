@@ -2068,8 +2068,82 @@ const cancelScheduledMessage = async (req, res) => {
   }
 };
 
+/**
+ * Call history for the Updates tab.
+ *
+ * Every call the signed-in user was part of — as caller or callee in a 1-on-1,
+ * or as a member of a group call — is a Message with isCallLog set. This pulls
+ * the most recent of those across every chat and reports them newest-first,
+ * with enough contact information to render a WhatsApp-style history row.
+ */
+const getCallHistory = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const limit = Math.min(parseInt(req.query.limit) || 100, 200);
+
+    const calls = await Message.find({
+      isCallLog: true,
+      $or: [
+        { senderId: userId, groupId: null, receiverId: { $exists: true } },
+        { receiverId: userId, groupId: null },
+        { groupId: { $exists: true } },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .populate("senderId", "fullName profilePic")
+      .populate("receiverId", "fullName profilePic")
+      .populate("groupId", "name groupPic")
+      .lean();
+
+    const history = calls.map((call) => {
+      let user = null;
+      let isGroup = Boolean(call.groupId);
+
+      if (isGroup) {
+        user = {
+          _id: call.groupId?._id,
+          name: call.groupId?.name || "Group call",
+          picture: call.groupId?.groupPic || "",
+          idType: "group",
+          idValue: call.groupId?._id?.toString(),
+        };
+      } else {
+        const other =
+          String(call.senderId?._id) === String(userId)
+            ? call.receiverId
+            : call.senderId;
+        user = {
+          _id: other?._id,
+          name: other?.fullName || "Unknown",
+          picture: other?.profilePic || "",
+          idType: "user",
+          idValue: other?._id?.toString(),
+        };
+      }
+
+      return {
+        _id: call._id,
+        callType: call.callType || "voice",
+        callStatus: call.callStatus || "completed",
+        callDuration: call.callDuration || 0,
+        createdAt: call.createdAt,
+        isGroup,
+        user,
+        isOutgoing: String(call.senderId?._id) === String(userId),
+      };
+    });
+
+    res.status(200).json(history);
+  } catch (err) {
+    console.error("Error in getCallHistory:", err.message);
+    res.status(500).json({ message: "Failed to fetch call history" });
+  }
+};
+
 export { 
   attachLastMessages,
+  getCallHistory,
   getContactById,
   getSharedMedia,
   getMessageDates,

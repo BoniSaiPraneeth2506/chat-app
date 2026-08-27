@@ -5,9 +5,9 @@ import NoChatSelected from "../components/NoChatSelected";
 import ChatContainer from "../components/ChatContainer";
 import SideBar from "../components/SideBar";
 
-const MIN_SIDEBAR_WIDTH = 260;
-const MAX_SIDEBAR_WIDTH = 520;
-const DEFAULT_SIDEBAR_WIDTH = 340;
+const MIN_SIDEBAR_WIDTH = 300;
+const MAX_SIDEBAR_WIDTH = 600;
+const DEFAULT_SIDEBAR_WIDTH = 420;
 
 const HomePage = () => {
   const { selectedUser, setSelectedUser } = useChatStore();
@@ -27,6 +27,7 @@ const HomePage = () => {
 
   // Resizable sidebar state — desktop only
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
+  const [isDragging, setIsDragging] = useState(false);
   const isDraggingRef = useRef(false);
   const startXRef = useRef(0);
   const startWidthRef = useRef(DEFAULT_SIDEBAR_WIDTH);
@@ -34,6 +35,7 @@ const HomePage = () => {
   const onMouseDown = useCallback(
     (e) => {
       isDraggingRef.current = true;
+      setIsDragging(true);
       startXRef.current = e.clientX;
       startWidthRef.current = sidebarWidth;
       document.body.style.cursor = "col-resize";
@@ -56,6 +58,7 @@ const HomePage = () => {
     const onMouseUp = () => {
       if (!isDraggingRef.current) return;
       isDraggingRef.current = false;
+      setIsDragging(false);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
@@ -105,26 +108,29 @@ const HomePage = () => {
 
             {/* ── Sidebar ── renders ONCE; hides on mobile when chat is open */}
             <div
-              className={`h-full flex-shrink-0 ${hasActiveChat ? "hidden lg:block" : ""}`}
+              className={`h-full flex-shrink-0 min-w-0 overflow-hidden ${hasActiveChat ? "hidden lg:block" : ""}`}
               style={isDesktop ? { width: sidebarWidth } : { width: "100%" }}
             >
               <SideBar />
             </div>
 
-            {/* ── Drag handle (desktop only) ── */}
+            {/* ── Drag handle / Divider (desktop only) ── */}
             {isDesktop && (
               <div
                 onMouseDown={onMouseDown}
-                className="h-full w-[5px] cursor-col-resize flex-shrink-0 flex items-center justify-center group relative z-10"
-                title="Drag to resize"
+                className={`group relative w-[1px] flex-shrink-0 z-20 cursor-col-resize select-none transition-colors ${
+                  isDragging ? "bg-primary" : "bg-base-300 hover:bg-primary/70"
+                }`}
+                title="Drag to resize sidebar"
               >
-                <div className="w-[2px] h-full bg-base-300 group-hover:bg-primary/60 transition-colors duration-150" />
+                {/* 12px wide invisible hit area centered on divider line */}
+                <div className="absolute inset-y-0 -left-1.5 -right-1.5 w-3 cursor-col-resize z-20" />
               </div>
             )}
 
             {/* ── Chat area: desktop always, mobile only when chat is selected ── */}
             {(isDesktop || hasActiveChat) && (
-              <div className="flex flex-1 h-full min-w-0">
+              <div className="flex flex-1 h-full min-w-0 overflow-hidden">
                 {!hasActiveChat ? <NoChatSelected /> : <ChatContainer />}
               </div>
             )}
