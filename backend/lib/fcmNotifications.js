@@ -223,7 +223,11 @@ async function pruneInvalidTokens(userId, tokens, responses) {
  */
 export async function pushDmNotification({ recipientUser, sender, message, type }) {
   if (!recipientUser?._id) return;
-  const conversationId = recipientUser._id;
+  // For DMs the "conversation" is identified by the partner's user id. That is
+  // what the recipient's device reports as its active conversation (suppression
+  // check), and it is also what a tap must open — NOT the recipient's own id,
+  // which would route a tap to a self-chat that the app rejects.
+  const conversationId = sender?._id || recipientUser._id;
   try {
     await sendPushNotification({
       recipient: recipientUser,

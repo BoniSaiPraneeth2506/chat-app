@@ -340,11 +340,19 @@ const App = () => {
   }, [authUser, handlePushTap]);
 
   // Tell the server which conversation is open so it can skip redundant pushes.
-  // `socket` is in the dep array so this re-fires when the socket (re)connects.
+  // A conversation only counts as "active" while actually on the chat screen
+  // with it open. Navigating anywhere else in the app (profile, settings, chat
+  // list with nothing open) reports nothing, so an incoming message still raises
+  // a notification there instead of being swallowed by a stale active id.
+  // `socket` and the location are in the deps so this re-fires on (re)connect
+  // and when the user leaves the chat screen.
   useEffect(() => {
-    const openId = selectedUser?._id || selectedGroup?._id || null;
+    const isOnChatScreen = !location || location.pathname === "/";
+    const openId = isOnChatScreen
+      ? selectedUser?._id || selectedGroup?._id || null
+      : null;
     reportActiveConversation(openId, socket);
-  }, [selectedUser?._id, selectedGroup?._id, socket]);
+  }, [selectedUser?._id, selectedGroup?._id, socket, location?.pathname]);
 
   // Global keyboard shortcuts (desktop only)
   useEffect(() => {
