@@ -26,3 +26,10 @@ dist-ssr
 .env
 # Local email previews from scripts/digest.js --preview
 .email-preview/
+
+# Firebase Admin service-account keys (contain the private key — never commit).
+# They are loaded via env vars / Render secrets, not from these files.
+backend/firebase-service-account.json
+*firebase-adminsdk*.json
+*-firebase-adminsdk*.json
+

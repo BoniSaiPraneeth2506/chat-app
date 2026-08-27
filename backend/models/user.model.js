@@ -291,6 +291,30 @@ const userSchema=new mongoose.Schema({
         type:Map,
         of:Boolean,
         default:new Map()
+    },
+    // ── Push-notification preferences ────────────────────────────────────────────
+    // Global switch for incoming FCM pushes. Per-conversation overrides (mute)
+    // are held separately below so a single toggle here can silence everything
+    // while still allowing individual chats to be unmuted.
+    notificationPrefs:{
+        type:new mongoose.Schema({
+            pushEnabled:{ type:Boolean, default:true }
+        },{ _id:false }),
+        default:{ pushEnabled:true }
+    },
+    // Per-contact mute: keyed by the other user's id. When true, the server
+    // suppresses push notifications for new messages from that contact.
+    mutedChats:{
+        type:Map,
+        of:Boolean,
+        default:new Map()
+    },
+    // Per-group mute: keyed by the group id. When true, the server suppresses
+    // push notifications for new messages in that group (mentions still fire).
+    mutedGroups:{
+        type:Map,
+        of:Boolean,
+        default:new Map()
     }
 },{timestamps:true}
 )

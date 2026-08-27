@@ -5,6 +5,7 @@ import { io } from 'socket.io-client';
 import { isNetworkError, subscribeOnlineStatus } from '../lib/network.js';
 import { deleteUserDb } from '../lib/db.js';
 import { rememberAccount, forgetAccount, getAccountToken, listAccounts } from '../lib/accounts.js';
+import { removeDeviceToken } from '../lib/pushNotifications.js';
 
 const BASE_URL = import.meta.env.VITE_API_URL
   ? import.meta.env.VITE_API_URL.replace(/\/api$/, "")
@@ -186,6 +187,7 @@ const useAuthStore=create((set,get)=>({
             persistAuthSnapshot(null);
             if(currentUser){ deleteUserDb(currentUser._id); forgetAccount(currentUser._id); }
             get().disconnectSocket();
+            removeDeviceToken();
             set({authUser:null,sessions:[],onlineUsers:[],savedAccounts:listAccounts()});
             toast.success("Your account has been deleted");
             return true;
@@ -291,6 +293,7 @@ const useAuthStore=create((set,get)=>({
             if(currentUser){ deleteUserDb(currentUser._id); forgetAccount(currentUser._id); }
             get().disconnectSocket();
             await resetPerAccountState();
+            removeDeviceToken();
 
             const remaining=listAccounts();
             set({authUser:null,onlineUsers:[],sessions:[],savedAccounts:remaining});

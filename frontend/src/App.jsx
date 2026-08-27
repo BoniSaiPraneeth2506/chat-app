@@ -77,6 +77,7 @@ import StatusViewersSheet from './components/StatusViewersSheet'
 import { useGroupStore } from './store/useGroupStore'
 import { App as CapacitorApp } from '@capacitor/app'
 import OfflineBanner from './components/OfflineBanner'
+import { initPushListeners, initPushRegistration, reportActiveConversation } from './lib/pushNotifications'
 
 const PENDING_CHAT_KEY = "pendingChatUserId";
 
@@ -279,6 +280,54 @@ const App = () => {
       };
     }
   }, [authUserId, socket, subscribeToMessages, unsubscribeFromMessages]);
+
+  // ── Push notifications (Android / FCM) ─────────────────────────────────────
+  // A notification tap routes to the exact conversation. DMs reuse the existing
+  // deep-link route (it hands off through setSelectedUser); groups are opened
+  // directly by id since no `/chat-with/` route exists for them.
+  const handlePushTap = React.useCallback((data) => {
+    const type = data?.type;
+    const conversationId = data?.conversationId;
+    if (!conversationId) return;
+
+    if (type === "group_message" || type === "mention") {
+      const groupStore = useGroupStore.getState();
+      const existing =
+        groupStore.groups?.find((g) => String(g._id) === String(conversationId)) ||
+        groupStore.selectedGroup;
+      if (existing) {
+        groupStore.setSelectedGroup(existing);
+        navigate("/");
+      } else {
+        groupStore.getGroups().finally(() => {
+          const fresh = useGroupStore.getState().groups?.find(
+            (g) => String(g._id) === String(conversationId)
+          );
+          if (fresh) {
+            useGroupStore.getState().setSelectedGroup(fresh);
+            navigate("/");
+          }
+        });
+      }
+    } else {
+      navigate(`/chat-with/${conversationId}`);
+    }
+  }, [navigate]);
+
+  // Install the FCM native listeners once and turn on push when signed in.
+  useEffect(() => {
+    initPushListeners(handlePushTap);
+    if (authUser) {
+      initPushRegistration();
+    }
+  }, [authUser, handlePushTap]);
+
+  // Tell the server which conversation is open so it can skip redundant pushes.
+  // `socket` is in the dep array so this re-fires when the socket (re)connects.
+  useEffect(() => {
+    const openId = selectedUser?._id || selectedGroup?._id || null;
+    reportActiveConversation(openId, socket);
+  }, [selectedUser?._id, selectedGroup?._id, socket]);
 
   // Global keyboard shortcuts (desktop only)
   useEffect(() => {

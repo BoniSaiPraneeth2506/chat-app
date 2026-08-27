@@ -6,6 +6,7 @@ import cloudinary from "../lib/cloudinary.js";
 import { io, getReceiverSocketId } from "../lib/socket.js";
 import { hideAnonymousAuthor } from "../lib/anonymity.js";
 import { isGiphyMediaUrl } from "../lib/giphy.js";
+import { pushGroupNotification } from "../lib/fcmNotifications.js";
 import {
   verifyAttachment,
   publicUrlForKey,
@@ -832,6 +833,18 @@ export const sendGroupMessage = async (req, res) => {
       ...hideAnonymousAuthor(populatedMessage),
       clientId: clientId || null,
     });
+
+    // Android push fallback: notify each member's registered devices. The
+    // sender's own devices are excluded, and members who were @mentioned get a
+    // mention notification regardless of a group mute. Best-effort; never
+    // blocks the already-broadcast message or the HTTP response.
+    pushGroupNotification({
+      group,
+      sender: { _id: senderId, fullName: req.user?.fullName },
+      senderName: req.user?.fullName || "ChatApp",
+      message: populatedMessage,
+      mentions: validMentions,
+    }).catch(() => {});
 
     res.status(201).json(hideAnonymousAuthor(populatedMessage, senderId));
   } catch (error) {

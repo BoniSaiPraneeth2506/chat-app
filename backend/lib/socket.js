@@ -69,6 +69,30 @@ export function getReceiverSocketId(userId) {
 
 export const roomForUser = (userId) => `user_${userId}`;
 
+/** True if the user currently has at least one live socket (is online). */
+export function isUserOnline(userId) {
+    const sockets = userSocketMap.get(String(userId));
+    return Boolean(sockets && sockets.size > 0);
+}
+
+// whether the user is actively viewing / has that conversation on screen.
+// Returns true when ANY of the user's connected devices reports that
+// conversation as its open one — the push layer uses this to avoid raising a
+// redundant notification on a device that is already showing the message.
+export function isUserViewingConversation(userId, conversationId) {
+    if (!userId || !conversationId) return false;
+    const sockets = userSocketMap.get(String(userId));
+    if (!sockets || sockets.size === 0) return false;
+    const target = String(conversationId);
+    for (const socketId of sockets) {
+        const sock = io.sockets.sockets.get(socketId);
+        if (sock && sock.activeConversationId && String(sock.activeConversationId) === target) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // userId -> Set of that user's live socket ids. It was a single socket id, and a
 // second device replaced the first, so two devices could never be online at once
 // and nothing could be delivered to more than one of them.
@@ -591,6 +615,14 @@ io.on("connection", async (socket) => {
                 });
             }
         } catch {}
+    });
+
+    // ── Event: activeConversation ──────────────────────────────────────────
+    // The mobile app reports which conversation (DM user id or group id) is
+    // open on this device, so the push layer can tell that a device is already
+    // showing a conversation and skip an otherwise-redundant notification.
+    socket.on("activeConversation", ({ conversationId }) => {
+        socket.activeConversationId = conversationId ? String(conversationId) : null;
     });
 
     // ── Disconnect ──────────────────────────────────────────────────────────

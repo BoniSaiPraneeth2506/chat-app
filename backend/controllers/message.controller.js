@@ -81,6 +81,7 @@ import {
   safeDisplayName,
   MAX_ATTACHMENTS_PER_MESSAGE,
 } from "../lib/attachments.js";
+import { pushDmNotification } from "../lib/fcmNotifications.js";
 
 // ── Security Helpers ──────────────────────────────────────────────────────────
 
@@ -940,6 +941,17 @@ const sendMessage = async (req, res) => {
     const senderRoom = getReceiverSocketId(senderId);
     if (senderRoom) rooms.add(senderRoom);
     if (rooms.size > 0) io.to([...rooms]).emit("newMessage", payload);
+
+    // Android push fallback: notify the recipient's registered devices when
+    // they aren't already viewing this exact conversation. The service is a
+    // best-effort no-op if Firebase is unconfigured or the user has muted /
+    // opted out — it never blocks the message that was already delivered.
+    pushDmNotification({
+      recipientUser: recipient,
+      sender,
+      message: newMessage,
+      type: newMessage.replyTo ? "reply" : "chat_message",
+    }).catch(() => {});
 
     res.status(201).json(newMessage);
 
