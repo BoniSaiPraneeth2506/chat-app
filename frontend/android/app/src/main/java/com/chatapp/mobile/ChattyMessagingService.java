@@ -6,6 +6,7 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
+import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import com.capacitorjs.plugins.pushnotifications.PushNotificationsPlugin;
 import com.google.firebase.messaging.FirebaseMessagingService;
@@ -52,9 +53,14 @@ public class ChattyMessagingService extends FirebaseMessagingService {
         appForeground = foreground;
     }
 
+    private static final String TAG = "ChattyPush";
+
     @Override
     public void onMessageReceived(RemoteMessage remoteMessage) {
         super.onMessageReceived(remoteMessage);
+        Log.i(TAG, "onMessageReceived foreground=" + appForeground
+            + " type=" + remoteMessage.getData().get("type")
+            + " conversation=" + remoteMessage.getData().get("conversationId"));
 
         // Foreground → let Capacitor's normal path fire pushNotificationReceived so
         // the existing web listener (which re-shows a tappable local notification)
