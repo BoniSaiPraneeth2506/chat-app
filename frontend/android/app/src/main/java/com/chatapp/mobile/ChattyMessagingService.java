@@ -140,9 +140,10 @@ public class ChattyMessagingService extends FirebaseMessagingService {
         inbox.setSummaryText(count + " new messages");
 
         int summaryId = stableId(conversationId);
-        // Collapsed card shows the LATEST message (WhatsApp-style), with the total
-        // as the setNumber badge and the full list available on expansion.
-        String collapsedText = lines.isEmpty() ? "New message" : lines.get(lines.size() - 1);
+        // Collapsed card shows the COUNT with the stacked/down-arrow group icon
+        // (standard Android grouped style); the full unread list is revealed by
+        // tapping the down-arrow to expand the group.
+        String collapsedText = count > 0 ? count + " new message" + (count == 1 ? "" : "s") : "New message";
         NotificationCompat.Builder summary = new NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
