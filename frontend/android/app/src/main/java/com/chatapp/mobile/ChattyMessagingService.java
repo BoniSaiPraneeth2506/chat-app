@@ -32,10 +32,6 @@ import java.util.List;
  */
 public class ChattyMessagingService extends FirebaseMessagingService {
 
-    // How many per-message child rows to keep/render; older ones are dropped so
-    // the group never grows unbounded.
-    private static final int MAX_CHILDREN = 5;
-
     // Set by MainActivity so the service knows whether the app is on screen.
     private static volatile boolean appForeground = false;
 
@@ -101,60 +97,36 @@ public class ChattyMessagingService extends FirebaseMessagingService {
 
         // The backend sends a fully-aggregated multi-line body per push: one line
         // per unseen message plus a trailing "N new messages" count. We render
-        // that list directly and REPLACE the conversation's group on every push
-        // (no accumulation), so the card always reflects the authoritative set of
-        // unseen messages — badge count, expandable list and collapsed preview.
+        // that list as a single InboxStyle notification and REPLACE it on every
+        // push (no accumulation), so the card always reflects the authoritative set
+        // of unseen messages.
         ParsedBody parsed = parseBody(body);
         List<String> lines = parsed.lines;
         int count = parsed.count;
+        String latest = lines.isEmpty() ? "New message" : lines.get(lines.size() - 1);
 
-        // Group key shared by summary + children (this is what makes them collapse).
-        String group = "conv_" + conversationId;
         // Content intent: opens the conversation and preserves Capacitor tap routing.
         PendingIntent contentIntent = buildContentIntent(msg);
 
-        // Drop any children this conversation posted previously so a fresh push
-        // with a different number of rows never leaves stale ones behind.
-        for (int i = 0; i < MAX_CHILDREN; i++) {
-            nm.cancel(group, stableId(conversationId + ":" + i));
-        }
-
-        // One child per message row, revealed when the group card is expanded.
-        for (int i = 0; i < lines.size(); i++) {
-            int childId = stableId(conversationId + ":" + i);
-            NotificationCompat.Builder child = new NotificationCompat.Builder(this, channelId)
-                .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentTitle(title)
-                .setContentText(lines.get(i))
-                .setGroup(group)
-                .setAutoCancel(true)
-                .setContentIntent(contentIntent);
-            nm.notify(group, childId, child.build());
-        }
-
-        // The collapsed card: stacked small icon + count + InboxStyle list.
+        // One per-conversation card: collapsed shows the LATEST message + count
+        // badge + down-arrow; expanding reveals the full unread list. Using a
+        // single InboxStyle notification (not separate child notifications) keeps
+        // the shade clean and the tap-focus reliable.
         NotificationCompat.InboxStyle inbox = new NotificationCompat.InboxStyle();
-        for (String line : lines) {
-            inbox.addLine(line);
-        }
+        for (String line : lines) inbox.addLine(line);
+        if (count > lines.size()) inbox.addLine(count + " new messages");
         inbox.setSummaryText(count + " new messages");
 
         int summaryId = stableId(conversationId);
-        // Collapsed card shows the COUNT with the stacked/down-arrow group icon
-        // (standard Android grouped style); the full unread list is revealed by
-        // tapping the down-arrow to expand the group.
-        String collapsedText = count > 0 ? count + " new message" + (count == 1 ? "" : "s") : "New message";
         NotificationCompat.Builder summary = new NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
-            .setContentText(collapsedText)
-            .setGroup(group)
-            .setGroupSummary(true)
+            .setContentText(latest)
             .setNumber(count)
             .setStyle(inbox)
             .setAutoCancel(true)
             .setContentIntent(contentIntent);
-        nm.notify(group, summaryId, summary.build());
+        nm.notify(summaryId, summary.build());
     }
 
     // Splits a backend body into message lines and a count. The count comes from
@@ -204,11 +176,7 @@ public class ChattyMessagingService extends FirebaseMessagingService {
     public static void clearConversation(Context context, String conversationId) {
         if (conversationId == null || context == null) return;
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        String group = "conv_" + conversationId;
-        for (int i = 0; i < MAX_CHILDREN; i++) {
-            nm.cancel(group, stableId(conversationId + ":" + i));
-        }
-        nm.cancel(group, stableId(conversationId));
+        nm.cancel(stableId(conversationId));
     }
 
     private static int stableId(String key) {
