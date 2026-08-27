@@ -95,22 +95,24 @@ const StatusRow = () => {
             <button
               key={group.user?._id}
               onClick={() => handleOtherStatusClick(group)}
-              className="flex flex-col items-center gap-1 flex-shrink-0"
+              className="flex flex-col items-center gap-1 flex-shrink-0 group/status"
             >
               <div
-                className={`rounded-full p-[2.5px] ${
-                  hasUnseen ? "bg-primary" : "bg-base-300"
+                className={`rounded-full transition-all ${
+                  hasUnseen
+                    ? "p-[2.5px] bg-primary shadow-sm shadow-primary/20"
+                    : "p-[2px] bg-base-content/25 opacity-80"
                 }`}
               >
                 <div className="rounded-full bg-base-100 p-[2px]">
                   <img
                     src={group.user?.profilePic || "/avatar.png"}
                     alt={group.user?.fullName}
-                    className="rounded-full size-12 object-cover"
+                    className="rounded-full size-12 object-cover transition-transform group-hover/status:scale-105"
                   />
                 </div>
               </div>
-              <span className="text-[10px] t-dim max-w-[56px] truncate text-center">
+              <span className={`text-[10px] max-w-[56px] truncate text-center ${hasUnseen ? "font-semibold text-base-content" : "t-dim"}`}>
                 {group.user?.fullName?.split(" ")[0] || "User"}
               </span>
             </button>

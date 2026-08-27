@@ -92,15 +92,27 @@ const StatusViewersSheet = () => {
                 key={viewer._id}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-base-200/60 transition-colors"
               >
-                <img
-                  src={viewer.profilePic || "/avatar.png"}
-                  alt={viewer.fullName}
-                  className="size-10 rounded-full object-cover flex-shrink-0"
-                />
+                <div className="relative flex-shrink-0">
+                  <img
+                    src={viewer.profilePic || "/avatar.png"}
+                    alt={viewer.fullName}
+                    className="size-10 rounded-full object-cover"
+                  />
+                  {viewer.reaction && (
+                    <span className="absolute -bottom-1 -right-1 text-xs bg-base-100 rounded-full shadow-sm px-1 py-0.5 border border-base-300">
+                      {viewer.reaction}
+                    </span>
+                  )}
+                </div>
                 <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium text-base-content block truncate">
-                    {viewer.fullName}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-medium text-base-content truncate">
+                      {viewer.fullName}
+                    </span>
+                    {viewer.reaction && (
+                      <span className="text-sm">{viewer.reaction}</span>
+                    )}
+                  </div>
                 </div>
                 <span className="text-[11px] t-dim flex-shrink-0">
                   {formatTimeAgo(viewer.viewedAt)}

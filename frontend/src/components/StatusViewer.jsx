@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useStatusStore } from "../store/useStatusStore";
 import useAuthStore from "../store/useAuthStore";
-import { X, Eye, ChevronLeft, ChevronRight, Trash2, Pause, Play } from "lucide-react";
+import { X, Eye, ChevronLeft, ChevronRight, Trash2, Pause, Play, Send, Heart, Smile, ArrowLeft } from "lucide-react";
 import { haptic } from "../lib/haptics";
 import toast from "react-hot-toast";
 
 const STATUS_IMAGE_DURATION_MS = 5000;
+const QUICK_EMOJIS = ["😍", "😂", "😮", "😢", "🙏", "🔥", "👏", "❤️"];
 
 function formatTimeAgo(dateStr) {
   if (!dateStr) return "";
@@ -31,23 +32,63 @@ const StatusViewer = () => {
   const setViewingMediaUrl = useStatusStore((s) => s.setViewingMediaUrl);
   const openViewersSheet = useStatusStore((s) => s.openViewersSheet);
   const deleteStatus = useStatusStore((s) => s.deleteStatus);
+  const reactToStatus = useStatusStore((s) => s.reactToStatus);
 
   const authUser = useAuthStore((s) => s.authUser);
   const socket = useAuthStore((s) => s.socket);
 
-  const [mediaUrl, setMediaUrl] = useState("");
-  const [loading, setLoading] = useState(true);
+  const currentStatus = viewingStatusGroup?.statuses?.[viewingIndex];
+  const isOwn = viewingStatusGroup?.isOwn;
+  const isVideo = currentStatus?.media?.type === "video";
+
+  const isLikedByMe = Boolean(
+    currentStatus?.viewers?.some(
+      (v) =>
+        (v.user?._id || v.user)?.toString() === authUser?._id?.toString() &&
+        (v.reaction === "❤️" || v.reaction === "😍" || v.reaction === "like")
+    )
+  );
+
+  const [mediaUrl, setMediaUrl] = useState(() => currentStatus?.media?.url || "");
+  const [loading, setLoading] = useState(() => !currentStatus?.media?.url);
   const [progress, setProgress] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [showControls, setShowControls] = useState(true);
+  const [replyText, setReplyText] = useState("");
+  const [isTypingReply, setIsTypingReply] = useState(false);
+  const [flyingEmoji, setFlyingEmoji] = useState(null);
+
   const videoRef = useRef(null);
   const timerRef = useRef(null);
   const startTimeRef = useRef(null);
   const controlsTimerRef = useRef(null);
+  const replyInputRef = useRef(null);
+  const popstateClosedRef = useRef(false);
 
-  const currentStatus = viewingStatusGroup?.statuses?.[viewingIndex];
-  const isOwn = viewingStatusGroup?.isOwn;
-  const isVideo = currentStatus?.media?.type === "video";
+  // Mobile Android back gesture / button router support: push history on open, close viewer on popstate
+  useEffect(() => {
+    if (isOpen) {
+      window.history.pushState({ statusViewerOpen: true }, "");
+      const handlePopState = () => {
+        popstateClosedRef.current = true;
+        closeViewer();
+      };
+      window.addEventListener("popstate", handlePopState);
+      return () => {
+        window.removeEventListener("popstate", handlePopState);
+      };
+    } else {
+      if (!popstateClosedRef.current && window.history.state?.statusViewerOpen) {
+        window.history.back();
+      }
+      popstateClosedRef.current = false;
+    }
+  }, [isOpen, closeViewer]);
+
+  const handleBack = useCallback(() => {
+    haptic("tap");
+    closeViewer();
+  }, [closeViewer]);
 
   const fetchMediaUrlSafe = useCallback(
     async (statusId) => {
@@ -69,9 +110,15 @@ const StatusViewer = () => {
 
   const loadMedia = useCallback(async () => {
     if (!currentStatus?._id) return;
+    if (currentStatus.media?.url) {
+      setMediaUrl(currentStatus.media.url);
+      setViewingMediaUrl(currentStatus.media.url);
+      setLoading(false);
+      setProgress(0);
+      return;
+    }
     setLoading(true);
     setProgress(0);
-    setIsPaused(false);
     try {
       const url = await fetchMediaUrlSafe(currentStatus._id);
       setMediaUrl(url);
@@ -81,7 +128,7 @@ const StatusViewer = () => {
     } finally {
       setLoading(false);
     }
-  }, [currentStatus?._id, fetchMediaUrlSafe, setViewingMediaUrl]);
+  }, [currentStatus, fetchMediaUrlSafe, setViewingMediaUrl]);
 
   const handleVideoProgress = useCallback(() => {
     const video = videoRef.current;
@@ -106,14 +153,16 @@ const StatusViewer = () => {
   }, [isPaused, isVideo]);
 
   const handleTapLeft = useCallback(() => {
+    if (isTypingReply) return;
     haptic("tap");
     prevStatus();
-  }, [prevStatus]);
+  }, [prevStatus, isTypingReply]);
 
   const handleTapRight = useCallback(() => {
+    if (isTypingReply) return;
     haptic("tap");
     nextStatus();
-  }, [nextStatus]);
+  }, [nextStatus, isTypingReply]);
 
   const handleDelete = useCallback(async () => {
     if (!currentStatus?._id) return;
@@ -131,10 +180,58 @@ const StatusViewer = () => {
     }
   }, [currentStatus?._id, deleteStatus, closeViewer]);
 
+  const handleToggleLike = async () => {
+    if (!currentStatus?._id) return;
+    haptic("tap");
+    const willLike = !isLikedByMe;
+    if (willLike) {
+      setFlyingEmoji("❤️");
+      setTimeout(() => setFlyingEmoji(null), 1200);
+    }
+    try {
+      await reactToStatus(currentStatus._id, {
+        reaction: willLike ? "❤️" : "",
+        isLikeToggle: true,
+      });
+      toast.success(willLike ? "Liked status ❤️" : "Unliked status");
+    } catch (err) {
+      toast.error("Failed to update like");
+    }
+  };
+
+  const handleSendReaction = async (emoji) => {
+    if (!currentStatus?._id) return;
+    haptic("success");
+    setFlyingEmoji(emoji);
+    setTimeout(() => setFlyingEmoji(null), 1200);
+    try {
+      await reactToStatus(currentStatus._id, { reaction: emoji, isLikeToggle: false });
+      toast.success(`Sent ${emoji} to chat`);
+    } catch (err) {
+      toast.error("Failed to send reaction");
+    }
+  };
+
+  const handleSendReply = async (e) => {
+    if (e) e.preventDefault();
+    if (!replyText.trim() || !currentStatus?._id) return;
+    const textToSend = replyText.trim();
+    setReplyText("");
+    setIsTypingReply(false);
+    setIsPaused(false);
+    haptic("success");
+    try {
+      await reactToStatus(currentStatus._id, { text: textToSend, isLikeToggle: false });
+      toast.success("Reply sent to chat");
+    } catch (err) {
+      toast.error("Failed to send reply");
+    }
+  };
+
   const handleInteraction = useCallback(() => {
     setShowControls(true);
     if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-    controlsTimerRef.current = setTimeout(() => setShowControls(false), 3000);
+    controlsTimerRef.current = setTimeout(() => setShowControls(false), 3500);
   }, []);
 
   useEffect(() => {
@@ -184,7 +281,7 @@ const StatusViewer = () => {
   }, [socket, closeViewer]);
 
   useEffect(() => {
-    if (!isOpen || loading || !mediaUrl || isVideo) return;
+    if (!isOpen || loading || !mediaUrl || isVideo || isPaused || isTypingReply) return;
     clearTimers();
     startTimeRef.current = Date.now();
     const total = STATUS_IMAGE_DURATION_MS;
@@ -200,12 +297,12 @@ const StatusViewer = () => {
     };
     timerRef.current = requestAnimationFrame(tick);
     return () => clearTimers();
-  }, [isOpen, loading, mediaUrl, isVideo, viewingIndex, nextStatus, clearTimers]);
+  }, [isOpen, loading, mediaUrl, isVideo, viewingIndex, isPaused, isTypingReply, nextStatus, clearTimers]);
 
   useEffect(() => {
     if (showControls) {
       if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-      controlsTimerRef.current = setTimeout(() => setShowControls(false), 3000);
+      controlsTimerRef.current = setTimeout(() => setShowControls(false), 3500);
     }
     return () => {
       if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
@@ -214,7 +311,7 @@ const StatusViewer = () => {
 
   useEffect(() => {
     const onKey = (e) => {
-      if (!isOpen) return;
+      if (!isOpen || isTypingReply) return;
       if (e.key === "ArrowRight") handleTapRight();
       if (e.key === "ArrowLeft") handleTapLeft();
       if (e.key === "Escape") closeViewer();
@@ -225,7 +322,7 @@ const StatusViewer = () => {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isOpen, handleTapRight, handleTapLeft, closeViewer, togglePause]);
+  }, [isOpen, isTypingReply, handleTapRight, handleTapLeft, closeViewer, togglePause]);
 
   if (!isOpen || !viewingStatusGroup || !currentStatus) return null;
 
@@ -234,7 +331,7 @@ const StatusViewer = () => {
 
   return (
     <div
-      className="fixed inset-0 z-[130] bg-black flex flex-col animate-in fade-in duration-150"
+      className="fixed inset-0 z-[130] bg-black flex flex-col animate-in fade-in duration-150 select-none"
       onClick={handleInteraction}
     >
       {/* Progress bars */}
@@ -261,66 +358,70 @@ const StatusViewer = () => {
         ))}
       </div>
 
-      {/* Header */}
+      {/* Top Header */}
       <div
-        className={`absolute top-0 left-0 right-0 z-20 px-4 pt-5 pb-3 bg-gradient-to-b from-black/60 to-transparent transition-opacity duration-200 ${
-          showControls ? "opacity-100" : "opacity-0"
+        className={`absolute top-0 left-0 right-0 z-20 px-3 pt-4 pb-3 bg-gradient-to-b from-black/75 via-black/40 to-transparent transition-opacity duration-200 ${
+          showControls ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
       >
-        <div className="flex items-center gap-3">
-          <img
-            src={viewingStatusGroup.user?.profilePic || "/avatar.png"}
-            alt=""
-            className="size-9 rounded-full object-cover ring-2 ring-white/20"
-          />
-          <div className="flex-1 min-w-0">
-            <span className="text-sm font-semibold text-white truncate block">
-              {viewingStatusGroup.user?.fullName || "User"}
-            </span>
-            <span className="text-[10px] text-white/60">
-              {formatTimeAgo(currentStatus.createdAt)}
-            </span>
-          </div>
-          {isOwn && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                openViewersSheet(currentStatus._id);
-              }}
-              className="flex items-center gap-1 px-2 py-1 rounded-full bg-white/10 text-white/80 hover:bg-white/20 transition-colors"
-            >
-              <Eye size={14} />
-              <span className="text-xs">
-                {currentStatus.viewers?.length || 0}
-              </span>
-            </button>
-          )}
-          {isOwn && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleDelete();
-              }}
-              className="p-1.5 rounded-full bg-white/10 text-white/80 hover:bg-white/20 transition-colors"
-            >
-              <Trash2 size={14} />
-            </button>
-          )}
+        <div className="flex items-center gap-2.5">
+          {/* Top Left Back Button (WhatsApp Style) */}
           <button
             onClick={(e) => {
               e.stopPropagation();
-              closeViewer();
+              handleBack();
             }}
-            className="p-1.5 rounded-full bg-white/10 text-white/80 hover:bg-white/20 transition-colors"
+            title="Back"
+            className="p-2 -ml-1 rounded-full text-white/95 hover:bg-white/20 active:scale-95 transition-all"
           >
-            <X size={16} />
+            <ArrowLeft size={22} strokeWidth={2.4} />
           </button>
+
+          <img
+            src={viewingStatusGroup.user?.profilePic || "/avatar.png"}
+            alt=""
+            className="size-9 rounded-full object-cover ring-2 ring-white/25 flex-shrink-0"
+          />
+          <div className="flex-1 min-w-0 text-left">
+            <span className="text-sm font-semibold text-white truncate block">
+              {isOwn ? "My status" : (viewingStatusGroup.user?.fullName || "User")}
+            </span>
+            <span className="text-[10px] text-white/70 block">
+              {formatTimeAgo(currentStatus.createdAt)}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {isOwn && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDelete();
+                }}
+                title="Delete status"
+                className="p-2 rounded-full bg-white/10 text-white/80 hover:bg-red-500 hover:text-white transition-colors"
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
+
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleBack();
+              }}
+              title="Close"
+              className="p-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 transition-colors"
+            >
+              <X size={17} />
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Media */}
-      <div className="flex-1 flex items-center justify-center relative">
-        {loading ? (
+      {/* Main Media Display Area */}
+      <div className="flex-1 flex items-center justify-center relative overflow-hidden">
+        {loading && !mediaUrl ? (
           <div className="flex flex-col items-center gap-3">
             <span className="loading loading-spinner loading-lg text-white" />
             <span className="text-sm text-white/60">Loading...</span>
@@ -330,7 +431,7 @@ const StatusViewer = () => {
             <video
               ref={videoRef}
               src={mediaUrl}
-              className="w-full h-full object-contain"
+              className="w-full h-full object-contain pointer-events-auto"
               autoPlay
               playsInline
               onTimeUpdate={handleVideoProgress}
@@ -359,22 +460,29 @@ const StatusViewer = () => {
                 e.stopPropagation();
                 handleTapLeft();
               }}
-              className="absolute left-0 top-0 bottom-0 w-1/3 z-10"
+              className="absolute left-0 top-0 bottom-24 w-1/3 z-10 cursor-pointer"
             />
             <div
               onClick={(e) => {
                 e.stopPropagation();
                 handleTapRight();
               }}
-              className="absolute right-0 top-0 bottom-0 w-1/3 z-10"
+              className="absolute right-0 top-0 bottom-24 w-1/3 z-10 cursor-pointer"
             />
           </>
+        )}
+
+        {/* Floating flying emoji reaction animation */}
+        {flyingEmoji && (
+          <div className="absolute bottom-24 inset-x-0 flex justify-center z-30 pointer-events-none animate-bounce text-6xl drop-shadow-2xl">
+            {flyingEmoji}
+          </div>
         )}
 
         {/* Pause indicator */}
         {isPaused && isVideo && (
           <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-            <div className="p-4 rounded-full bg-black/30">
+            <div className="p-4 rounded-full bg-black/40 backdrop-blur-sm">
               <Play size={32} className="text-white" fill="white" />
             </div>
           </div>
@@ -387,11 +495,11 @@ const StatusViewer = () => {
               e.stopPropagation();
               handleTapLeft();
             }}
-            className={`absolute left-2 top-1/2 -translate-y-1/2 z-10 p-2 rounded-full bg-black/30 text-white hover:bg-black/50 transition-all ${
+            className={`absolute left-4 top-1/2 -translate-y-1/2 z-20 p-2.5 rounded-full bg-black/40 text-white hover:bg-black/70 transition-all ${
               showControls ? "opacity-100" : "opacity-0"
             } hidden sm:flex`}
           >
-            <ChevronLeft size={20} />
+            <ChevronLeft size={22} />
           </button>
         )}
         {viewingIndex < statusCount - 1 && (
@@ -400,21 +508,113 @@ const StatusViewer = () => {
               e.stopPropagation();
               handleTapRight();
             }}
-            className={`absolute right-2 top-1/2 -translate-y-1/2 z-10 p-2 rounded-full bg-black/30 text-white hover:bg-black/50 transition-all ${
+            className={`absolute right-4 top-1/2 -translate-y-1/2 z-20 p-2.5 rounded-full bg-black/40 text-white hover:bg-black/70 transition-all ${
               showControls ? "opacity-100" : "opacity-0"
             } hidden sm:flex`}
           >
-            <ChevronRight size={20} />
+            <ChevronRight size={22} />
           </button>
         )}
       </div>
 
-      {/* Caption */}
+      {/* Caption if present */}
       {caption && (
-        <div className="absolute bottom-0 left-0 right-0 z-20 px-4 pb-5 pt-8 bg-gradient-to-t from-black/60 to-transparent">
-          <p className="text-sm text-white text-center leading-relaxed">
+        <div className="absolute bottom-20 left-0 right-0 z-20 px-6 pb-2 pt-6 bg-gradient-to-t from-black/80 to-transparent pointer-events-none">
+          <p className="text-sm font-medium text-white text-center leading-relaxed drop-shadow-md">
             {caption}
           </p>
+        </div>
+      )}
+
+      {/* ── Bottom Bar: My Status (Left Eye Symbol) vs Other User (Reply + Quick Reactions) ── */}
+      {isOwn ? (
+        /* My Status: Eye symbol at bottom-left */
+        <div className="absolute bottom-4 left-4 z-30 pointer-events-auto">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              openViewersSheet(currentStatus._id);
+            }}
+            className="flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 backdrop-blur-md text-white text-xs font-semibold hover:bg-black/80 active:scale-95 transition-all border border-white/20 shadow-xl"
+            title="View status viewers"
+          >
+            <Eye size={16} className="text-white" />
+            <span>{currentStatus.viewers?.length || 0}</span>
+          </button>
+        </div>
+      ) : (
+        /* Other User: Bottom Reply Input + Quick Emoji Reactions */
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="absolute bottom-3 inset-x-0 z-30 px-3 flex flex-col items-center gap-2"
+        >
+          {/* Quick Reaction Emojis Strip */}
+          <div className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-white/15 shadow-xl">
+            {QUICK_EMOJIS.map((emoji) => (
+              <button
+                key={emoji}
+                onClick={() => handleSendReaction(emoji)}
+                className="text-xl p-1 hover:scale-125 active:scale-95 transition-transform"
+                title={`React with ${emoji}`}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+
+          {/* Reply Text Bar */}
+          <form
+            onSubmit={handleSendReply}
+            className="w-full max-w-md flex items-center gap-2"
+          >
+            <div className="relative flex-1">
+              <input
+                ref={replyInputRef}
+                type="text"
+                value={replyText}
+                onFocus={() => {
+                  setIsTypingReply(true);
+                  setIsPaused(true);
+                }}
+                onBlur={() => {
+                  if (!replyText.trim()) {
+                    setIsTypingReply(false);
+                    setIsPaused(false);
+                  }
+                }}
+                onChange={(e) => setReplyText(e.target.value)}
+                placeholder="Reply..."
+                className="w-full h-10 pl-4 pr-10 rounded-full bg-black/60 backdrop-blur-md text-white placeholder:text-white/60 text-sm border border-white/20 focus:outline-none focus:border-primary shadow-lg"
+              />
+              {replyText.trim() && (
+                <button
+                  type="submit"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 bg-primary text-white rounded-full hover:opacity-90 transition-opacity"
+                  title="Send reply"
+                >
+                  <Send size={14} />
+                </button>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleToggleLike}
+              className={`size-10 rounded-full bg-black/60 backdrop-blur-md border transition-all shadow-lg flex-shrink-0 flex items-center justify-center ${
+                isLikedByMe
+                  ? "border-red-500/60 text-red-500 hover:scale-110 active:scale-95 shadow-red-500/25"
+                  : "border-white/20 text-white/70 hover:text-red-400 hover:scale-110 active:scale-95"
+              }`}
+              title={isLikedByMe ? "Liked" : "Like status"}
+            >
+              <Heart
+                size={19}
+                fill={isLikedByMe ? "currentColor" : "none"}
+                strokeWidth={isLikedByMe ? 2.5 : 2}
+                className={`transition-transform duration-200 ${isLikedByMe ? "scale-110 text-red-500" : ""}`}
+              />
+            </button>
+          </form>
         </div>
       )}
     </div>

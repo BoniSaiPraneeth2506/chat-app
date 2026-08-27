@@ -8,6 +8,7 @@ import {
   deleteStatus,
   getStatusViewers,
   getStatusMediaUrl,
+  reactToStatus,
 } from "../controllers/status.controller.js";
 
 const router = express.Router();
@@ -18,6 +19,7 @@ router.get("/media/:statusId", protectRoute, getStatusMediaUrl);
 router.get("/viewers/:statusId", protectRoute, getStatusViewers);
 router.get("/:userId", protectRoute, getUserStatuses);
 router.post("/view/:statusId", protectRoute, viewStatus);
+router.post("/react/:statusId", protectRoute, reactToStatus);
 router.delete("/:statusId", protectRoute, deleteStatus);
 
 export default router;

@@ -1,5 +1,6 @@
 import Status from "../models/status.model.js";
 import User from "../models/user.model.js";
+import Message from "../models/message.model.js";
 import { getReceiverSocketId, io } from "../lib/socket.js";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -7,7 +8,27 @@ import { getStorage, storageBucket, isStorageConfigured } from "../lib/storage.j
 import { HeadObjectCommand } from "@aws-sdk/client-s3";
 
 const STATUS_DURATION_MS = 24 * 60 * 60 * 1000;
-const MEDIA_URL_TTL_SECONDS = 300;
+const MEDIA_URL_TTL_SECONDS = 3600; // 1 hour
+
+export const signStatusMedia = async (status) => {
+  if (!status || !status.media?.key || !isStorageConfigured()) return status;
+  try {
+    const url = await getSignedUrl(
+      getStorage(),
+      new GetObjectCommand({
+        Bucket: storageBucket(),
+        Key: status.media.key,
+        ResponseContentType: status.media.contentType || undefined,
+        ResponseContentDisposition: "inline",
+      }),
+      { expiresIn: MEDIA_URL_TTL_SECONDS }
+    );
+    status.media.url = url;
+  } catch (e) {
+    // Keep as is
+  }
+  return status;
+};
 
 const isBlockedBetween = async (a, b) => {
   if (!a || !b) return false;
@@ -73,27 +94,29 @@ export const createStatus = async (req, res) => {
     await status.save();
 
     const populated = await status.populate("user", "fullName profilePic");
+    const populatedObj = populated.toObject();
+    await signStatusMedia(populatedObj);
 
     const viewerIds = await getAuthorizedViewerIds(userId);
     for (const viewerId of viewerIds) {
       const socketId = getReceiverSocketId(viewerId);
       if (socketId) {
         io.to(socketId).emit("status:new", {
-          _id: populated._id,
+          _id: populatedObj._id,
           user: {
-            _id: populated.user._id,
-            fullName: populated.user.fullName,
-            profilePic: populated.user.profilePic,
+            _id: populatedObj.user._id,
+            fullName: populatedObj.user.fullName,
+            profilePic: populatedObj.user.profilePic,
           },
-          media: populated.media,
-          caption: populated.caption,
-          createdAt: populated.createdAt,
-          expiresAt: populated.expiresAt,
+          media: populatedObj.media,
+          caption: populatedObj.caption,
+          createdAt: populatedObj.createdAt,
+          expiresAt: populatedObj.expiresAt,
         });
       }
     }
 
-    res.status(201).json(populated);
+    res.status(201).json(populatedObj);
   } catch (err) {
     console.error("Error in createStatus:", err.message);
     res.status(500).json({ message: "Failed to create status" });
@@ -122,6 +145,9 @@ export const getStatuses = async (req, res) => {
         !blockedIds.includes(s.user._id.toString())
     );
 
+    // Pre-sign all media URLs in parallel for instant display
+    await Promise.all(filtered.map(signStatusMedia));
+
     const grouped = new Map();
     for (const s of filtered) {
       const ownerId = s.user._id.toString();
@@ -146,6 +172,8 @@ export const getStatuses = async (req, res) => {
     })
       .sort({ createdAt: 1 })
       .lean();
+
+    await Promise.all(myStatuses.map(signStatusMedia));
 
     const myHasUnseen = false;
     const myLatestStatusAt = myStatuses.length > 0
@@ -363,12 +391,97 @@ export const getStatusViewers = async (req, res) => {
       fullName: v.user?.fullName,
       profilePic: v.user?.profilePic,
       viewedAt: v.viewedAt,
+      reaction: v.reaction || "",
     }));
 
     res.status(200).json({ viewers, count: viewers.length });
   } catch (err) {
     console.error("Error in getStatusViewers:", err.message);
     res.status(500).json({ message: "Failed to fetch viewers" });
+  }
+};
+
+export const reactToStatus = async (req, res) => {
+  try {
+    const { statusId } = req.params;
+    const { reaction, text, isLikeToggle } = req.body || {};
+    const senderId = req.user._id;
+
+    const status = await Status.findById(statusId).populate("user", "fullName profilePic").lean();
+    if (!status) {
+      return res.status(404).json({ message: "Status not found" });
+    }
+
+    const ownerId = status.user._id.toString();
+
+    // If reaction is empty string or explicitly null -> unlike
+    const isUnlike = reaction === "" || reaction === null;
+    const reactionEmoji = isUnlike ? "" : (reaction || (text ? "" : "❤️"));
+
+    const existingViewer = (status.viewers || []).find(
+      (v) => v.user?.toString() === senderId.toString()
+    );
+
+    if (existingViewer) {
+      await Status.updateOne(
+        { _id: statusId, "viewers.user": senderId },
+        { $set: { "viewers.$.reaction": reactionEmoji } }
+      );
+    } else {
+      await Status.findByIdAndUpdate(statusId, {
+        $push: {
+          viewers: {
+            user: senderId,
+            viewedAt: new Date(),
+            reaction: reactionEmoji,
+          },
+        },
+      });
+    }
+
+    // Notify status owner in real-time
+    const ownerSocketId = getReceiverSocketId(ownerId);
+    if (ownerSocketId) {
+      io.to(ownerSocketId).emit("status:reacted", {
+        statusId,
+        user: {
+          _id: req.user._id,
+          fullName: req.user.fullName,
+          profilePic: req.user.profilePic,
+        },
+        reaction: reactionEmoji,
+      });
+    }
+
+    // ONLY send a message to individual chat for quick emoji strip reactions or text replies (NOT for like toggle)
+    let populatedMsg = null;
+    if (!isLikeToggle && !isUnlike) {
+      const messageBody = text
+        ? `Replied to status: ${text}`
+        : `Reacted ${reactionEmoji} to status`;
+
+      const newMessage = new Message({
+        senderId,
+        receiverId: ownerId,
+        text: messageBody,
+      });
+      await newMessage.save();
+
+      populatedMsg = await Message.findById(newMessage._id).populate("senderId", "fullName profilePic");
+
+      if (ownerSocketId) {
+        io.to(ownerSocketId).emit("newMessage", populatedMsg);
+      }
+      const senderSocketId = getReceiverSocketId(senderId.toString());
+      if (senderSocketId) {
+        io.to(senderSocketId).emit("newMessage", populatedMsg);
+      }
+    }
+
+    res.status(200).json({ success: true, reaction: reactionEmoji, message: populatedMsg });
+  } catch (err) {
+    console.error("Error in reactToStatus:", err.message);
+    res.status(500).json({ message: "Failed to react to status" });
   }
 };
 

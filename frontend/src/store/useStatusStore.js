@@ -111,14 +111,39 @@ export const useStatusStore = create((set, get) => ({
       set({ statusGroups: updated });
     });
 
-    socket.on("status:viewed", ({ statusId }) => {
+    socket.on("status:viewed", ({ statusId, viewer }) => {
       const { statusGroups } = get();
       set({
         statusGroups: statusGroups.map((g) => ({
           ...g,
           statuses: g.statuses.map((s) =>
             s._id === statusId
-              ? { ...s, viewedByMe: true }
+              ? {
+                  ...s,
+                  viewedByMe: true,
+                  viewers: s.viewers ? [...s.viewers, { user: viewer, viewedAt: new Date() }] : [{ user: viewer, viewedAt: new Date() }],
+                }
+              : s
+          ),
+        })),
+      });
+    });
+
+    socket.on("status:reacted", ({ statusId, user, reaction }) => {
+      const { statusGroups } = get();
+      set({
+        statusGroups: statusGroups.map((g) => ({
+          ...g,
+          statuses: g.statuses.map((s) =>
+            s._id === statusId
+              ? {
+                  ...s,
+                  viewers: (s.viewers || []).map((v) =>
+                    (v.user?._id || v.user)?.toString() === user?._id?.toString()
+                      ? { ...v, reaction }
+                      : v
+                  ),
+                }
               : s
           ),
         })),
@@ -132,12 +157,16 @@ export const useStatusStore = create((set, get) => ({
     socket.off("status:new");
     socket.off("status:deleted");
     socket.off("status:viewed");
+    socket.off("status:reacted");
   },
 
   openStatusGroup: (group, index = 0) => {
+    const initialStatus = group?.statuses?.[index];
+    const initialUrl = initialStatus?.media?.url || "";
     set({
       viewingStatusGroup: group,
       viewingIndex: index,
+      viewingMediaUrl: initialUrl,
       isOpen: true,
     });
   },
@@ -264,6 +293,62 @@ export const useStatusStore = create((set, get) => ({
 
   closeViewersSheet: () => {
     set({ viewersSheetOpen: false, viewersSheetStatusId: null, viewerCount: 0 });
+  },
+
+  reactToStatus: async (statusId, { reaction, text }) => {
+    try {
+      const res = await axiosInstance.post(`/status/react/${statusId}`, {
+        reaction,
+        text,
+      });
+
+      const currentUserId = useAuthStore.getState().authUser?._id;
+      const reactionVal = reaction || text || "❤️";
+      const { statusGroups, viewingStatusGroup } = get();
+
+      const updateGroupStatuses = (statuses) =>
+        (statuses || []).map((s) => {
+          if (s._id !== statusId) return s;
+          const viewers = s.viewers || [];
+          const idx = viewers.findIndex(
+            (v) => (v.user?._id || v.user)?.toString() === currentUserId?.toString()
+          );
+          let updatedViewers;
+          if (idx >= 0) {
+            updatedViewers = viewers.map((v, i) =>
+              i === idx ? { ...v, reaction: reactionVal } : v
+            );
+          } else {
+            updatedViewers = [
+              ...viewers,
+              { user: currentUserId, viewedAt: new Date(), reaction: reactionVal },
+            ];
+          }
+          return { ...s, viewers: updatedViewers };
+        });
+
+      const updatedGroups = statusGroups.map((g) => ({
+        ...g,
+        statuses: updateGroupStatuses(g.statuses),
+      }));
+
+      const updatedViewingGroup = viewingStatusGroup
+        ? {
+            ...viewingStatusGroup,
+            statuses: updateGroupStatuses(viewingStatusGroup.statuses),
+          }
+        : null;
+
+      set({
+        statusGroups: updatedGroups,
+        viewingStatusGroup: updatedViewingGroup,
+      });
+
+      return res.data;
+    } catch (err) {
+      console.error("Error reacting to status:", err.message);
+      throw err;
+    }
   },
 
   setCreateOpen: (open) => set({ isCreateOpen: open }),
