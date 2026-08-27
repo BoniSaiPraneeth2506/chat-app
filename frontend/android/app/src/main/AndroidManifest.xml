@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application
         android:allowBackup="true"
@@ -24,23 +23,6 @@
             </intent-filter>
 
         </activity>
-
-        <!-- Replace Capacitor's default push MessagingService with our own so a
-             single FCM service is responsible for rendering WhatsApp-style grouped
-             notifications. tools:node="remove" strips the plugin's declaration;
-             the intent filter below re-registers the same event for our service. -->
-        <service
-            android:name="com.capacitorjs.plugins.pushnotifications.MessagingService"
-            android:exported="false"
-            tools:node="remove" />
-
-        <service
-            android:name=".ChattyMessagingService"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-            </intent-filter>
-        </service>
 
         <provider
             android:name="androidx.core.content.FileProvider"
