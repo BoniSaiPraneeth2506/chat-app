@@ -1,4 +1,4 @@
-import { Image as ImageIcon, Video, FileText, User } from "lucide-react";
+import { Image as ImageIcon, Camera, Video, Clapperboard, FileText, User, Mic, Sticker } from "lucide-react";
 
 /**
  * What the paperclip opens.
@@ -22,11 +22,39 @@ const ITEMS = [
     tint: "#7c5cff",
   },
   {
+    id: "camera",
+    label: "Camera",
+    hint: "Take a photo now",
+    Icon: Camera,
+    tint: "#e0731c",
+  },
+  {
     id: "video",
     label: "Videos",
     hint: "Send a large video",
     Icon: Video,
     tint: "#e0466f",
+  },
+  {
+    id: "video_note",
+    label: "Video note",
+    hint: "Record a quick clip",
+    Icon: Mic,
+    tint: "#d1478c",
+  },
+  {
+    id: "gifs",
+    label: "GIFs",
+    hint: "From GIPHY",
+    Icon: Clapperboard,
+    tint: "#f2b03d",
+  },
+  {
+    id: "stickers",
+    label: "Stickers",
+    hint: "From GIPHY",
+    Icon: Sticker,
+    tint: "#5aa7f0",
   },
   {
     id: "document",

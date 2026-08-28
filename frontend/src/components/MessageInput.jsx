@@ -53,6 +53,11 @@ const MessageInput = () => {
   const fileInputRef = useRef(null);
   const videoInputRef = useRef(null);
   const docInputRef = useRef(null);
+  // Captured-on-device media: a live-camera photo and a short video note. These
+  // keep their own inputs so they can force `capture` without changing what the
+  // Gallery / Videos pickers offer.
+  const cameraInputRef = useRef(null);
+  const videoNoteInputRef = useRef(null);
 
   // The attachment menu, the contact picker, and the one large file being sent.
   const [isAttachOpen, setIsAttachOpen] = useState(false);
@@ -425,8 +430,18 @@ const MessageInput = () => {
       fileInputRef.current?.click();
       return;
     }
+    if (id === "camera") {
+      cameraInputRef.current?.click();
+      return;
+    }
     if (id === "contact") {
       setIsContactOpen(true);
+      return;
+    }
+    // GIFs and stickers never upload a file — the bubble keeps GIPHY's URL — so
+    // they do not need the bucket-based file sharing the other kinds do.
+    if (id === "gifs" || id === "stickers") {
+      setGifCommand({ kind: id === "gifs" ? "gifs" : "stickers", query: "" });
       return;
     }
     if (!limits.enabled) {
@@ -434,6 +449,7 @@ const MessageInput = () => {
       return;
     }
     if (id === "video") videoInputRef.current?.click();
+    if (id === "video_note") videoNoteInputRef.current?.click();
     if (id === "document") docInputRef.current?.click();
   };
 
@@ -1017,7 +1033,10 @@ const MessageInput = () => {
             onPick={sendGif}
             onClose={() => {
               setGifCommand(null);
-              setText("");
+              // With the /gif or /stickers slash command the command text lives
+              // in the composer and must go; opened from the attach menu there is
+              // no command, so leave any draft the user was typing untouched.
+              if (text.startsWith("/")) setText("");
               inputRef.current?.focus();
             }}
           />
@@ -1123,6 +1142,27 @@ const MessageInput = () => {
                 accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
                 className="hidden"
                 ref={docInputRef}
+                onChange={handleBucketFile}
+              />
+
+              {/* Live-capture inputs: the Camera option forces the rear camera
+                  for a photo straight into the image tray; Video note opens the
+                  front camera to record a short clip that goes through the same
+                  bucket staging as a picked video. */}
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                ref={cameraInputRef}
+                onChange={handleImageChange}
+              />
+              <input
+                type="file"
+                accept="video/*"
+                capture="user"
+                className="hidden"
+                ref={videoNoteInputRef}
                 onChange={handleBucketFile}
               />
 
