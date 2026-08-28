@@ -148,7 +148,15 @@ const upsertIntoList = (list, message) => {
   );
   if (index === -1) return [...list, message];
   const merged = [...list];
-  merged[index] = { ...merged[index], ...message };
+  // A server-confirmed message has a real id, not a local "temp" placeholder.
+  // When it lands over a pending optimistic bubble it must leave the sending
+  // state behind: isSending false and the percent/upload marker cleared, so the
+  // progress bar or spinner disappears the moment the message is delivered.
+  const confirmed =
+    typeof message._id === "string" && !message._id.startsWith("temp");
+  merged[index] = confirmed
+    ? { ...merged[index], ...message, isSending: false, uploadProgress: undefined }
+    : { ...merged[index], ...message };
   return merged;
 };
 
@@ -928,16 +936,6 @@ export const useChatStore = create((set, get) => ({
       }
     }));
 
-    // Simulated progress timer nudges progress forward while network request runs
-    let progress = 0;
-    const progressTimer = setInterval(() => {
-      progress = Math.min(90, progress + Math.floor(Math.random() * 8) + 4);
-      set((s) => ({
-        messages: s.messages.map((m) => m._id === tempId ? { ...m, uploadProgress: progress } : m)
-      }));
-      if (onProgress) onProgress(progress);
-    }, 300);
-
     // Use AbortController to allow cancellation.
     //
     // Registered against the temp id as well, so the cancel button on the bubble
@@ -956,10 +954,18 @@ export const useChatStore = create((set, get) => ({
         : { ...messageData, clientId: tempId };
 
       const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, payload, {
-        signal: controller.signal
+        signal: controller.signal,
+        onUploadProgress: (e) => {
+          if (!e.total) return;
+          // Real byte-for-byte progress of the base64 image body being uploaded.
+          const pct = Math.min(99, Math.round((e.loaded / e.total) * 100));
+          set((s) => ({
+            messages: s.messages.map((m) => m._id === tempId ? { ...m, uploadProgress: pct } : m)
+          }));
+          if (onProgress) onProgress(pct);
+        },
       });
 
-      clearInterval(progressTimer);
       uploadControllers.delete(tempId);
       // Finalize progress
       set((s) => ({
@@ -972,7 +978,6 @@ export const useChatStore = create((set, get) => ({
       if (onProgress) onProgress(100);
       return res.data;
     } catch (error) {
-      clearInterval(progressTimer);
       uploadControllers.delete(tempId);
       // If aborted, remove optimistic message
       if (controller.signal.aborted || error.name === 'CanceledError' || error.message === 'canceled') {

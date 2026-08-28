@@ -720,6 +720,8 @@ const ChatContainer = () => {
     // While a picture is uploading, the bubble is where the progress belongs. The
     // composer used to hold the thumbnails and show it there instead, which meant a
     // photo sent from a phone reported itself somewhere other than the conversation.
+    // A confirmed message has isSending false (and no uploadProgress), so this
+    // overlay disappears the instant delivery finishes.
     const sendingProgress =
       message.isSending && typeof message.uploadProgress === "number"
         ? message.uploadProgress
