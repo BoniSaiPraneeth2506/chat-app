@@ -360,7 +360,8 @@ import { useChatStore } from "../store/useChatStore";
 import useAuthStore from "../store/useAuthStore";
 import { useGroupStore } from "../store/useGroupStore";
 import SidebarSkeleton from "./skeletons/SidebarSkeleton";
-import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus, Lock, MessageSquare, RefreshCw } from "lucide-react";
+import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus, Lock, 
+MessageSquare, RefreshCw, Phone } from "lucide-react";
 import { useNicknames, displayNameOf } from "../lib/contacts";
 import { formatMessageTime } from "../lib/utils";
 import toast from "react-hot-toast";
@@ -368,6 +369,7 @@ import { haptic } from "../lib/haptics";
 import { useChatLockStore } from "../store/useChatLockStore";
 import LockPasswordPrompt from "./LockPasswordPrompt";
 import UpdatesTab from "./UpdatesTab";
+import CallsTab from "./CallsTab";
 import { useUpdatesStore } from "../store/useUpdatesStore";
 import { isBiometryAvailable, verifyBiometry, hasStoredLockSecret, readLockSecret } from "../lib/biometrics";
 
@@ -1039,6 +1041,7 @@ const SideBar = () => {
           {([
             { id: "chats", Icon: MessageSquare },
             { id: "updates", Icon: RefreshCw },
+            { id: "calls", Icon: Phone },
           ]).map((t) => {
             const isActive = activeTab === t.id;
             const Icon = t.Icon;
@@ -1046,7 +1049,7 @@ const SideBar = () => {
               <button
                 key={t.id}
                 onClick={() => useUpdatesStore.getState().setActiveTab(t.id)}
-                title={t.id === "chats" ? "Chats" : "Updates"}
+                title={t.id === "chats" ? "Chats" : t.id === "calls" ? "Calls" : "Updates"}
                 className={`flex items-center justify-center w-11 h-11 rounded-xl transition-colors select-none mx-1 ${
                   isActive
                     ? "text-primary bg-base-200"
@@ -1213,6 +1216,8 @@ const SideBar = () => {
         )}
       </div>
           </>
+          ) : activeTab === "calls" ? (
+            <CallsTab />
           ) : (
             <UpdatesTab />
           )}
@@ -1224,6 +1229,7 @@ const SideBar = () => {
         {([
           { id: "chats", label: "Chats", Icon: MessageSquare },
           { id: "updates", label: "Updates", Icon: RefreshCw },
+          { id: "calls", label: "Calls", Icon: Phone },
         ]).map((t) => {
           const isActive = activeTab === t.id;
           const Icon = t.Icon;

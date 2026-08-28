@@ -1,159 +1,159 @@
 import { useEffect } from "react";
 import StatusRow from "./StatusRow";
-import { useUpdatesStore } from "../store/useUpdatesStore";
-import { useChatStore } from "../store/useChatStore";
-import { PhoneIncoming, PhoneOutgoing, PhoneMissed, Video } from "lucide-react";
-import { haptic } from "../lib/haptics";
+import { useGroupStore } from "../store/useGroupStore";
+import useAuthStore from "../store/useAuthStore";
+import { Users, Star, Pin } from "lucide-react";
+import { formatMessageTime } from "../lib/utils";
 
-const CallIcon = ({ call }) => {
-  const isVideo = call.callType === "video";
-
-  // Color precedence: missed is the most urgent, then direction.
-  if (call.callStatus === "missed") {
-    return <PhoneMissed size={16} className="text-red-500" />;
-  }
-  if (isVideo) {
-    return call.isOutgoing ? (
-      <Video size={16} className="text-green-500" />
-    ) : (
-      <Video size={16} className="text-primary" />
-    );
-  }
-  if (call.isOutgoing) {
-    return <PhoneOutgoing size={16} className="text-green-500" />;
-  }
-  return <PhoneIncoming size={16} className="text-primary" />;
+const previewForAttachment = (attachment) => {
+  if (!attachment) return "📎 Attachment";
+  if (attachment.kind === "video") return "🎬 Video";
+  if (attachment.kind === "image") return "🖼️ Photo";
+  return `📄 ${attachment.name || "Document"}`;
 };
 
-const CallHistoryList = () => {
-  const { callHistory, isCallHistoryLoading, fetchCallHistory, setActiveTab } =
-    useUpdatesStore();
-  const setSelectedUser = useChatStore((s) => s.setSelectedUser);
+const UpdatesTab = () => {
+  const {
+    groups,
+    isGroupsLoading,
+    getGroups,
+    setSelectedGroup,
+    setGroupPreview,
+    latestGroupMessages,
+    unreadGroupCounts,
+    mentionedGroups,
+  } = useGroupStore();
+  const authUser = useAuthStore((s) => s.authUser);
 
   useEffect(() => {
-    fetchCallHistory();
-  }, [fetchCallHistory]);
+    getGroups();
+  }, [getGroups]);
 
-  const fmtDuration = (sec) => {
-    if (!Number.isFinite(sec) || sec <= 0) return "";
-    const m = Math.floor(sec / 60);
-    const s = Math.floor(sec % 60);
-    return `${m}:${s < 10 ? "0" : ""}${s} min`;
-  };
-
-  const callLabel = (call) => {
-    if (call.callStatus === "missed") {
-      return call.isOutgoing ? "Missed call" : "Missed call";
-    }
-    if (call.callType === "video") {
-      return call.isOutgoing ? "Outgoing video call" : "Incoming video call";
-    }
-    return call.isOutgoing ? "Outgoing voice call" : "Incoming voice call";
-  };
-
-  const timeLabel = (dateStr) => {
-    if (!dateStr) return "";
-    const d = new Date(dateStr);
-    const now = new Date();
-    const sameDay =
-      d.getFullYear() === now.getFullYear() &&
-      d.getMonth() === now.getMonth() &&
-      d.getDate() === now.getDate();
-    if (sameDay) {
-      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    }
-    const diffDays = Math.floor((now - d) / 86400000);
-    if (diffDays === 1) return "Yesterday";
-    if (diffDays < 7) return d.toLocaleDateString([], { weekday: "short" });
-    return d.toLocaleDateString([], { day: "numeric", month: "short" });
-  };
-
-  const openCallTarget = (call) => {
-    haptic("tap");
-    if (call.isGroup) {
-      // Open group chat if we can via group store
-      setActiveTab("chats");
-      return;
-    }
-    if (call.user?.idType === "user" && call.user.idValue) {
-      setActiveTab("chats");
-      const users = useChatStore.getState().users;
-      const found = users?.find((u) => String(u._id) === String(call.user.idValue));
-      if (found) setSelectedUser(found);
-    }
-  };
+  const asIds = (arr) => new Set((arr || []).map((x) => String(x?._id || x)));
+  const favoriteGroupIds = asIds(authUser?.favoriteGroups);
+  const pinnedGroupIds = asIds(authUser?.pinnedGroups);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-y-auto">
       <div className="px-4 py-3 flex-shrink-0">
         <h2 className="text-base font-semibold text-base-content">Updates</h2>
         <p className="text-xs text-base-content/50 mt-0.5">
-          Statuses and call history
+          Statuses and groups
         </p>
       </div>
 
       <StatusRow />
 
-      {/* Call history header */}
+      {/* Groups header */}
       <div className="px-4 pt-4 pb-2 flex items-center gap-2">
-        <h3 className="text-sm font-semibold text-base-content">Call History</h3>
+        <h3 className="text-sm font-semibold text-base-content">Groups</h3>
       </div>
 
-      {isCallHistoryLoading ? (
+      {isGroupsLoading ? (
         <div className="px-4 py-8 flex justify-center">
           <span className="loading loading-spinner loading-md text-primary" />
         </div>
-      ) : callHistory.length === 0 ? (
+      ) : groups.length === 0 ? (
         <div className="px-4 py-8 text-center">
-          <p className="text-sm text-base-content/40">No calls yet</p>
+          <p className="text-sm text-base-content/40">No groups joined yet</p>
         </div>
       ) : (
         <div className="pb-4">
-          {callHistory.map((call) => (
-            <button
-              key={call._id}
-              onClick={() => openCallTarget(call)}
-              className="w-full py-3 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors text-left"
-            >
-              <div className="relative flex-shrink-0">
-                <img
-                  src={call.user?.picture || "/avatar.png"}
-                  alt={call.user?.name || "Unknown"}
-                  className="size-11 rounded-full object-cover"
-                />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-base-content truncate">
-                    {call.user?.name || "Unknown"}
-                  </span>
-                  <span className="text-xs t-dim flex-shrink-0 ml-2">
-                    {timeLabel(call.createdAt)}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <CallIcon call={call} />
-                  <span
-                    className={`text-sm truncate ${
-                      call.callStatus === "missed"
-                        ? "text-red-500"
-                        : "text-base-content/60"
-                    }`}
+          {groups.map((group) => {
+            const latestMsg = latestGroupMessages[group._id];
+            const unread = unreadGroupCounts[group._id] || 0;
+            const mentioned = Boolean(mentionedGroups?.[group._id]);
+            return (
+                <button
+                  key={group._id}
+                  onClick={() => setSelectedGroup(group)}
+                  className="w-full py-3.5 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors group select-none"
+                >
+                  <div
+                    className="relative flex-shrink-0 cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setGroupPreview(group);
+                    }}
                   >
-                    {callLabel(call)}
-                    {call.callType === "video" ? " · video" : " · voice"}
-                    {call.callStatus === "completed" && call.callDuration > 0
-                      ? ` · ${fmtDuration(call.callDuration)}`
-                      : ""}
-                  </span>
+                  {group.groupPic ? (
+                    <img
+                      src={group.groupPic}
+                      alt={group.name}
+                      className="object-cover rounded-full size-12"
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center rounded-full size-12 bg-secondary/10 border border-secondary/20 text-secondary">
+                      <Users className="size-6" />
+                    </div>
+                  )}
                 </div>
-              </div>
-            </button>
-          ))}
+
+                <div className="min-w-0 flex-1 text-left">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-base-content truncate flex items-center gap-1.5">
+                      {group.name}
+                      {favoriteGroupIds.has(group._id) && (
+                        <Star className="size-3 text-yellow-500 fill-yellow-500 flex-shrink-0" />
+                      )}
+                      {pinnedGroupIds.has(group._id) && (
+                        <Pin className="size-3 t-dim rotate-45 flex-shrink-0" />
+                      )}
+                      <span className="text-[10px] leading-none bg-base-300 px-1.5 py-1 rounded t-dim font-normal">
+                        {group.members?.length || 0}
+                      </span>
+                    </span>
+                    {latestMsg && (
+                      <span className="text-xs leading-none t-dim">
+                        {formatMessageTime(latestMsg.createdAt)}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between mt-0.5">
+                    <div className="text-sm text-base-content/60 truncate pr-2 flex-1 text-left">
+                      {latestMsg ? (
+                        <span>
+                          <strong className="font-medium text-base-content/80">
+                            {latestMsg.isAnonymous ? "Anonymous" : latestMsg.senderId?.fullName?.split(" ")[0]}:
+                          </strong>{" "}
+                          {latestMsg.isDeletedForEveryone
+                            ? "This message was deleted"
+                            : latestMsg.poll ? `📊 ${latestMsg.poll.question}`
+                            : latestMsg.voice ? "🎤 Voice message"
+                            : latestMsg.image ? "📷 Image"
+                            : latestMsg.contact?.name ? `👤 ${latestMsg.contact.name}`
+                            : latestMsg.attachments?.length ? previewForAttachment(latestMsg.attachments[0])
+                            : latestMsg.text}
+                        </span>
+                      ) : (
+                        <span className="text-base-content/40 italic">Group created</span>
+                      )}
+                    </div>
+                    {mentioned && (
+                      <span
+                        title="You were mentioned"
+                        className="flex items-center justify-center size-5 text-[11px] font-bold text-primary-content bg-primary rounded-full flex-shrink-0"
+                      >
+                        @
+                      </span>
+                    )}
+                    {unread > 0 && (
+                      <span className={`flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[9px] leading-none font-bold rounded-full flex-shrink-0 ${
+                        mentioned ? "badge-mention" : "bg-primary text-white"
+                      }`}>
+                        {unread}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
   );
 };
 
-export default CallHistoryList;
+export default UpdatesTab;
