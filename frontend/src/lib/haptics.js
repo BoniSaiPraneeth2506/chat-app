@@ -10,6 +10,9 @@
 // and the feel can be retuned in one place. A single number is one buzz in ms;
 // an array alternates vibrate/pause.
 
+import { Capacitor } from "@capacitor/core";
+import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics";
+
 const PATTERNS = {
   /** Lightest tick: toggling a selection, tapping an emoji. */
   tap: 10,
@@ -24,6 +27,35 @@ const PATTERNS = {
   /** An action was refused, e.g. the pin limit. */
   reject: [30, 40, 30],
 };
+
+// Android's WebView doesn't expose navigator.vibrate, so on the native app we
+// drive haptics through the Capacitor plugin instead and keep navigator.vibrate
+// as the desktop/web fallback.
+const isNative = () =>
+  Capacitor.getPlatform() === "android" || Capacitor.getPlatform() === "ios";
+
+/**
+ * Native haptic route: maps each named pattern to a platform-level resonance
+ * (selection tick, impact, or notification success/confirmation) so it feels
+ * intentional rather than a generic buzz.
+ */
+async function nativeHaptic(name) {
+  switch (name) {
+    case "impact":
+      return Haptics.impact({ style: ImpactStyle.Medium });
+    case "longPress":
+      return Haptics.impact({ style: ImpactStyle.Light });
+    case "double":
+      return Haptics.impact({ style: ImpactStyle.Light });
+    case "success":
+      return Haptics.notification({ type: NotificationType.Success });
+    case "reject":
+      return Haptics.notification({ type: NotificationType.Error });
+    case "tap":
+    default:
+      return Haptics.selectionStart();
+  }
+}
 
 /**
  * Touch-first devices only. `(hover: none)` is true on phones and false on a
@@ -41,10 +73,19 @@ const canVibrate = () => {
 };
 
 export const haptic = (name = "tap") => {
-  if (!canVibrate()) return;
   try {
-    navigator.vibrate(PATTERNS[name] ?? PATTERNS.tap);
+    if (isNative()) {
+      nativeHaptic(name).catch(() => {});
+      return;
+    }
   } catch {
-    // Haptics are best effort — never let them break an interaction.
+    // fall through to navigator.vibrate below
+  }
+  if (canVibrate()) {
+    try {
+      navigator.vibrate(PATTERNS[name] ?? PATTERNS.tap);
+    } catch {
+      // Haptics are best effort — never let them break an interaction.
+    }
   }
 };

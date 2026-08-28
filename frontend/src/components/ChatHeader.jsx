@@ -148,7 +148,7 @@ const ChatHeader = () => {
 
   const { onlineUsers, authUser } = useAuthStore();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const { callState, localStream, isScreenSharing, toggleLocalMute, toggleScreenShare } = useChatStore();
+  const { callState, isScreenSharing, toggleLocalMute, toggleScreenShare, isMuted } = useChatStore();
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
   const [nicknameDraft, setNicknameDraft] = useState(null); // null = dialog closed
   const nicknames = useNicknames();
@@ -525,7 +525,7 @@ const ChatHeader = () => {
                       className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary"
                       title="Toggle mute"
                     >
-                      {(localStream && localStream.getAudioTracks().every(t => !t.enabled)) ? <MicOff size={16} /> : <Mic size={16} />}
+                      {isMuted ? <MicOff size={16} /> : <Mic size={16} />}
                     </button>
                     <button
                       onClick={() => toggleScreenShare()}

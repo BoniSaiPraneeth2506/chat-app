@@ -266,6 +266,7 @@ export const useChatStore = create((set, get) => ({
   isCaller: false,
   isCallMinimized: false,
   localStream: null,
+  isMuted: false,
   remoteStream: null,
   peerConnection: null,
   incomingSignal: null,
@@ -1375,7 +1376,8 @@ export const useChatStore = create((set, get) => ({
         remoteStream: null,
         peerConnection: null,
         incomingSignal: null,
-        isCaller: false
+        isCaller: false,
+        isMuted: false
       });
       toast("Call ended");
     });
@@ -1847,7 +1849,7 @@ export const useChatStore = create((set, get) => ({
           throw err;
         }
       }
-      set({ localStream: stream });
+      set({ localStream: stream, isMuted: false });
 
       const pc = new RTCPeerConnection({
         iceServers: [
@@ -1920,7 +1922,7 @@ export const useChatStore = create((set, get) => ({
           throw err;
         }
       }
-      set({ localStream: stream });
+      set({ localStream: stream, isMuted: false });
 
       const pc = new RTCPeerConnection({
         iceServers: [
@@ -2029,17 +2031,20 @@ export const useChatStore = create((set, get) => ({
       remoteStream: null,
       peerConnection: null,
       incomingSignal: null,
-      isCaller: false
+      isCaller: false,
+      isMuted: false
     });
   },
 
   toggleLocalMute: () => {
-    const localStream = get().localStream;
+    const { localStream, isMuted } = get();
+    const next = !isMuted;
     if (localStream) {
       localStream.getAudioTracks().forEach((track) => {
-        track.enabled = !track.enabled;
+        track.enabled = !next;
       });
     }
+    set({ isMuted: next });
   },
 
   toggleScreenShare: async () => {

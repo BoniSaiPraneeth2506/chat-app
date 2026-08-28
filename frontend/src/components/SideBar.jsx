@@ -868,8 +868,8 @@ const SideBar = () => {
     <div key={user._id} className="relative overflow-hidden">
       {swipe.id === user._id && swipe.dx > 0 && (
         <div
-          className="absolute inset-y-0 left-0 flex items-center gap-2 px-4 s-tile"
-          style={{ width: `${Math.max(swipe.dx, 56)}px` }}
+          className="absolute inset-y-0 left-0 w-[120px] flex items-center gap-2 px-4 s-tile will-change-transform"
+          style={{ transform: `translateX(${Math.min(swipe.dx, SWIPE_MAX) - 120}px)` }}
         >
           <Archive
             size={18}
@@ -901,10 +901,10 @@ const SideBar = () => {
       onTouchMove={(e) => handleTouchMove(user._id, e)}
       style={
         swipe.id === user._id
-          ? { transform: `translateX(${swipe.dx}px)`, transition: "none" }
+          ? { transform: `translateX(${swipe.dx}px)`, transition: "none", willChange: "transform" }
           : undefined
       }
-      className={`relative z-10 w-full py-3.5 px-4 flex items-center gap-3 bg-base-100 hover:bg-base-200/60 transition-transform group select-none
+      className={`relative z-10 w-full py-3.5 px-4 flex items-center gap-3 bg-base-100 hover:bg-base-200/60 transition-transform duration-200 ease-out group select-none
         ${
           selectedUser?._id === user._id
             ? "bg-base-200/80"

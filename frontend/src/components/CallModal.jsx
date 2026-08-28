@@ -19,12 +19,13 @@ const CallModal = () => {
     toggleCallMinimize,
     isScreenSharing,
     startScreenShare,
-    stopScreenShare
+    stopScreenShare,
+    isMuted,
+    toggleLocalMute
   } = useChatStore();
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
-  const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   // getDisplayMedia isn't implemented in Android's WebView, so the control is
   // hidden on the app rather than shown and failing on tap.
@@ -153,12 +154,7 @@ const CallModal = () => {
   };
 
   const toggleMute = () => {
-    if (localStream) {
-      localStream.getAudioTracks().forEach((track) => {
-        track.enabled = !track.enabled;
-      });
-      setIsMuted(!isMuted);
-    }
+    toggleLocalMute();
   };
 
   const toggleCamera = () => {
