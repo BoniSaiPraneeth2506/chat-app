@@ -155,7 +155,28 @@ const upsertIntoList = (list, message) => {
   const confirmed =
     typeof message._id === "string" && !message._id.startsWith("temp");
   merged[index] = confirmed
-    ? { ...merged[index], ...message, isSending: false, uploadProgress: undefined }
+    ? {
+        ...merged[index],
+        ...message,
+        isSending: false,
+        uploadProgress: undefined,
+        // Keep the local copy of a just-sent picture so the bubble doesn't swap
+        // to the freshly-uploaded Cloudinary URL and flash black. Only applies
+        // while the existing message still holds a local data-URL image; once it
+        // leaves this device the server's URL is used as normal.
+        image:
+          typeof merged[index]?.image === "string" &&
+          merged[index].image.startsWith("data:")
+            ? merged[index].image
+            : message.image,
+        images:
+          Array.isArray(merged[index]?.images) &&
+          merged[index].images.some(
+            (u) => typeof u === "string" && u.startsWith("data:")
+          )
+            ? merged[index].images
+            : message.images,
+      }
     : { ...merged[index], ...message };
   return merged;
 };
@@ -967,9 +988,15 @@ export const useChatStore = create((set, get) => ({
       });
 
       uploadControllers.delete(tempId);
-      // Finalize progress
+      // Finalize progress. The settled message keeps the local (data-URL) copy of
+      // the picture the sender just chose, exactly as a bucket attachment keeps
+      // its localUrl. Swapping to the freshly-uploaded Cloudinary URL here would
+      // reload the image and flash the bubble black for a moment. A fresh fetch
+      // of the conversation uses the server's URL instead.
       set((s) => ({
-        messages: s.messages.map((m) => m._id === tempId ? { ...res.data, tempId } : m),
+        messages: s.messages.map((m) =>
+          m._id === tempId ? { ...res.data, tempId, image: m.image, images: m.images } : m
+        ),
         latestMessages: {
           ...s.latestMessages,
           [selectedUser._id]: res.data
