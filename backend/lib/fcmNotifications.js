@@ -26,6 +26,7 @@ const CHANNEL_BY_TYPE = {
   group_message: "groups",
   mention: "mentions",
   reply: "messages",
+  incoming_call: "calls",
   missed_call: "calls",
   message_request: "requests",
   status: "status",
@@ -75,7 +76,10 @@ async function shouldSuppressForRecipient({ recipient, senderId, type, conversat
 
   // Per-conversation mute. Mentions in groups still get through — that is the
   // point of a mention. Non-mention group messages respect the group mute.
+  // Calls are never silenced by a chat/group mute — a ringing call must reach
+  // the recipient; only the global opt-out or a block stops it.
   if (type === "mention") return false;
+  if (type === "incoming_call" || type === "missed_call") return false;
   if (type === "group_message") {
     if (recipient?.mutedGroups?.get && recipient.mutedGroups.get(String(conversationId))) {
       return true;
@@ -138,6 +142,10 @@ export async function sendPushNotification({
     body = `@mentioned you: ${preview(messageContent?.text) || "New message"}`;
   } else if (type === "reply") {
     body = `Replied: ${preview(messageContent?.text) || "New message"}`;
+  } else if (type === "incoming_call") {
+    title = senderName || "ChatApp";
+    body = "Incoming voice call";
+    if (messageContent?.type === "video") body = "Incoming video call";
   } else if (type === "missed_call") {
     title = senderName || "ChatApp";
     body = "Missed call";

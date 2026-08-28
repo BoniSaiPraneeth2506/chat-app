@@ -8,6 +8,7 @@ import Group from '../models/group.model.js';
 import Status from '../models/status.model.js';
 import { isOriginAllowed } from './origins.js';
 import { canDo } from './groupPermissions.js';
+import { sendPushNotification } from './fcmNotifications.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -338,11 +339,39 @@ io.on("connection", async (socket) => {
         }
         console.log(`[Socket] User ${from} is calling User ${userToCall} (${type})`);
         const receiverSocketId = getReceiverSocketId(userToCall);
-        if (!receiverSocketId) return;
         if (await isBlockedBetween(userId, userToCall)) {
             // Reported as unreachable rather than "blocked", so the block is
             // not disclosed to the caller.
             socket.emit("callFailed", { reason: "unavailable" });
+            return;
+        }
+        if (!receiverSocketId) {
+            // The recipient's app is closed/killed (no socket), so the ringing
+            // `callUser` event can't reach them. Fall back to an FCM push with a
+            // sound so they still get an incoming-call notification + ringtone.
+            // Best-effort — a failed push must not break the caller's flow.
+            try {
+                const [caller, receiver] = await Promise.all([
+                    User.findById(userId).select("fullName").lean(),
+                    User.findById(userToCall)
+                        .select("_id fullName notificationPrefs blockedUsers mutedChats")
+                        .lean(),
+                ]);
+                if (receiver) {
+                    await sendPushNotification({
+                        recipient: receiver,
+                        senderName: caller?.fullName || "ChatApp",
+                        type: "incoming_call",
+                        conversationId: userId,
+                        senderId: String(userId),
+                        messageContent: { type: type === "video" ? "video" : "voice" },
+                    }).catch((err) => {
+                        console.error("[push] incoming call push error:", err?.message);
+                    });
+                }
+            } catch (err) {
+                console.error("[push] incoming call push failed:", err?.message);
+            }
             return;
         }
         io.to(receiverSocketId).emit("callUser", { signal: signalData, from, type });
