@@ -78,6 +78,7 @@ import { useGroupStore } from './store/useGroupStore'
 import { App as CapacitorApp } from '@capacitor/app'
 import OfflineBanner from './components/OfflineBanner'
 import { initPushListeners, initPushRegistration, reportActiveConversation } from './lib/pushNotifications'
+import { setNotificationNavigator, setAuthReady, resetNotificationNavigation } from './lib/notificationNavigation'
 
 const PENDING_CHAT_KEY = "pendingChatUserId";
 
@@ -185,11 +186,6 @@ const App = () => {
   // is the real record (welcomeSeenBy); this only stops the sheet reappearing in
   // the instant before that write is reflected locally.
   const [welcomeDismissed, setWelcomeDismissed] = useState([]);
-  // A notification tap that arrived before the app finished booting (cold start
-  // from the drawer). Holds the target until authUser + socket are ready, then
-  // routes — otherwise the tap is lost while checkAuth is still running.
-  const pendingPushRef = React.useRef(null);
-  const [pushPendingTick, setPushPendingTick] = useState(0);
   const { 
     subscribeToMessages, 
     unsubscribeFromMessages,
@@ -287,57 +283,32 @@ const App = () => {
   }, [authUserId, socket, subscribeToMessages, unsubscribeFromMessages]);
 
   // ── Push notifications (Android / FCM) ─────────────────────────────────────
-  // A notification tap is stored (never navigated immediately) so a cold start
-  // from the drawer doesn't lose it: routing happens once authUser + socket are
-  // confirmed ready below. DMs reuse the existing deep-link route (hands off
-  // through setSelectedUser); groups are opened directly by id.
-  const handlePushTap = React.useCallback((data) => {
-    const type = data?.type;
-    const conversationId = data?.conversationId;
-    if (!conversationId) return;
-    pendingPushRef.current = { type, conversationId };
-    setPushPendingTick((t) => t + 1);
-  }, []);
+  // All notification taps funnel to the centralized navigation module
+  // (lib/notificationNavigation.js), which holds the target until the router is
+  // wired and authentication is restored, then navigates exactly once. Here we
+  // only hand it the router + the auth-ready signal.
 
-  // Process a stored tap once the session is ready.
+  // Wire the react-router navigate function into the notification nav module.
   useEffect(() => {
-    if (!authUser) return;
-    const pending = pendingPushRef.current;
-    if (!pending) return;
-    pendingPushRef.current = null;
-    const { type, conversationId } = pending;
+    console.log("[NotifyNav] wiring navigator");
+    setNotificationNavigator(navigate);
+  }, [navigate]);
 
-    if (type === "group_message" || type === "mention") {
-      const groupStore = useGroupStore.getState();
-      const existing =
-        groupStore.groups?.find((g) => String(g._id) === String(conversationId)) ||
-        groupStore.selectedGroup;
-      if (existing) {
-        groupStore.setSelectedGroup(existing);
-        navigate("/");
-      } else {
-        groupStore.getGroups().finally(() => {
-          const fresh = useGroupStore.getState().groups?.find(
-            (g) => String(g._id) === String(conversationId)
-          );
-          if (fresh) {
-            useGroupStore.getState().setSelectedGroup(fresh);
-            navigate("/");
-          }
-        });
-      }
-    } else {
-      navigate(`/chat-with/${conversationId}`);
-    }
-  }, [authUser, pushPendingTick, navigate]);
-
-  // Install the FCM native listeners once and turn on push when signed in.
+  // Tell the notification nav module when the session is authenticated (or not).
   useEffect(() => {
-    initPushListeners(handlePushTap);
+    console.log("[NotifyNav] authUser present:", Boolean(authUser));
+    setAuthReady(Boolean(authUser));
+    if (!authUser) resetNotificationNavigation();
+  }, [authUser]);
+
+  // Install the FCM + local-notification native listeners once and turn on push
+  // when signed in. Listeners are added once regardless of auth.
+  useEffect(() => {
+    initPushListeners();
     if (authUser) {
       initPushRegistration();
     }
-  }, [authUser, handlePushTap]);
+  }, [authUser]);
 
   // Tell the server which conversation is open so it can skip redundant pushes.
   // A conversation only counts as "active" while actually on the chat screen

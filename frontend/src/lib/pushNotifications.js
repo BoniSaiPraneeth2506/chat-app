@@ -7,10 +7,26 @@
 // Everything here is guarded to native Capacitor only — the same code runs in a
 // desktop browser during development where there is no FCM, and must no-op
 // there rather than throw.
+//
+// TAP ROUTING
+// ───────────
+// Notification taps are routed through the centralized navigation module
+// (lib/notificationNavigation.js), which waits for auth + router readiness and
+// navigates exactly once.
+//   - Background / killed: the OS shows the FCM notification; a tap arrives via
+//     `pushNotificationActionPerformed`.
+//   - Foreground: the Capacitor push plugin does not reliably surface a tap from
+//     its own foreground notification (known limitation), so we re-display the
+//     incoming message as a tappable local notification whose tap fires
+//     `localNotificationActionPerformed`. The server suppresses the push when the
+//     device is already viewing that conversation, so the foreground card is not
+//     redundant there.
 
 import { Capacitor } from "@capacitor/core";
 import { PushNotifications } from "@capacitor/push-notifications";
+import { LocalNotifications } from "@capacitor/local-notifications";
 import axiosInstance from "./axios.js";
+import { handleNotificationTap } from "./notificationNavigation.js";
 
 // The server references these channel ids in every payload (CHANNEL_BY_TYPE),
 // and the system routes the delivered notification through the channel — so
@@ -48,15 +64,12 @@ function ensureDeviceId() {
 }
 
 let listenersAdded = false;
-let tapHandler = null;
 
 /**
- * Install the native FCM listeners once, on app boot.
- * `onTap(data)` is invoked on notification tap with the structured `data`
- * payload so the app can route to the exact conversation.
+ * Install the native FCM + local-notification listeners once, on app boot.
+ * Every tap funnels to handleNotificationTap() in the centralized nav module.
  */
-export function initPushListeners(onTap) {
-  tapHandler = onTap;
+export function initPushListeners() {
   if (!isNative() || listenersAdded) return;
   listenersAdded = true;
 
@@ -69,29 +82,69 @@ export function initPushListeners(onTap) {
     console.error("[push] registration error:", err?.error || err);
   });
 
-  // Foreground receipt. The native plugin shows the system notification for
-  // FCM pushes automatically. The server already suppresses the push entirely
-  // when any device is viewing that conversation, so nothing extra is needed
-  // here — this handler exists mainly for observability.
+  // Foreground receipt. Re-display the incoming message as a tappable local
+  // notification so a tap reliably routes (the plugin's own foreground card
+  // doesn't reliably deliver pushNotificationActionPerformed).
   PushNotifications.addListener("pushNotificationReceived", (notification) => {
     const data = notification?.data || {};
+    console.log("[Push] received (foreground):", JSON.stringify(data));
     if (data.silent === "true") return;
+    showForegroundNotification(notification);
   });
 
-  // Tap on a delivered notification → route to the conversation.
+  // Tap on a delivered notification while the app was in the background/killed
+  // state (the OS-created one) → route to the conversation.
   PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
     const data = action?.notification?.data || {};
-    if (typeof tapHandler === "function") tapHandler(data);
+    console.log("[Push] action performed (background/killed):", JSON.stringify(data));
+    handleNotificationTap(data);
+  });
+
+  // Tap on the foreground local notification we created → route to the
+  // conversation.
+  LocalNotifications.addListener("localNotificationActionPerformed", (action) => {
+    const extra = action?.notification?.extra || {};
+    console.log("[Local] action performed (foreground):", JSON.stringify(extra));
+    handleNotificationTap(extra);
   });
 }
 
-/**
- * Tell the push helpers which stores to read for "currently open conversation".
- * Call once from the app after the stores are imported.
- */
-export function bindPushStores({ chatStore, groupStore }) {
-  storeRefs.chat = chatStore;
-  storeRefs.group = groupStore;
+// Re-create the incoming FCM message as a local notification so that tapping it
+// in the foreground actually fires a tap event (see initPushListeners).
+async function showForegroundNotification(notification) {
+  try {
+    const data = notification?.data || {};
+    const title = notification?.title || data?.title || "ChatApp";
+    const body = notification?.body || data?.body || "New message";
+    const channelId = data?.channelId || "messages";
+
+    // Derive a stable numeric id from the CONVERSATION (not the message) so
+    // successive foreground messages from the same conversation replace the
+    // previous local card instead of stacking one per message — the equivalent
+    // of the tag grouping used on the OS/background path.
+    let id = 0;
+    const raw = String(data?.conversationId || data?.senderId || "");
+    for (let i = 0; i < raw.length; i++) id = (id + raw.charCodeAt(i)) % 2147483647;
+    if (!id) id = Date.now() % 2147483647;
+
+    const perm = await LocalNotifications.requestPermissions();
+    if (perm.display !== "granted") return;
+
+    await LocalNotifications.schedule({
+      notifications: [
+        {
+          id,
+          title,
+          body,
+          channelId,
+          sound: "default",
+          extra: data,
+        },
+      ],
+    });
+  } catch (err) {
+    console.error("[push] foreground local notification error:", err.message);
+  }
 }
 
 /** Register (or re-register) this install's FCM token with the backend. */
