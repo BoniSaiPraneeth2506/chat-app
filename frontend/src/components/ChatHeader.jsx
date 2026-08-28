@@ -75,17 +75,18 @@
 // };
 // export default ChatHeader;
 
-import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image, CheckSquare, Users, Info, Mic, MicOff, Maximize2, CornerUpLeft, Pin, Trash2, Forward, Pencil, Tag, Download, Copy } from "lucide-react";
+import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image, CheckSquare, Users, Info, Mic, MicOff, Maximize2, CornerUpLeft, Pin, Trash2, Forward, Pencil, Tag, Download, Copy, Sparkles } from "lucide-react";
 import { useNicknames, displayNameOf, hasNickname } from "../lib/contacts";
 import { saveTextFile } from "../lib/download";
 import { copyText, messagesToClipboardText } from "../lib/clipboard";
 import { haptic } from "../lib/haptics";
 import MessageInfoSheet from "./MessageInfoSheet";
+import AiActionMenu from "./ai/AiActionMenu";
 import axiosInstance from "../lib/axios";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import toast from "react-hot-toast";
 
 const formatLastSeen = (lastSeenTime) => {
@@ -157,6 +158,29 @@ const ChatHeader = () => {
   const [dimLevel, setDimLevel] = useState(35);
   const [infoMessageId, setInfoMessageId] = useState(null);
 
+  // The overflow tray must stay open while the AI sub-menu (language list) is
+  // shown. DaisyUI's default focus-based dropdown closes the instant you click
+  // "Translate"/"Change Script" (focus moves to the button), so this one is
+  // controlled: it opens on the trigger click and closes only when an action
+  // finishes or the user clicks outside.
+  const [aiMenuOpen, setAiMenuOpen] = useState(false);
+  const aiMenuRef = useRef(null);
+
+  useEffect(() => {
+    if (!aiMenuOpen) return;
+    const onDown = (e) => {
+      if (aiMenuRef.current && !aiMenuRef.current.contains(e.target)) {
+        setAiMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("touchstart", onDown);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("touchstart", onDown);
+    };
+  }, [aiMenuOpen]);
+
   const isSelf = selectedUser?._id === authUser?._id;
   const isOnline = onlineUsers.includes(selectedUser?._id);
   const showLastSeen = selectedUser?.onlinePrivacy !== false;
@@ -176,6 +200,19 @@ const ChatHeader = () => {
   const isSoleOwn = soleSelected && senderOf(soleSelected) === authUser?._id;
   const canEditSole = isSoleOwn && !soleSelected.isDeletedForEveryone && soleSelected.text
     && (Date.now() - new Date(soleSelected.createdAt).getTime() <= 15 * 60 * 1000);
+
+  // The AI actions (Listen / Translate / Change Script) apply to any single
+  // text message, whether or not the user sent it.
+  const aiActionable = Boolean(
+    soleSelected && soleSelected.text && !soleSelected.isDeletedForEveryone
+  );
+  // The overflow tray shows whenever a single message is selected — for an own
+  // text message that means "Message info" plus the AI actions.
+  const showOverflow = Boolean(soleSelected && !soleSelected.isDeletedForEveryone);
+  // Groups keep the ordinary three-dot tray (with Message info for your own
+  // messages); individual chats replace it with a single AI icon that opens the
+  // same three AI actions but no Message info.
+  const isGroup = Boolean(selectedGroup);
 
   const exitSelection = () => setSelectionMode(false);
 
@@ -295,35 +332,82 @@ const ChatHeader = () => {
             </button>
           )}
 
-          {/* Overflow menu. Info is only meaningful for a single message you
-              sent yourself — read state for someone else's message is not
-              yours to see, and the endpoint refuses it. */}
-          {isSoleOwn && !soleSelected.isDeletedForEveryone && (
-            <div className="dropdown dropdown-bottom dropdown-end">
+          {/* Action tray. Groups keep the ordinary three-dot tray (with Message
+              info for your own messages); individual chats show a single AI
+              icon that opens the same three AI actions but no Message info. */}
+          {isGroup ? (
+            showOverflow && (
               <div
-                tabIndex={0}
-                role="button"
-                className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary cursor-pointer"
-                title="More"
+                className={`dropdown dropdown-bottom dropdown-end ${aiMenuOpen ? "dropdown-open" : ""}`}
+                ref={aiMenuRef}
               >
-                <MoreVertical size={18} />
+                <div
+                  role="button"
+                  className="p-2 hover:bg-base-300 rounded-full transition-colors hover:text-primary cursor-pointer"
+                  title="More"
+                  onClick={() => setAiMenuOpen((o) => !o)}
+                >
+                  <MoreVertical size={18} />
+                </div>
+                <ul
+                  tabIndex={0}
+                  className="dropdown-content z-50 menu p-1.5 shadow-xl bg-base-100 rounded-box w-48 text-xs text-base-content mt-1"
+                >
+                  {isSoleOwn && (
+                    <li>
+                      <button
+                        onClick={() => {
+                          haptic("tap");
+                          setAiMenuOpen(false);
+                          setInfoMessageId(soleSelected._id);
+                        }}
+                        className="hover:bg-primary/15 focus:bg-primary/15 active:bg-primary/25 hover:text-primary focus:text-primary py-2 text-left font-medium flex items-center gap-2"
+                      >
+                        <Info size={14} />
+                        Message info
+                      </button>
+                    </li>
+                  )}
+                  {aiActionable && (
+                    <AiActionMenu
+                      message={soleSelected}
+                      onFinish={() => {
+                        setAiMenuOpen(false);
+                        exitSelection();
+                      }}
+                    />
+                  )}
+                </ul>
               </div>
-              <ul tabIndex={0} className="dropdown-content z-50 menu p-1.5 shadow-xl bg-base-100 rounded-box w-44 text-xs text-base-content mt-1">
-                <li>
-                  <button
-                    onClick={() => {
-                      haptic("tap");
-                      setInfoMessageId(soleSelected._id);
-                      document.activeElement?.blur();
+            )
+          ) : (
+            aiActionable && (
+              <div
+                className={`dropdown dropdown-bottom dropdown-end ${aiMenuOpen ? "dropdown-open" : ""}`}
+                ref={aiMenuRef}
+              >
+                <div
+                  role="button"
+                  className="p-2 hover:bg-base-300 rounded-full transition-colors hover:text-primary cursor-pointer"
+                  title="AI actions"
+                  onClick={() => setAiMenuOpen((o) => !o)}
+                >
+                  <Sparkles size={18} />
+                </div>
+                <ul
+                  tabIndex={0}
+                  className="dropdown-content z-50 menu p-1.5 shadow-xl bg-base-100 rounded-box w-48 text-xs text-base-content mt-1"
+                >
+                  <AiActionMenu
+                    message={soleSelected}
+                    onFinish={() => {
+                      setAiMenuOpen(false);
+                      exitSelection();
                     }}
-                    className="hover:bg-base-200 py-2 text-left font-medium flex items-center gap-2"
-                  >
-                    <Info size={14} />
-                    Message info
-                  </button>
-                </li>
-              </ul>
-            </div>
+                  />
+                </ul>
+              </div>
+            )
           )}
         </div>
 

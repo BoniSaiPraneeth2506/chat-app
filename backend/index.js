@@ -10,6 +10,7 @@ import uploadRoutes from './routes/upload.route.js'
 import giphyRoutes from "./routes/giphy.route.js";
 import statusRoutes from "./routes/status.route.js";
 import notificationRoutes from "./routes/notification.route.js";
+import aiRoutes from "./routes/ai.route.js";
 import connectDB from './lib/db.js';
 import path from "path";
 import fs from "fs";
@@ -107,6 +108,7 @@ app.use('/api/uploads', uploadRoutes);
 app.use('/api/giphy', giphyRoutes);
 app.use('/api/status', statusRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/ai', aiRoutes);
 
 app.get('/', (req, res) => {
   res.send("api is working");

@@ -12,6 +12,7 @@ import { useNicknames, displayNameOf } from "../lib/contacts";
 import PollMessage from "./PollMessage";
 import VoiceNote from "./VoiceNote";
 import VoiceTranscript from "./VoiceTranscript";
+import MessageAiPanel from "./ai/MessageAiPanel";
 import { useThemeStore } from "../store/useThemeStore";
 import { getWallpaperStyle } from "../pages/SettingsPage";
 
@@ -22,6 +23,7 @@ import MessageSkeleton from "./skeletons/MessageSkeleton";
 import useAuthStore from "../store/useAuthStore";
 import { formatMessageTime } from "../lib/utils";
 import { haptic } from "../lib/haptics";
+import { stopAllAudio } from "../lib/aiAudio";
 
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
 
@@ -474,6 +476,10 @@ const ChatContainer = () => {
 
   const { authUser, onlineUsers } = useAuthStore();
   const { theme, wallpaper, privacyReadReceipts } = useThemeStore();
+
+  // Stop any synthesized speech when switching chats or leaving — a clip from
+  // one conversation must not keep playing over another.
+  useEffect(() => stopAllAudio, [selectedUser?._id, selectedGroup?._id]);
 
   const activeMessages = selectedGroup ? groupMessages : messages;
   const activeLoading = selectedGroup ? isGroupMessagesLoading : isMessagesLoading;
@@ -1452,6 +1458,8 @@ const ChatContainer = () => {
                       )}
                       {/* Message Content & Media */}
                       {renderMessageContent(message)}
+                      {/* Inline AI: translation / script change / synthesized audio */}
+                      <MessageAiPanel message={message} />
                     </>
                   )}
                   
