@@ -120,6 +120,7 @@ const ChatRedirectHandler = () => {
     hasRunRef.current = true;
 
     const performRedirect = async () => {
+      console.log(`[ChatRedirectHandler] Redirecting to conversation for userId: ${userId}`);
       const { setSelectedUser, getUsers } = useChatStore.getState();
       const authUser = useAuthStore.getState().authUser;
 
@@ -151,6 +152,7 @@ const ChatRedirectHandler = () => {
         return;
       }
 
+      console.log(`[ChatRedirectHandler] Success: opening conversation for ${foundUser.fullName || foundUser._id}`);
       setSelectedUser(foundUser);
       navigate("/", { replace: true });
     };
@@ -291,15 +293,25 @@ const App = () => {
   // Wire the react-router navigate function into the notification nav module.
   useEffect(() => {
     console.log("[NotifyNav] wiring navigator");
+    console.log("[Router] ready");
     setNotificationNavigator(navigate);
   }, [navigate]);
 
   // Tell the notification nav module when the session is authenticated (or not).
   useEffect(() => {
-    console.log("[NotifyNav] authUser present:", Boolean(authUser));
-    setAuthReady(Boolean(authUser));
-    if (!authUser) resetNotificationNavigation();
-  }, [authUser]);
+    console.log("[NotifyNav] authUser present:", Boolean(authUser), "isCheckingAuth:", isCheckingAuth);
+    if (authUser) {
+      console.log("[Auth] ready");
+      setAuthReady(true);
+    } else {
+      setAuthReady(false);
+      // ONLY reset pending notification navigation if auth check has completed
+      // and user is confirmed logged out. Do not reset while checkAuth() is in flight.
+      if (!isCheckingAuth) {
+        resetNotificationNavigation();
+      }
+    }
+  }, [authUser, isCheckingAuth]);
 
   // Install the FCM + local-notification native listeners once and turn on push
   // when signed in. Listeners are added once regardless of auth.

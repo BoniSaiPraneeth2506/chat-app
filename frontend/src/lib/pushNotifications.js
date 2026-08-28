@@ -23,6 +23,7 @@
 //     redundant there.
 
 import { Capacitor } from "@capacitor/core";
+import { App } from "@capacitor/app";
 import { PushNotifications } from "@capacitor/push-notifications";
 import { LocalNotifications } from "@capacitor/local-notifications";
 import axiosInstance from "./axios.js";
@@ -96,7 +97,9 @@ export function initPushListeners() {
   // state (the OS-created one) → route to the conversation.
   PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
     const data = action?.notification?.data || {};
-    console.log("[Push] action performed (background/killed):", JSON.stringify(data));
+    console.log("[Notification] tapped (background/killed)");
+    console.log("[Capacitor notification action received]:", JSON.stringify(data));
+    console.log("[Android Intent] conversationId:", data?.conversationId);
     handleNotificationTap(data);
   });
 
@@ -104,9 +107,50 @@ export function initPushListeners() {
   // conversation.
   LocalNotifications.addListener("localNotificationActionPerformed", (action) => {
     const extra = action?.notification?.extra || {};
-    console.log("[Local] action performed (foreground):", JSON.stringify(extra));
+    console.log("[Notification] tapped (foreground)");
+    console.log("[Local notification action received]:", JSON.stringify(extra));
     handleNotificationTap(extra);
   });
+
+  // Cold-start launch intent. When Chatty is force-killed and launched by
+  // tapping a notification, the Capacitor push plugin only surfaces the tap if
+  // the launch intent happens to carry `google.message_id` — which some OEMs
+  // (vivo) drop. As a reliable fallback MainActivity exposes the captured
+  // `data` extras through a native JavascriptInterface; we pull them at
+  // boot (with retries for bridge initialization) and route through the same
+  // centralized path. Dedup in notificationNavigation absorbs any overlap.
+  pullLaunchTap();
+
+  // A background tap resumes the already-running app. MainActivity re-captures
+  // the tap in onNewIntent, but the plugin event may again be silently dropped
+  // (missing google.message_id), so pull the native bridge again on resume.
+  App.addListener("resume", () => {
+    setTimeout(() => pullLaunchTap(), 400);
+  });
+}
+
+// Read a notification tap that launched the app from a cold start via the
+// native launch-intent bridge (see MainActivity.AndroidBridge). Retries up to
+// 4 times to accommodate WebView JavascriptInterface injection timing.
+function pullLaunchTap(attemptsLeft = 4) {
+  try {
+    const bridge = window.AndroidBridge;
+    if (!bridge || typeof bridge.getLaunchTap !== "function") {
+      if (attemptsLeft > 0) {
+        setTimeout(() => pullLaunchTap(attemptsLeft - 1), 200);
+      }
+      return;
+    }
+    const json = bridge.getLaunchTap();
+    if (!json) return;
+    const data = JSON.parse(json);
+    console.log("[Notification] tapped (cold start bridge)");
+    console.log("[Push] cold-start launch tap from native bridge:", JSON.stringify(data));
+    console.log("[Android Intent] conversationId:", data?.conversationId);
+    handleNotificationTap(data);
+  } catch (err) {
+    console.error("[push] error reading cold-start launch tap:", err.message);
+  }
 }
 
 // Re-create the incoming FCM message as a local notification so that tapping it

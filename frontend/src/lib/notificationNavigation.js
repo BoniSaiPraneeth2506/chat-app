@@ -16,6 +16,26 @@ let authReady = false;
 let pending = null;
 let inFlight = false;
 
+// De-duplicate taps that arrive through BOTH delivery paths for the SAME
+// conversation within a short window — e.g. on cold start the retained
+// pushNotificationActionPerformed event AND the native launch-intent bridge may
+// both deliver the same tap. Idempotent consumers only; a genuine re-tap on a
+// new conversation (or after the window) still navigates.
+let lastHandled = { conversationId: null, at: 0 };
+const DEDUP_WINDOW_MS = 5000;
+
+// Expose internal state for remote debugging (CDP): lets us inspect whether a
+// cold-start tap was received/consumed and whether nav was held.
+if (typeof window !== "undefined") {
+  window.__notifyNavDebug = () => ({
+    navigateFnSet: !!navigateFn,
+    authReady,
+    pending,
+    inFlight,
+    lastHandled,
+  });
+}
+
 function log(...args) {
   console.log("[NotifyNav]", ...args);
 }
@@ -54,9 +74,18 @@ export function handleNotificationTap(data) {
   };
 
   log("[React] notification tap received:", JSON.stringify(payload));
+  log(`[React] received conversationId: ${payload.conversationId}`);
 
   if (!payload.conversationId) {
     log("no conversationId — ignoring tap", JSON.stringify(payload));
+    return;
+  }
+
+  // Ignore a duplicate delivery of the same conversation tap (plugin retained
+  // event + native launch-intent bridge on cold start both fire for one tap).
+  const now = Date.now();
+  if (lastHandled.conversationId === payload.conversationId && now - lastHandled.at < DEDUP_WINDOW_MS) {
+    log("duplicate tap for", payload.conversationId, "ignored");
     return;
   }
 
@@ -82,7 +111,8 @@ function tryNavigate() {
   const target = pending;
   pending = null; // consume the tap exactly once
   inFlight = true;
-  log("[Navigate] opening conversation", target.conversationId, "type", target.type || "dm");
+  lastHandled = { conversationId: target.conversationId, at: Date.now() };
+  log(`[Navigate] opening conversation ${target.conversationId}`);
   run(target).finally(() => {
     inFlight = false;
     // A tap that arrived while a navigation was in flight may still be held;
@@ -101,6 +131,7 @@ async function run(target) {
       groupStore.selectedGroup;
 
     if (existing) {
+      log(`[Final route] group / (selectedGroup: ${existing._id})`);
       await openGroup(existing);
       return;
     }
@@ -110,9 +141,11 @@ async function run(target) {
       .getState()
       .groups?.find((g) => String(g._id) === String(conversationId));
     if (fresh) {
+      log(`[Final route] group / (selectedGroup: ${fresh._id})`);
       await openGroup(fresh);
     } else {
       log("group not found, opening home");
+      log("[Final route] /");
       navigateFn("/");
     }
     return;
@@ -121,8 +154,10 @@ async function run(target) {
   // DMs (chat_message / reply / reaction) + anything else carrying a
   // conversationId: open the exact conversation via the existing deep-link
   // route. conversationId for a DM IS the partner's user id.
-  log("[Navigate] DM → /chat-with/" + conversationId);
-  navigateFn(`/chat-with/${conversationId}`);
+  const targetRoute = `/chat-with/${conversationId}`;
+  log(`[Navigate] DM → ${targetRoute}`);
+  log(`[Final route] ${targetRoute}`);
+  navigateFn(targetRoute);
 }
 
 function openGroup(group) {
