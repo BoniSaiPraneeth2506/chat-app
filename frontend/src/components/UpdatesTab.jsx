@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import StatusRow from "./StatusRow";
 import { useGroupStore } from "../store/useGroupStore";
 import useAuthStore from "../store/useAuthStore";
@@ -16,7 +15,6 @@ const UpdatesTab = () => {
   const {
     groups,
     isGroupsLoading,
-    getGroups,
     setSelectedGroup,
     setGroupPreview,
     latestGroupMessages,
@@ -24,10 +22,6 @@ const UpdatesTab = () => {
     mentionedGroups,
   } = useGroupStore();
   const authUser = useAuthStore((s) => s.authUser);
-
-  useEffect(() => {
-    getGroups();
-  }, [getGroups]);
 
   const asIds = (arr) => new Set((arr || []).map((x) => String(x?._id || x)));
   const favoriteGroupIds = asIds(authUser?.favoriteGroups);

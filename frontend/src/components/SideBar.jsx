@@ -1066,10 +1066,11 @@ const SideBar = () => {
           })}
         </div>
 
-        {/* Tab content */}
+        {/* Tab content — every tab stays mounted (only hidden with CSS), so
+            switching tabs never refetches or drops socket subscriptions; the
+            data persists in the stores just like the always-mounted Chats tab. */}
         <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
-        {activeTab === "chats" ? (
-          <>
+        <div className={`${activeTab === "chats" ? "flex" : "hidden"} h-full flex-col min-h-0 min-w-0`}>
       <div className="w-full pt-3 px-4 pb-3.5 flex-shrink-0">
         {/* Search Bar & New Group Action */}
         <div className="flex items-center gap-2">
@@ -1215,39 +1216,52 @@ const SideBar = () => {
           </>
         )}
       </div>
-          </>
-          ) : activeTab === "calls" ? (
-            <CallsTab />
-          ) : (
-            <UpdatesTab />
-          )}
+        </div>
+        <div className={`${activeTab === "calls" ? "flex" : "hidden"} h-full flex-col min-h-0 min-w-0`}>
+          <CallsTab />
+        </div>
+        <div className={`${activeTab === "updates" ? "flex" : "hidden"} h-full flex-col min-h-0 min-w-0`}>
+          <UpdatesTab />
+        </div>
         </div>
       </div>
 
-      {/* Mobile: bottom tab bar (hidden on desktop) */}
-      <div className="flex lg:hidden items-stretch flex-shrink-0 border-t border-base-300 bg-base-100 pb-[env(safe-area-inset-bottom)] z-10">
-        {([
-          { id: "chats", label: "Chats", Icon: MessageSquare },
-          { id: "updates", label: "Updates", Icon: RefreshCw },
-          { id: "calls", label: "Calls", Icon: Phone },
-        ]).map((t) => {
-          const isActive = activeTab === t.id;
-          const Icon = t.Icon;
-          return (
-            <button
-              key={t.id}
-              onClick={() => useUpdatesStore.getState().setActiveTab(t.id)}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 transition-colors select-none ${
-                isActive
-                  ? "text-primary"
-                  : "text-base-content/60 hover:text-base-content"
-              }`}
-            >
-              <Icon size={20} strokeWidth={isActive ? 2.4 : 2} />
-              <span className="text-xs font-semibold">{t.label}</span>
-            </button>
-          );
-        })}
+      {/* Mobile: bottom tab bar (hidden on desktop) — a clean segmented bar
+          with an animated active pill, so it reads modern on small screens. */}
+      <div className="flex lg:hidden items-stretch flex-shrink-0 px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-1.5 z-10">
+        <div className="relative flex flex-1 bg-base-200/90 backdrop-blur-md rounded-2xl border border-base-300/80 p-1 shadow-sm">
+          {/* Animated active pill slides behind the selected tab */}
+          <span
+            className={`absolute top-1 bottom-1 w-[calc((100%-0.5rem)/3)] rounded-xl bg-base-100 shadow-sm border border-base-300/70 transition-transform duration-300 ease-out ${
+              activeTab === "chats"
+                ? "translate-x-0"
+                : activeTab === "updates"
+                ? "translate-x-[100%]"
+                : "translate-x-[200%]"
+            }`}
+            style={{ left: "0.25rem" }}
+          />
+          {([
+            { id: "chats", label: "Chats", Icon: MessageSquare },
+            { id: "updates", label: "Updates", Icon: RefreshCw },
+            { id: "calls", label: "Calls", Icon: Phone },
+          ]).map((t) => {
+            const isActive = activeTab === t.id;
+            const Icon = t.Icon;
+            return (
+              <button
+                key={t.id}
+                onClick={() => useUpdatesStore.getState().setActiveTab(t.id)}
+                className={`relative flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl transition-colors select-none ${
+                  isActive ? "text-primary" : "text-base-content/55 hover:text-base-content"
+                }`}
+              >
+                <Icon size={19} strokeWidth={isActive ? 2.4 : 2} className={isActive ? "drop-shadow-sm" : ""} />
+                <span className="text-xs font-semibold">{t.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {lockPrompt && (

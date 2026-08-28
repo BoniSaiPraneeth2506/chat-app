@@ -51,6 +51,15 @@ import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
 import SignUpPage from './pages/SignUpPage'
 import SettingsPage from './pages/SettingsPage'
+import ThemeSettingsPage from './pages/ThemeSettingsPage'
+import NotificationSettingsPage from './pages/NotificationSettingsPage'
+import WallpaperSettingsPage from './pages/WallpaperSettingsPage'
+import AppPreferencesPage from './pages/AppPreferencesPage'
+import LockedChatsPage from './pages/LockedChatsPage'
+import DisappearingMessagesPage from './pages/DisappearingMessagesPage'
+import AccountPage from './pages/AccountPage'
+import FeaturesPage from './pages/FeaturesPage'
+import FeatureDetailPage from './pages/FeatureDetailPage'
 import ProfilePage from './pages/ProfilePage'
 import LinkedDevicesPage from './pages/LinkedDevicesPage'
 import BlockedUsersPage from './pages/BlockedUsersPage'
@@ -455,6 +464,15 @@ const App = () => {
         <Route path='/login' element={<LoginRoute authUser={authUser} />} />
         <Route path='/signup' element={!authUser ? <SignUpPage /> : <Navigate to='/' />} />
         <Route path='/settings' element={authUser ? <SettingsPage /> : <Navigate to='/login' />} />
+        <Route path='/settings/theme' element={authUser ? <ThemeSettingsPage /> : <Navigate to='/login' />} />
+        <Route path='/settings/notifications' element={authUser ? <NotificationSettingsPage /> : <Navigate to='/login' />} />
+        <Route path='/settings/wallpaper' element={authUser ? <WallpaperSettingsPage /> : <Navigate to='/login' />} />
+        <Route path='/settings/app-preferences' element={authUser ? <AppPreferencesPage /> : <Navigate to='/login' />} />
+        <Route path='/settings/locked-chats' element={authUser ? <LockedChatsPage /> : <Navigate to='/login' />} />
+        <Route path='/settings/disappearing-messages' element={authUser ? <DisappearingMessagesPage /> : <Navigate to='/login' />} />
+        <Route path='/settings/account' element={authUser ? <AccountPage /> : <Navigate to='/login' />} />
+        <Route path='/settings/features' element={authUser ? <FeaturesPage /> : <Navigate to='/login' />} />
+        <Route path='/settings/feature/:id' element={authUser ? <FeatureDetailPage /> : <Navigate to='/login' />} />
         <Route path='/profile' element={authUser ? <ProfilePage /> : <Navigate to='/login' />} />
         <Route path='/linked-devices' element={authUser ? <LinkedDevicesPage /> : <Navigate to='/login' />} />
         <Route path='/blocked' element={authUser ? <BlockedUsersPage /> : <Navigate to='/login' />} />

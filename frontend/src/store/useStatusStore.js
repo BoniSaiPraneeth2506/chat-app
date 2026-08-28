@@ -2,6 +2,24 @@ import { create } from "zustand";
 import axiosInstance from "../lib/axios";
 import useAuthStore from "./useAuthStore";
 
+let statusPruneInterval = null;
+
+// Drop statuses past their 24h window and any group left empty by that.
+// Mirrors the server's expiresAt logic so the UI never lingers on an expired
+// status between refetches — the backend cleanup job deletes them from the DB,
+// and this keeps the client's cached list in step without a rebuild.
+const pruneExpired = (groups) => {
+  const now = Date.now();
+  return (groups || [])
+    .map((g) => ({
+      ...g,
+      statuses: (g.statuses || []).filter(
+        (s) => !s.expiresAt || new Date(s.expiresAt).getTime() > now
+      ),
+    }))
+    .filter((g) => g.statuses.length > 0 || g.isOwn);
+};
+
 export const useStatusStore = create((set, get) => ({
   statusGroups: [],
   isLoadingStatuses: false,
@@ -18,7 +36,7 @@ export const useStatusStore = create((set, get) => ({
     set({ isLoadingStatuses: true });
     try {
       const res = await axiosInstance.get("/status");
-      set({ statusGroups: res.data || [] });
+      set({ statusGroups: pruneExpired(res.data || []) });
     } catch (err) {
       console.error("Error fetching statuses:", err.message);
     } finally {
@@ -33,6 +51,13 @@ export const useStatusStore = create((set, get) => ({
     socket.off("status:new");
     socket.off("status:deleted");
     socket.off("status:viewed");
+
+    // Periodically drop statuses that cross their 24h expiry locally, so the
+    // cached Updates tab matches the server's cleanup without a full refetch.
+    clearInterval(statusPruneInterval);
+    statusPruneInterval = setInterval(() => {
+      get().pruneExpiredStatuses();
+    }, 60_000);
 
     socket.on("status:new", (statusData) => {
       const { statusGroups } = get();
@@ -152,6 +177,9 @@ export const useStatusStore = create((set, get) => ({
   },
 
   unsubscribeFromStatusEvents: () => {
+    clearInterval(statusPruneInterval);
+    statusPruneInterval = null;
+
     const socket = useAuthStore.getState().socket;
     if (!socket) return;
     socket.off("status:new");
@@ -199,6 +227,10 @@ export const useStatusStore = create((set, get) => ({
   },
 
   setViewingMediaUrl: (url) => set({ viewingMediaUrl: url }),
+
+  pruneExpiredStatuses: () => {
+    set({ statusGroups: pruneExpired(get().statusGroups) });
+  },
 
   markAsViewed: async (statusId) => {
     try {

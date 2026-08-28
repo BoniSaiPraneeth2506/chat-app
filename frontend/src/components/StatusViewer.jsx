@@ -5,8 +5,12 @@ import { X, Eye, ChevronLeft, ChevronRight, Trash2, Pause, Play, Send, Heart, Sm
 import { haptic } from "../lib/haptics";
 import toast from "react-hot-toast";
 
-const STATUS_IMAGE_DURATION_MS = 5000;
+const STATUS_IMAGE_DURATION_MS = 10000;
 const QUICK_EMOJIS = ["😍", "😂", "😮", "😢", "🙏", "🔥", "👏", "❤️"];
+
+// In-memory media-URL cache so reopening a status doesn't refetch the URL
+// every time — statuses are immutable once posted, so this stays valid.
+const statusMediaCache = new Map();
 
 function formatTimeAgo(dateStr) {
   if (!dateStr) return "";
@@ -111,8 +115,19 @@ const StatusViewer = () => {
   const loadMedia = useCallback(async () => {
     if (!currentStatus?._id) return;
     if (currentStatus.media?.url) {
+      statusMediaCache.set(currentStatus._id, currentStatus.media.url);
       setMediaUrl(currentStatus.media.url);
       setViewingMediaUrl(currentStatus.media.url);
+      setLoading(false);
+      setProgress(0);
+      return;
+    }
+    // Serve from the in-memory cache when we've resolved this URL before, so
+    // closing and reopening a status never flashes a loader.
+    const cachedUrl = statusMediaCache.get(currentStatus._id);
+    if (cachedUrl) {
+      setMediaUrl(cachedUrl);
+      setViewingMediaUrl(cachedUrl);
       setLoading(false);
       setProgress(0);
       return;
@@ -121,6 +136,7 @@ const StatusViewer = () => {
     setProgress(0);
     try {
       const url = await fetchMediaUrlSafe(currentStatus._id);
+      if (url) statusMediaCache.set(currentStatus._id, url);
       setMediaUrl(url);
       setViewingMediaUrl(url);
     } catch {
@@ -334,12 +350,13 @@ const StatusViewer = () => {
       className="fixed inset-0 z-[130] bg-black flex flex-col animate-in fade-in duration-150 select-none"
       onClick={handleInteraction}
     >
-      {/* Progress bars */}
-      <div className="absolute top-0 left-0 right-0 z-20 flex gap-1 px-3 pt-3 pb-2">
+      {/* Progress bars — z-30 so they sit ABOVE the header's dark gradient
+          (WhatsApp shows the thin line at the very top, over the black). */}
+      <div className="absolute top-0 left-0 right-0 z-30 flex gap-1 px-3 pt-3 pb-2">
         {viewingStatusGroup.statuses.map((s, i) => (
           <div
             key={s._id}
-            className="flex-1 h-[2.5px] rounded-full overflow-hidden bg-white/30"
+            className="flex-1 h-[3px] rounded-full overflow-hidden bg-white/35"
           >
             <div
               className="h-full rounded-full"
@@ -350,7 +367,8 @@ const StatusViewer = () => {
                     : i === viewingIndex
                     ? `${progress}%`
                     : "0%",
-                backgroundColor: "white",
+                backgroundColor: "#34b7f1",
+                boxShadow: "0 0 6px rgba(52,183,241,0.7)",
                 transition: isVideo && i === viewingIndex ? "none" : "width 100ms linear",
               }}
             />
@@ -358,12 +376,9 @@ const StatusViewer = () => {
         ))}
       </div>
 
-      {/* Top Header */}
-      <div
-        className={`absolute top-0 left-0 right-0 z-20 px-3 pt-4 pb-3 bg-gradient-to-b from-black/75 via-black/40 to-transparent transition-opacity duration-200 ${
-          showControls ? "opacity-100" : "opacity-0 pointer-events-none"
-        }`}
-      >
+      {/* Top Header — always visible while the status plays, like real-world
+          story viewers, so the name + upload time never need a tap to appear. */}
+      <div className="absolute top-0 left-0 right-0 z-20 px-3 pt-4 pb-3 bg-gradient-to-b from-black/75 via-black/40 to-transparent">
         <div className="flex items-center gap-2.5">
           {/* Top Left Back Button (WhatsApp Style) */}
           <button

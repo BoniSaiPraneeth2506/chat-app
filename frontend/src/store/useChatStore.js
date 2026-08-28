@@ -1094,13 +1094,22 @@ export const useChatStore = create((set, get) => ({
 
       // Normalize IDs to string for consistent keying
       const senderKey = typeof newMessage.senderId === 'object' ? (newMessage.senderId._id || newMessage.senderId.toString()) : newMessage.senderId;
+      const receiverKey = typeof newMessage.receiverId === 'object'
+        ? (newMessage.receiverId?._id || newMessage.receiverId?.toString())
+        : newMessage.receiverId;
 
-      // Update latest message for the sender (prefer scheduledAt when present)
+      // The sidebar preview line belongs to the conversation partner, not the
+      // sender. Sending a message echoes it back with senderId === us, so keying
+      // it under our own id would make the "Personal Notes (You)" row show
+      // something we just sent to someone else. (Self-notes already return above.)
+      const conversationKey = senderKey === currentUser?._id ? receiverKey : senderKey;
+
+      // Update the latest message for the conversation (prefer scheduledAt when present)
       set((state) => ({
         latestMessages: {
           ...state.latestMessages,
-          [senderKey]: {
-            ...(state.latestMessages[senderKey] || {}),
+          [conversationKey]: {
+            ...(state.latestMessages[conversationKey] || {}),
             ...newMessage
           }
         }
@@ -1112,12 +1121,8 @@ export const useChatStore = create((set, get) => ({
 
       // Write-through to the local cache regardless of which chat is open,
       // so reopening this conversation later (even offline) shows it.
-      if (currentUser) {
-        const receiverKey = typeof newMessage.receiverId === 'object'
-          ? (newMessage.receiverId._id || newMessage.receiverId.toString())
-          : newMessage.receiverId;
-        const otherPartyId = senderKey === currentUser._id ? receiverKey : senderKey;
-        if (otherPartyId) cacheMessages(currentUser._id, dmKey(otherPartyId), [newMessage]);
+      if (currentUser && conversationKey) {
+        cacheMessages(currentUser._id, dmKey(conversationKey), [newMessage]);
       }
 
       // Belongs to the open chat if either end of it is the person on screen —

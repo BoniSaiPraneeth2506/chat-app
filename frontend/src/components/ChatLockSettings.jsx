@@ -18,8 +18,7 @@ import { haptic } from "../lib/haptics";
 const field =
   "field-focus w-full h-11 px-3.5 text-sm rounded-xl bg-base-200 border-0 text-base-content ph-dim";
 
-const row = "flex items-center justify-between gap-3 p-3.5 rounded-xl border";
-const rowStyle = { borderColor: "var(--color-base-300)" };
+const row = "flex items-center justify-between gap-3 px-3 py-3.5";
 
 const ChatLockSettings = () => {
   const { authUser } = useAuthStore();
@@ -149,21 +148,24 @@ const ChatLockSettings = () => {
       </div>
 
       {/* Main switch */}
-      <div className={row} style={rowStyle}>
-        <div className="space-y-0.5 min-w-0">
-          <span className="text-xs font-semibold">Locked Chats</span>
-          <p className="text-[10px] opacity-70">
-            {enabled
-              ? `${lockedCount} ${lockedCount === 1 ? "chat" : "chats"} hidden · double-tap the Chatty logo to open`
-              : "Hide chosen chats behind a separate password"}
-          </p>
+      <div className="overflow-hidden rounded-2xl divide-y divide-base-300/40"
+           style={{ backgroundColor: "var(--color-base-200)/40" }}>
+        <div className={row}>
+          <div className="space-y-0.5 min-w-0">
+            <span className="text-xs font-semibold">Locked Chats</span>
+            <p className="text-[10px] opacity-70">
+              {enabled
+                ? `${lockedCount} ${lockedCount === 1 ? "chat" : "chats"} hidden · double-tap the Chatty logo to open`
+                : "Hide chosen chats behind a separate password"}
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            className="toggle toggle-primary toggle-sm shrink-0"
+            checked={enabled || expanded}
+            onChange={(e) => toggleLock(e.target.checked)}
+          />
         </div>
-        <input
-          type="checkbox"
-          className="toggle toggle-primary toggle-sm shrink-0"
-          checked={enabled || expanded}
-          onChange={(e) => toggleLock(e.target.checked)}
-        />
       </div>
 
       {/* Setup, inline under the switch it belongs to */}
@@ -216,43 +218,45 @@ const ChatLockSettings = () => {
 
       {enabled && (
         <>
-          {biometry.available && (
-            <div className={row} style={rowStyle}>
-              <div className="space-y-0.5 min-w-0">
-                <span className="flex items-center gap-1.5 text-xs font-semibold">
-                  <Fingerprint size={12} className="text-primary" />
-                  Unlock with fingerprint
-                </span>
-                <p className="text-[10px] opacity-70">
-                  Keeps the lock password on this device, released by your fingerprint
-                </p>
+          <div className="overflow-hidden rounded-2xl divide-y divide-base-300/40"
+               style={{ backgroundColor: "var(--color-base-200)/40" }}>
+            {biometry.available && (
+              <div className={row}>
+                <div className="space-y-0.5 min-w-0">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold">
+                    <Fingerprint size={12} className="text-primary" />
+                    Unlock with fingerprint
+                  </span>
+                  <p className="text-[10px] opacity-70">
+                    Keeps the lock password on this device, released by your fingerprint
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  className="toggle toggle-primary toggle-sm shrink-0"
+                  checked={bioOn}
+                  onChange={(e) => toggleBiometric(e.target.checked)}
+                />
               </div>
-              <input
-                type="checkbox"
-                className="toggle toggle-primary toggle-sm shrink-0"
-                checked={bioOn}
-                onChange={(e) => toggleBiometric(e.target.checked)}
-              />
-            </div>
-          )}
+            )}
 
-          <button
-            type="button"
-            onClick={() => setChanging((v) => !v)}
-            className={`${row} w-full text-left s-row`}
-            style={rowStyle}
-          >
-            <span className="space-y-0.5 min-w-0">
-              <span className="block text-xs font-semibold">Change lock password</span>
-              <span className="block text-[10px] opacity-70">
-                You will confirm the current one
+            <button
+              type="button"
+              onClick={() => setChanging((v) => !v)}
+              className={`${row} w-full text-left hover:bg-base-200/70`}
+            >
+              <span className="space-y-0.5 min-w-0">
+                <span className="block text-xs font-semibold">Change lock password</span>
+                <span className="block text-[10px] opacity-70">
+                  You will confirm the current one
+                </span>
               </span>
-            </span>
-            <ChevronRight
-              size={15}
-              className={`t-dim shrink-0 transition-transform ${changing ? "rotate-90" : ""}`}
-            />
-          </button>
+              <ChevronRight
+                size={15}
+                className={`t-dim shrink-0 transition-transform ${changing ? "rotate-90" : ""}`}
+              />
+            </button>
+          </div>
 
           {changing && (
             <form onSubmit={onChange} className="p-3.5 space-y-2.5 rounded-xl s-chip">
