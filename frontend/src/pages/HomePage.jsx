@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
+import { useChannelStore } from "../store/useChannelStore";
+import { useUpdatesStore } from "../store/useUpdatesStore";
+import { useIsDesktop } from "../hooks/useIsDesktop";
 import NoChatSelected from "../components/NoChatSelected";
 import ChatContainer from "../components/ChatContainer";
+import ChannelFeed from "../components/ChannelFeed";
+import ChannelInfo from "../components/ChannelInfo";
 import SideBar from "../components/SideBar";
 
 const MIN_SIDEBAR_WIDTH = 300;
@@ -12,18 +17,24 @@ const DEFAULT_SIDEBAR_WIDTH = 420;
 const HomePage = () => {
   const { selectedUser, setSelectedUser } = useChatStore();
   const { selectedGroup, setSelectedGroup } = useGroupStore();
+  const isChannelFeedOpen = useChannelStore((s) => s.isChannelFeedOpen);
+  const isChannelInfoOpen = useChannelStore((s) => s.isChannelInfoOpen);
+  const activeTab = useUpdatesStore((s) => s.activeTab);
   const popstateClosedRef = useRef(false);
 
   const hasActiveChat = selectedUser || selectedGroup;
 
-  // Track whether we're on a large screen (lg = 1024px+)
-  const [isDesktop, setIsDesktop] = useState(() => window.innerWidth >= 1024);
-  useEffect(() => {
-    const mql = window.matchMedia("(min-width: 1024px)");
-    const handler = (e) => setIsDesktop(e.matches);
-    mql.addEventListener("change", handler);
-    return () => mql.removeEventListener("change", handler);
-  }, []);
+  // On desktop, an open channel is shown in the right panel (like a chat),
+  // while the channel list stays in the sidebar. Only when on the Channels tab.
+  const channelScreenOpen =
+    activeTab === "channels" && (isChannelFeedOpen || isChannelInfoOpen);
+
+  const isDesktop = useIsDesktop();
+
+  // Full-screen edge-to-edge when a chat is open, or when a channel is open on
+  // mobile (channel feeds are full-screen there, with the top app bar and the
+  // bottom tab bar hidden).
+  const isFullScreen = hasActiveChat || (!isDesktop && channelScreenOpen);
 
   // Resizable sidebar state — desktop only
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
@@ -95,12 +106,12 @@ const HomePage = () => {
     <div className="h-screen bg-base-200">
       <div
         className={`flex items-center justify-center w-full h-full px-0 lg:px-4 lg:pt-[68px]
-          ${hasActiveChat ? "pt-0" : "pt-16"}
+          ${isFullScreen ? "pt-0" : "pt-16"}
         `}
       >
         <div
           className={`bg-base-100 shadow-cl w-full rounded-none lg:rounded-lg
-            ${hasActiveChat ? "h-screen" : "h-[calc(100vh-4rem)]"}
+            ${isFullScreen ? "h-screen" : "h-[calc(100vh-4rem)]"}
             lg:h-[calc(100vh-4.5rem)]
           `}
         >
@@ -128,10 +139,17 @@ const HomePage = () => {
               </div>
             )}
 
-            {/* ── Chat area: desktop always, mobile only when chat is selected ── */}
+            {/* ── Chat area: desktop always, mobile only when chat is selected.
+                   On desktop an open channel fills this panel like a chat. ── */}
             {(isDesktop || hasActiveChat) && (
               <div className="flex flex-1 h-full min-w-0 overflow-hidden">
-                {!hasActiveChat ? <NoChatSelected /> : <ChatContainer />}
+                {isDesktop && channelScreenOpen ? (
+                  isChannelInfoOpen ? <ChannelInfo /> : <ChannelFeed />
+                ) : !hasActiveChat ? (
+                  <NoChatSelected />
+                ) : (
+                  <ChatContainer />
+                )}
               </div>
             )}
 

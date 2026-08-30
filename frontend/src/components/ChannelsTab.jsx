@@ -3,6 +3,7 @@ import { useChannelStore } from "../store/useChannelStore";
 import useAuthStore from "../store/useAuthStore";
 import { Search, Plus, Megaphone, Users, BellOff, TrendingUp, Flame } from "lucide-react";
 import { formatMessageTime } from "../lib/utils";
+import { useIsDesktop } from "../hooks/useIsDesktop";
 import ChannelFeed from "./ChannelFeed";
 import CreateChannelModal from "./CreateChannelModal";
 import ExploreChannels from "./ExploreChannels";
@@ -36,6 +37,7 @@ const ChannelsTab = () => {
     unsubscribeFromChannelEvents,
   } = useChannelStore();
   const authUser = useAuthStore((s) => s.authUser);
+  const isDesktop = useIsDesktop();
 
   useEffect(() => {
     fetchMyChannels();
@@ -145,10 +147,12 @@ const ChannelsTab = () => {
     );
   };
 
-  // Channels are always "mounted" beneath the current view, like the other tabs.
-  if (isChannelFeedOpen) return <ChannelFeed />;
+  // The feed / info are full-screen on mobile (replacing this tab view, with
+  // the bottom bar hidden). On desktop they render in the HomePage right panel
+  // like a chat, so they stay out of the sidebar — only the list lives here.
+  if (!isDesktop && isChannelFeedOpen) return <ChannelFeed />;
 
-  if (isChannelInfoOpen) return <ChannelInfo />;
+  if (!isDesktop && isChannelInfoOpen) return <ChannelInfo />;
 
   if (channelsView === "explore") return <ExploreChannels />;
 

@@ -1270,7 +1270,7 @@ const SideBar = () => {
               <button
                 key={t.id}
                 onClick={() => useUpdatesStore.getState().setActiveTab(t.id)}
-                className={`relative flex-1 flex flex-col items-center justify-center gap-0.5 py-1.5 rounded-xl transition-colors select-none ${
+                className={`relative flex-1 flex flex-col items-center justify-center gap-[7px] py-1.5 rounded-xl transition-colors select-none ${
                   isActive ? "text-primary" : "text-base-content/55 hover:text-base-content"
                 }`}
               >

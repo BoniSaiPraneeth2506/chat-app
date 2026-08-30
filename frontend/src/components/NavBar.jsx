@@ -5,6 +5,7 @@ import { useChatStore } from "../store/useChatStore";
 import { useState, useEffect, useRef } from "react";
 import { MessageSquare, Settings, User, Laptop, ShieldOff, UserPlus, Info } from "lucide-react";
 import { useGroupStore } from "../store/useGroupStore";
+import { useChannelStore } from "../store/useChannelStore";
 import { useChatLockStore } from "../store/useChatLockStore";
 import { haptic } from "../lib/haptics";
 
@@ -35,11 +36,16 @@ const Navbar = () => {
   useEffect(() => { refreshSavedAccounts(); }, [authUser?._id, refreshSavedAccounts]);
   const { selectedUser } = useChatStore();
   const { selectedGroup } = useGroupStore();
+  // A channel feed / info is also full-screen on mobile, so the app top header
+  // (wordmark + profile menu) is hidden while one is open — like a chat.
+  const channelOpen = useChannelStore(
+    (s) => s.isChannelFeedOpen || s.isChannelInfoOpen
+  );
 
   return (
     <header
       className={`fixed top-0 z-40 w-full bg-base-100 backdrop-blur-lg bg-base-100/80
-        ${selectedUser || selectedGroup ? "hidden lg:block" : "block"}
+        ${selectedUser || selectedGroup || channelOpen ? "hidden lg:block" : "block"}
       `}
     >
       <div className="container h-16 px-4 mx-auto">
