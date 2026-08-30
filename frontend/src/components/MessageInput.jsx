@@ -885,6 +885,10 @@ const MessageInput = () => {
             </div>
             <button
               type="button"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                setReplyingToMessage(null);
+              }}
               onClick={() => setReplyingToMessage(null)}
               className="p-3 -m-1 hover:bg-base-300 active:bg-base-300 rounded-full transition-colors flex items-center justify-center"
               title="Cancel reply"
@@ -907,6 +911,10 @@ const MessageInput = () => {
             </div>
             <button
               type="button"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                setEditingMessage(null);
+              }}
               onClick={() => setEditingMessage(null)}
               className="p-3 -m-1 hover:bg-base-300 active:bg-base-300 rounded-full transition-colors flex items-center justify-center"
               title="Cancel edit"
