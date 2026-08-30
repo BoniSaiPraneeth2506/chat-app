@@ -886,8 +886,9 @@ const MessageInput = () => {
             <button
               type="button"
               onClick={() => setReplyingToMessage(null)}
-              className="p-1 hover:bg-base-300 rounded-full transition-colors"
+              className="p-3 -m-1 hover:bg-base-300 active:bg-base-300 rounded-full transition-colors flex items-center justify-center"
               title="Cancel reply"
+              aria-label="Cancel reply"
             >
               <X size={14} />
             </button>
@@ -907,8 +908,9 @@ const MessageInput = () => {
             <button
               type="button"
               onClick={() => setEditingMessage(null)}
-              className="p-1 hover:bg-base-300 rounded-full transition-colors"
+              className="p-3 -m-1 hover:bg-base-300 active:bg-base-300 rounded-full transition-colors flex items-center justify-center"
               title="Cancel edit"
+              aria-label="Cancel edit"
             >
               <X size={14} />
             </button>
