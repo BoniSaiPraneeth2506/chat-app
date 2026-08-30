@@ -65,7 +65,7 @@ const ChannelFeed = () => {
   // showing a skeleton here avoids a blank flash).
   if (!channel) {
     return (
-      <div className="h-full flex flex-col min-h-0 min-w-0 bg-base-100">
+      <div className="h-full w-full flex flex-col min-h-0 min-w-0 bg-base-100">
         <div className="px-3 py-2.5 border-b border-base-300 flex items-center gap-3 flex-shrink-0">
           <div className="p-1.5 -ml-1 rounded-full">
             <ArrowLeft size={20} className="text-base-content/30" />
@@ -143,7 +143,7 @@ const ChannelFeed = () => {
   };
 
   return (
-    <div className="h-full flex flex-col min-h-0 min-w-0 bg-base-100">
+    <div className="h-full w-full flex flex-col min-h-0 min-w-0 bg-base-100">
       {/* Header */}
       <div className="px-3 py-2.5 border-b border-base-300 flex items-center gap-3 flex-shrink-0">
         <button

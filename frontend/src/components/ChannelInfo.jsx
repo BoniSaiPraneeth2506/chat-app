@@ -40,7 +40,7 @@ const ChannelInfo = () => {
 
   if (!channel) {
     return (
-      <div className="h-full flex flex-col min-h-0 min-w-0 bg-base-100">
+      <div className="h-full w-full flex flex-col min-h-0 min-w-0 bg-base-100">
         <div className="px-3 py-2.5 flex items-center gap-3 flex-shrink-0">
           <button
             onClick={closeChannelInfo}
@@ -59,7 +59,7 @@ const ChannelInfo = () => {
   }
 
   return (
-    <div className="h-full flex flex-col min-h-0 min-w-0 bg-base-100">
+    <div className="h-full w-full flex flex-col min-h-0 min-w-0 bg-base-100">
       {/* Header */}
       <div className="px-3 py-2.5 border-b border-base-300 flex items-center gap-3 flex-shrink-0">
         <button
