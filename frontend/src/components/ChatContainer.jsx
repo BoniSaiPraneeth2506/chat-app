@@ -24,6 +24,7 @@ import useAuthStore from "../store/useAuthStore";
 import { formatMessageTime } from "../lib/utils";
 import { haptic } from "../lib/haptics";
 import { stopAllAudio } from "../lib/aiAudio";
+import { focusWithKeyboard, hideKeyboard } from "../lib/keyboard";
 
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
 
@@ -695,19 +696,11 @@ const ChatContainer = () => {
       suppressClickRef.current = Date.now();
       haptic("impact");
       setReplyingToMessage(message);
-      // Focus the composer synchronously inside the gesture so Android summons
-      // the soft keyboard (a focus() deferred to requestAnimationFrame often
-      // lands outside the user-gesture window and the keyboard stays hidden).
-      const input = document.getElementById("message-input");
-      if (input) {
-        input.focus();
-        const end = input.value?.length ?? 0;
-        try {
-          input.setSelectionRange(end, end);
-        } catch {
-          /* not every input type supports a selection range */
-        }
-      }
+      // Focus the composer synchronously inside the gesture and explicitly show
+      // the keyboard — focusing within the touch gesture normally opens the
+      // Android soft keyboard, and the Keyboard plugin's show() is the reliable
+      // backstop when a bare focus() is ignored.
+      focusWithKeyboard(document.getElementById("message-input"));
       return;
     }
 
@@ -1359,7 +1352,22 @@ const ChatContainer = () => {
         <div 
           ref={scrollableRef}
           onScroll={handleScroll}
-          onClick={() => setMobileEmojiId(null)}
+          onClick={(e) => {
+            setMobileEmojiId(null);
+            // Tapping the chat backdrop on a phone should fold away an armed
+            // reply (and its keyboard), the way WhatsApp closes the composer
+            // when you tap the conversation. Hidden inputs like the composer's
+            // file pickers are ignored so this never fires accidentally.
+            if (
+              /Mobi|Android|iPhone|iPad|iPod/.test(navigator.userAgent) &&
+              !e.target.closest(".chat-bubble") &&
+              document.activeElement?.blur
+            ) {
+              setReplyingToMessage(null);
+              document.activeElement.blur();
+              hideKeyboard();
+            }
+          }}
           onTouchStart={(e) => {
             if (!e.target.closest(".chat-bubble")) {
               setMobileEmojiId(null);

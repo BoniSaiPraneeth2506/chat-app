@@ -16,6 +16,7 @@ import useAuthStore from "../store/useAuthStore";
 import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3, Pencil, EyeOff, Paperclip, FileText, Video, Loader } from "lucide-react";
 import toast from "react-hot-toast";
 import { haptic } from "../lib/haptics";
+import { focusWithKeyboard } from "../lib/keyboard";
 import ImageEditorModal from "./ImageEditorModal";
 import CreatePollModal from "./CreatePollModal";
 import SchedulePicker from "./SchedulePicker";
@@ -158,17 +159,7 @@ const MessageInput = () => {
       if (replyingToMessage) setReplyingToMessage(null); // Cancel reply if editing
       // Raise the keyboard, and put the caret after the existing text so the
       // edit can be continued rather than overtyped.
-      requestAnimationFrame(() => {
-        const el = inputRef.current;
-        if (!el) return;
-        el.focus();
-        const end = el.value?.length ?? 0;
-        try {
-          el.setSelectionRange(end, end);
-        } catch {
-          // Not all input types support selection ranges.
-        }
-      });
+      requestAnimationFrame(() => focusWithKeyboard(inputRef.current));
     }
   }, [editingMessage]);
 
@@ -179,17 +170,7 @@ const MessageInput = () => {
   // With the caret at the end, continued typing prefaces the quoted message.
   useEffect(() => {
     if (!replyingToMessage) return;
-    requestAnimationFrame(() => {
-      const el = inputRef.current;
-      if (!el) return;
-      el.focus();
-      const end = el.value?.length ?? 0;
-      try {
-        el.setSelectionRange(end, end);
-      } catch {
-        // Not all input types support selection ranges.
-      }
-    });
+    requestAnimationFrame(() => focusWithKeyboard(inputRef.current));
   }, [replyingToMessage?._id]);
 
   useEffect(() => {
