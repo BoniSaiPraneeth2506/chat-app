@@ -195,15 +195,29 @@ export const useChannelStore = create((set, get) => ({
   },
 
   // ── Channel feed (posts) ───────────────────────────────────────────────────
-  openChannel: async (channelId) => {
-    set({ isChannelFeedOpen: true, activeChannelId: channelId, isPostsLoading: true });
+  openChannel: (channelId) => {
+    // The channel is usually already known (joined list, explore or search), so
+    // open the feed instantly with that data — no skeleton/blink. Fresh details
+    // and posts are then fetched in the background and patch the view in.
+    const known =
+      get().channels.find((c) => c._id === channelId) ||
+      get().exploreList.find((c) => c._id === channelId) ||
+      get().searchResults.find((c) => c._id === channelId);
+
+    set({
+      isChannelFeedOpen: true,
+      activeChannelId: channelId,
+      selectedChannel: known || get().selectedChannel,
+      posts: [],
+      hasMore: false,
+      isPostsLoading: true,
+    });
+
     const socket = useAuthStore.getState().socket;
     if (socket) socket.emit("joinChannelRoom", channelId);
 
-    await Promise.all([
-      get().fetchChannelDetails(channelId),
-      get().fetchPosts(channelId),
-    ]);
+    get().fetchChannelDetails(channelId);
+    get().fetchPosts(channelId);
   },
 
   fetchChannelDetails: async (channelId) => {
@@ -239,6 +253,7 @@ export const useChannelStore = create((set, get) => ({
     }
     set({
       isChannelFeedOpen: false,
+      isChannelInfoOpen: false,
       activeChannelId: null,
       selectedChannel: null,
       posts: [],
