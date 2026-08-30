@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
 import { useChannelStore } from "../store/useChannelStore";
-import { useUpdatesStore } from "../store/useUpdatesStore";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import NoChatSelected from "../components/NoChatSelected";
 import ChatContainer from "../components/ChatContainer";
@@ -19,15 +18,13 @@ const HomePage = () => {
   const { selectedGroup, setSelectedGroup } = useGroupStore();
   const isChannelFeedOpen = useChannelStore((s) => s.isChannelFeedOpen);
   const isChannelInfoOpen = useChannelStore((s) => s.isChannelInfoOpen);
-  const activeTab = useUpdatesStore((s) => s.activeTab);
   const popstateClosedRef = useRef(false);
 
   const hasActiveChat = selectedUser || selectedGroup;
 
   // On desktop, an open channel is shown in the right panel (like a chat),
-  // while the channel list stays in the sidebar. Only when on the Channels tab.
-  const channelScreenOpen =
-    activeTab === "channels" && (isChannelFeedOpen || isChannelInfoOpen);
+  // while the channel list stays in the sidebar.
+  const channelScreenOpen = isChannelFeedOpen || isChannelInfoOpen;
 
   const isDesktop = useIsDesktop();
 
