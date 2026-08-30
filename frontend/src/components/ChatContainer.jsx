@@ -695,6 +695,19 @@ const ChatContainer = () => {
       suppressClickRef.current = Date.now();
       haptic("impact");
       setReplyingToMessage(message);
+      // Focus the composer synchronously inside the gesture so Android summons
+      // the soft keyboard (a focus() deferred to requestAnimationFrame often
+      // lands outside the user-gesture window and the keyboard stays hidden).
+      const input = document.getElementById("message-input");
+      if (input) {
+        input.focus();
+        const end = input.value?.length ?? 0;
+        try {
+          input.setSelectionRange(end, end);
+        } catch {
+          /* not every input type supports a selection range */
+        }
+      }
       return;
     }
 
