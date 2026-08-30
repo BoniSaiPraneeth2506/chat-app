@@ -371,6 +371,7 @@ import LockPasswordPrompt from "./LockPasswordPrompt";
 import UpdatesTab from "./UpdatesTab";
 import CallsTab from "./CallsTab";
 import ChannelsTab from "./ChannelsTab";
+import { useChannelStore } from "../store/useChannelStore";
 import { useUpdatesStore } from "../store/useUpdatesStore";
 import { isBiometryAvailable, verifyBiometry, hasStoredLockSecret, readLockSecret } from "../lib/biometrics";
 
@@ -435,6 +436,12 @@ const SideBar = () => {
   } = useGroupStore();
 
   const activeTab = useUpdatesStore((s) => s.activeTab);
+
+  // A channel feed or channel-info screen is full-screen on mobile, so the
+  // bottom tab bar is hidden while one is open (like opening a direct chat).
+  const channelScreenOpen = useChannelStore(
+    (s) => s.isChannelFeedOpen || s.isChannelInfoOpen
+  );
 
   const { onlineUsers, authUser } = useAuthStore();
 
@@ -1232,7 +1239,10 @@ const SideBar = () => {
       </div>
 
       {/* Mobile: bottom tab bar (hidden on desktop) — a clean segmented bar
-          with an animated active pill, so it reads modern on small screens. */}
+          with an animated active pill, so it reads modern on small screens.
+          Hidden while a channel feed / channel-info is open, so the channel
+          feels full-screen like a direct chat. */}
+      {!channelScreenOpen && (
       <div className="flex lg:hidden items-stretch flex-shrink-0 px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-1.5 z-10">
         <div className="relative flex flex-1 bg-base-200/90 backdrop-blur-md rounded-2xl border border-base-300/80 p-1 shadow-sm">
           {/* Animated active pill slides behind the selected tab */}
@@ -1260,17 +1270,18 @@ const SideBar = () => {
               <button
                 key={t.id}
                 onClick={() => useUpdatesStore.getState().setActiveTab(t.id)}
-                className={`relative flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl transition-colors select-none ${
+                className={`relative flex-1 flex flex-col items-center justify-center gap-0.5 py-1.5 rounded-xl transition-colors select-none ${
                   isActive ? "text-primary" : "text-base-content/55 hover:text-base-content"
                 }`}
               >
-                <Icon size={19} strokeWidth={isActive ? 2.4 : 2} className={isActive ? "drop-shadow-sm" : ""} />
-                <span className="text-xs font-semibold">{t.label}</span>
+                <Icon size={22} strokeWidth={isActive ? 2.4 : 2} className={isActive ? "drop-shadow-sm" : ""} />
+                <span className={`${isActive ? "text-[11px]" : "text-[10.5px]"} font-semibold leading-none`}>{t.label}</span>
               </button>
             );
           })}
         </div>
       </div>
+      )}
 
       {lockPrompt && (
         <LockPasswordPrompt
