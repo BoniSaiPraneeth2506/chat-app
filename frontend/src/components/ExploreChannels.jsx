@@ -237,8 +237,13 @@ const ExploreChannels = () => {
                 )}
               </button>
 
-              {/* Info */}
-              <div className="min-w-0 flex-1 text-left">
+              {/* Info — whole section (name/header) opens the channel, not just
+                  the avatar, so it's easy to tap on a phone. */}
+              <button
+                onClick={() => openChannel(channel._id)}
+                className="min-w-0 flex-1 text-left"
+                title="Open channel"
+              >
                 <div className="font-semibold text-base-content truncate text-[15px]">
                   {channel.name}
                 </div>
@@ -254,7 +259,7 @@ const ExploreChannels = () => {
                     </span>
                   )}
                 </div>
-              </div>
+              </button>
 
               {/* Follow / Dismiss */}
               <div className="flex items-center gap-1 flex-shrink-0">

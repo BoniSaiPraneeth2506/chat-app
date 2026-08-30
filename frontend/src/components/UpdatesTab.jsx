@@ -1,5 +1,6 @@
 import StatusRow from "./StatusRow";
 import { useGroupStore } from "../store/useGroupStore";
+import { useChannelStore } from "../store/useChannelStore";
 import useAuthStore from "../store/useAuthStore";
 import { Users, Star, Pin } from "lucide-react";
 import { formatMessageTime } from "../lib/utils";
@@ -60,7 +61,10 @@ const UpdatesTab = () => {
             return (
                 <button
                   key={group._id}
-                  onClick={() => setSelectedGroup(group)}
+                  onClick={() => {
+                    useChannelStore.getState().closeChannel();
+                    setSelectedGroup(group);
+                  }}
                   className="w-full py-3.5 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors group select-none"
                 >
                   <div

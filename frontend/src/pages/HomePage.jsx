@@ -140,12 +140,12 @@ const HomePage = () => {
                    On desktop an open channel fills this panel like a chat. ── */}
             {(isDesktop || hasActiveChat) && (
               <div className="flex flex-1 h-full min-w-0 overflow-hidden">
-                {isDesktop && channelScreenOpen ? (
-                  isChannelInfoOpen ? <ChannelInfo /> : <ChannelFeed />
-                ) : !hasActiveChat ? (
-                  <NoChatSelected />
-                ) : (
+                {hasActiveChat ? (
                   <ChatContainer />
+                ) : isDesktop && channelScreenOpen ? (
+                  isChannelInfoOpen ? <ChannelInfo /> : <ChannelFeed />
+                ) : (
+                  <NoChatSelected />
                 )}
               </div>
             )}

@@ -774,7 +774,10 @@ const SideBar = () => {
     return (
       <button
         key={group._id}
-        onClick={() => setSelectedGroup(group)}
+        onClick={() => {
+          useChannelStore.getState().closeChannel();
+          setSelectedGroup(group);
+        }}
         onContextMenu={(e) => {
           e.preventDefault();
           setContextMenu({ x: e.clientX, y: e.clientY, userId: group._id, kind: "group" });
@@ -892,6 +895,7 @@ const SideBar = () => {
       )}
     <button
       onClick={() => {
+        useChannelStore.getState().closeChannel();
         setSelectedUser(user);
       }}
       onContextMenu={(e) => {

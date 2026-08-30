@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import axiosInstance from "../lib/axios";
 import useAuthStore from "./useAuthStore";
+import { useChatStore } from "./useChatStore";
+import { useGroupStore } from "./useGroupStore";
 
 export const useChannelStore = create((set, get) => ({
   // Joined + owned channels shown in the Channels tab.
@@ -203,6 +205,11 @@ export const useChannelStore = create((set, get) => ({
       get().channels.find((c) => c._id === channelId) ||
       get().exploreList.find((c) => c._id === channelId) ||
       get().searchResults.find((c) => c._id === channelId);
+
+    // Opening a channel is its own screen: clear any open chat/group so the
+    // channel owns the desktop right panel (and the mobile full-screen view).
+    useChatStore.getState().setSelectedUser(null);
+    useGroupStore.getState().setSelectedGroup(null);
 
     set({
       isChannelFeedOpen: true,

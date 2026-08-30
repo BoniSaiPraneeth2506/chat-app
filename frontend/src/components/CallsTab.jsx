@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useUpdatesStore } from "../store/useUpdatesStore";
 import { useChatStore } from "../store/useChatStore";
+import { useChannelStore } from "../store/useChannelStore";
 import {
   PhoneIncoming,
   PhoneOutgoing,
@@ -124,7 +125,10 @@ const CallsTab = () => {
       setActiveTab("chats");
       const users = useChatStore.getState().users;
       const found = users?.find((u) => String(u._id) === String(call.user.idValue));
-      if (found) setSelectedUser(found);
+      if (found) {
+        useChannelStore.getState().closeChannel();
+        setSelectedUser(found);
+      }
     }
   };
 

@@ -41,6 +41,19 @@ const isBlockedBetween = async (a, b) => {
   return aBlocks.includes(b.toString()) || bBlocks.includes(a.toString());
 };
 
+// Statuses are only shown to people you've actually chatted with — like
+// WhatsApp, your status is visible to real contacts, not every account. Two
+// users have "chatted" when at least one direct (non-group) message exists
+// between them in either direction.
+const hasChatWith = (a, b) =>
+  Message.exists({
+    groupId: null,
+    $or: [
+      { senderId: a, receiverId: b },
+      { senderId: b, receiverId: a },
+    ],
+  }).then(Boolean);
+
 export const createStatus = async (req, res) => {
   try {
     if (!isStorageConfigured()) {
@@ -130,6 +143,25 @@ export const getStatuses = async (req, res) => {
 
     const blockedIds = await getBlockedIds(userId);
 
+    // Statuses are only shown to people you've actually chatted with — like
+    // WhatsApp, your status appears to real contacts, not to every registered
+    // account. "Chatted with" = there is at least one direct (non-group) message
+    // between the two of you in either direction.
+    const chattedRows = await Message.find({
+      groupId: null,
+      $or: [{ senderId: userId }, { receiverId: userId }],
+    })
+      .select("senderId receiverId")
+      .lean();
+
+    const chattedUserIds = new Set(
+      chattedRows.flatMap((m) =>
+        [m.senderId, m.receiverId]
+          .filter((id) => id && id.toString() !== userId.toString())
+          .map((id) => id.toString())
+      )
+    );
+
     const statuses = await Status.find({
       expiresAt: { $gt: now },
       cleanupStatus: { $ne: "cleaned" },
@@ -142,7 +174,8 @@ export const getStatuses = async (req, res) => {
       (s) =>
         s.user &&
         s.user._id.toString() !== userId.toString() &&
-        !blockedIds.includes(s.user._id.toString())
+        !blockedIds.includes(s.user._id.toString()) &&
+        chattedUserIds.has(s.user._id.toString())
     );
 
     // Pre-sign all media URLs in parallel for instant display
@@ -244,6 +277,11 @@ export const getUserStatuses = async (req, res) => {
       return res.status(404).json({ message: "Status not found" });
     }
 
+    // Only people you've actually chatted with may view your status.
+    if (targetId.toString() !== viewerId.toString() && !(await hasChatWith(viewerId, targetId))) {
+      return res.status(404).json({ message: "Status not found" });
+    }
+
     const statuses = await Status.find({
       user: targetId,
       expiresAt: { $gt: now },
@@ -283,6 +321,11 @@ export const viewStatus = async (req, res) => {
     }
 
     if (await isBlockedBetween(viewerId, status.user)) {
+      return res.status(404).json({ message: "Status not found" });
+    }
+
+    // Only people you've actually chatted with may view your status.
+    if (status.user.toString() !== viewerId.toString() && !(await hasChatWith(viewerId, status.user))) {
       return res.status(404).json({ message: "Status not found" });
     }
 
