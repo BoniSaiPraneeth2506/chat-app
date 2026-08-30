@@ -18,7 +18,14 @@ const CATEGORIES = [
 ];
 
 const CreateChannelModal = () => {
-  const { isCreateModalOpen, setCreateModalOpen, createChannel } = useChannelStore();
+  const {
+    isCreateModalOpen,
+    setCreateModalOpen,
+    createChannel,
+    updateChannel,
+    editingChannel,
+    clearEditingChannel,
+  } = useChannelStore();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("");
@@ -26,17 +33,30 @@ const CreateChannelModal = () => {
   const [avatar, setAvatar] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const close = () => setCreateModalOpen(false);
+  const isEditing = Boolean(editingChannel);
+
+  const close = () => {
+    setCreateModalOpen(false);
+    clearEditingChannel();
+  };
 
   useEffect(() => {
     if (!isCreateModalOpen) return;
-    setName("");
-    setDescription("");
-    setCategory("");
-    setPrivacy("public");
-    setAvatar("");
+    if (editingChannel) {
+      setName(editingChannel.name || "");
+      setDescription(editingChannel.description || "");
+      setCategory(editingChannel.category || "");
+      setPrivacy(editingChannel.privacy || "public");
+      setAvatar(editingChannel.avatar || "");
+    } else {
+      setName("");
+      setDescription("");
+      setCategory("");
+      setPrivacy("public");
+      setAvatar("");
+    }
     setIsSubmitting(false);
-  }, [isCreateModalOpen]);
+  }, [isCreateModalOpen, editingChannel]);
 
   useEffect(() => {
     if (!isCreateModalOpen) return;
@@ -63,17 +83,23 @@ const CreateChannelModal = () => {
     if (!name.trim() || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      await createChannel({
+      const payload = {
         name: name.trim(),
         description: description.trim(),
         category,
         privacy,
         avatar,
-      });
-      toast.success("Channel created");
+      };
+      if (isEditing) {
+        await updateChannel(editingChannel._id, payload);
+        toast.success("Channel updated");
+      } else {
+        await createChannel(payload);
+        toast.success("Channel created");
+      }
       close();
     } catch (err) {
-      toast.error(err?.response?.data?.message || "Could not create channel");
+      toast.error(err?.response?.data?.message || (isEditing ? "Could not update channel" : "Could not create channel"));
     } finally {
       setIsSubmitting(false);
     }
@@ -88,7 +114,7 @@ const CreateChannelModal = () => {
       className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/65 backdrop-blur-[2px] cg-fade sm:p-4"
       role="dialog"
       aria-modal="true"
-      aria-label="Create a new channel"
+      aria-label={isEditing ? "Edit channel" : "Create a new channel"}
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -111,10 +137,10 @@ const CreateChannelModal = () => {
           </button>
           <div className="flex-1 min-w-0">
             <h2 className="font-semibold text-[17px] leading-tight text-base-content">
-              Create channel
+              {isEditing ? "Edit channel" : "Create channel"}
             </h2>
             <p className="text-xs text-base-content/50 leading-tight mt-0.5">
-              Broadcast to anyone who follows
+              {isEditing ? "Update your channel details" : "Broadcast to anyone who follows"}
             </p>
           </div>
         </div>
@@ -253,10 +279,10 @@ const CreateChannelModal = () => {
               {isSubmitting ? (
                 <>
                   <Loader2 size={17} className="animate-spin" />
-                  Creating…
+                  {isEditing ? "Saving…" : "Creating…"}
                 </>
               ) : (
-                "Create channel"
+                isEditing ? "Save changes" : "Create channel"
               )}
             </button>
           </div>

@@ -6,6 +6,7 @@ import { formatMessageTime } from "../lib/utils";
 import ChannelFeed from "./ChannelFeed";
 import CreateChannelModal from "./CreateChannelModal";
 import ExploreChannels from "./ExploreChannels";
+import ChannelInfo from "./ChannelInfo";
 import toast from "react-hot-toast";
 
 const previewOf = (post) => {
@@ -27,6 +28,7 @@ const ChannelsTab = () => {
     followChannel,
     channelsView,
     isChannelFeedOpen,
+    isChannelInfoOpen,
     openChannel,
     openExplore,
     setCreateModalOpen,
@@ -145,6 +147,8 @@ const ChannelsTab = () => {
 
   // Channels are always "mounted" beneath the current view, like the other tabs.
   if (isChannelFeedOpen) return <ChannelFeed />;
+
+  if (isChannelInfoOpen) return <ChannelInfo />;
 
   if (channelsView === "explore") return <ExploreChannels />;
 

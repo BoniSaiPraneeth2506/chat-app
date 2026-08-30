@@ -22,6 +22,8 @@ export const useChannelStore = create((set, get) => ({
   // UI sub-state within the Channels tab and the Explorer overlay.
   channelsView: "list", // "list" | "explore"
   isCreateModalOpen: false,
+  isChannelInfoOpen: false,
+  editingChannel: null, // channel being edited (non-null => create modal in edit mode)
   isChannelFeedOpen: false,
   activeChannelId: null,
 
@@ -361,4 +363,11 @@ export const useChannelStore = create((set, get) => ({
   closeExplore: () => set({ channelsView: "list" }),
   setChannelsView: (view) => set({ channelsView: view }),
   setCreateModalOpen: (open) => set({ isCreateModalOpen: open }),
+
+  openChannelInfo: () => set({ isChannelInfoOpen: true }),
+  closeChannelInfo: () => set({ isChannelInfoOpen: false }),
+
+  // Open the create/edit modal pre-filled for an existing channel.
+  openEditChannel: (channel) => set({ editingChannel: channel, isCreateModalOpen: true }),
+  clearEditingChannel: () => set({ editingChannel: null }),
 }));

@@ -4,11 +4,12 @@ import useAuthStore from "../store/useAuthStore";
 import {
   ArrowLeft, Send, Image as ImageIcon, X, Heart, MessageSquare, Pin,
   Trash2, Megaphone, Users, Link as LinkIcon, Bell, BellOff, MoreVertical,
-  Loader2, Eye,
+  Loader2, Eye, Pencil,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { uploadAttachment } from "../lib/attachments";
 import { formatMessageTime } from "../lib/utils";
+import CreateChannelModal from "./CreateChannelModal";
 
 const REACTIONS = ["❤️", "👍", "🔥", "😂", "😮", "😢"];
 
@@ -28,6 +29,8 @@ const ChannelFeed = () => {
     generateInvite,
     revokeInvite,
     closeChannel,
+    openChannelInfo,
+    openEditChannel,
   } = useChannelStore();
   const authUser = useAuthStore((s) => s.authUser);
 
@@ -58,7 +61,30 @@ const ChannelFeed = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelId, recentPosts.length]);
 
-  if (!channel) return null;
+  // Details are still loading (openChannel sets the feed open immediately, so
+  // showing a skeleton here avoids a blank flash).
+  if (!channel) {
+    return (
+      <div className="h-full flex flex-col min-h-0 min-w-0 bg-base-100">
+        <div className="px-3 py-2.5 border-b border-base-300 flex items-center gap-3 flex-shrink-0">
+          <div className="p-1.5 -ml-1 rounded-full">
+            <ArrowLeft size={20} className="text-base-content/30" />
+          </div>
+          <div className="flex-1 min-w-0 flex items-center gap-3">
+            <div className="size-10 rounded-full bg-base-200 animate-pulse flex-shrink-0" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="h-3.5 w-32 rounded bg-base-200 animate-pulse" />
+              <div className="h-2.5 w-20 rounded bg-base-200 animate-pulse" />
+            </div>
+          </div>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-8">
+          <span className="loading loading-spinner loading-md text-primary" />
+          <p className="text-xs text-base-content/40">Opening channel…</p>
+        </div>
+      </div>
+    );
+  }
 
   const handlePickFile = (e) => {
     const file = e.target.files[0];
@@ -129,26 +155,35 @@ const ChannelFeed = () => {
         </button>
 
         <div className="flex-1 min-w-0 flex items-center gap-3">
-          {channel.avatar ? (
-            <img
-              src={channel.avatar}
-              alt={channel.name}
-              className="object-cover rounded-full size-10 flex-shrink-0"
-            />
-          ) : (
-            <div className="flex items-center justify-center rounded-full size-10 bg-secondary/10 border border-secondary/20 text-secondary flex-shrink-0">
-              <Megaphone size={18} />
+          <button
+            onClick={() => {
+              setMenuOpen(false);
+              openChannelInfo();
+            }}
+            className="flex items-center gap-3 min-w-0 rounded-xl active:bg-base-200/70 px-1 py-1 -ml-1 transition-colors text-left select-none"
+            title="Channel info"
+          >
+            {channel.avatar ? (
+              <img
+                src={channel.avatar}
+                alt={channel.name}
+                className="object-cover rounded-full size-10 flex-shrink-0"
+              />
+            ) : (
+              <div className="flex items-center justify-center rounded-full size-10 bg-secondary/10 border border-secondary/20 text-secondary flex-shrink-0">
+                <Megaphone size={18} />
+              </div>
+            )}
+            <div className="min-w-0">
+              <div className="font-semibold text-base-content truncate leading-tight">
+                {channel.name}
+              </div>
+              <div className="text-[11px] text-base-content/50 truncate flex items-center gap-1">
+                <span>{channel.followerCount || 0} followers</span>
+                {channel.category && <span>· {channel.category}</span>}
+              </div>
             </div>
-          )}
-          <div className="min-w-0">
-            <div className="font-semibold text-base-content truncate leading-tight">
-              {channel.name}
-            </div>
-            <div className="text-[11px] text-base-content/50 truncate flex items-center gap-1">
-              <span>{channel.followerCount || 0} followers</span>
-              {channel.category && <span>· {channel.category}</span>}
-            </div>
-          </div>
+          </button>
         </div>
 
         {/* Actions */}
@@ -174,6 +209,17 @@ const ChannelFeed = () => {
             <>
               <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
               <div className="absolute right-0 top-full mt-1 z-50 w-56 rounded-2xl bg-base-100 border border-base-300 shadow-xl py-1.5">
+                {canPost && (
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      openEditChannel(channel);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-base-content hover:bg-base-200/70 transition-colors"
+                  >
+                    <Pencil size={15} /> Edit channel
+                  </button>
+                )}
                 {canPost && (
                   <button
                     onClick={async () => {
@@ -431,6 +477,8 @@ const ChannelFeed = () => {
           </div>
         </div>
       )}
+
+      <CreateChannelModal />
     </div>
   );
 };
