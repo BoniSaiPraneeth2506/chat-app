@@ -423,6 +423,25 @@ io.on("connection", async (socket) => {
         }
     });
 
+    // ── Channel Socket Events ─────────────────────────────────────────────────
+    // Channels are one-way broadcasts; followers subscribe to a channel room to
+    // receive new posts in real time. The server does not re-verify membership
+    // here — the room is only joined after the client followed via the REST API,
+    // and post fan-out is gated by the view access checks in the controller.
+    socket.on("joinChannelRoom", (channelId) => {
+        if (channelId) {
+            socket.join(`channel_${channelId}`);
+            console.log(`[Channel Socket] User ${userId} (socket ${socket.id}) joined channel_${channelId}`);
+        }
+    });
+
+    socket.on("leaveChannelRoom", (channelId) => {
+        if (channelId) {
+            socket.leave(`channel_${channelId}`);
+            console.log(`[Channel Socket] User ${userId} (socket ${socket.id}) left channel_${channelId}`);
+        }
+    });
+
     // ── Group Multi-Peer Call Events (Mesh WebRTC) ───────────────────────────
     socket.on("startGroupCall", async ({ groupId, type, groupName }) => {
         // Throttle group call starts: max 3 starts per 10 minutes

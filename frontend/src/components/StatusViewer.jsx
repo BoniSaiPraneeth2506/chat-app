@@ -12,6 +12,26 @@ const QUICK_EMOJIS = ["😍", "😂", "😮", "😢", "🙏", "🔥", "👏", "�
 // every time — statuses are immutable once posted, so this stays valid.
 const statusMediaCache = new Map();
 
+// Warm the browser's HTTP cache for a status's full media blob so that when
+// the viewer advances to it there is nothing left to wait on. Statuses are
+// immutable; a hidden image/video fetch is cheap and makes swiping between
+// stories feel instant instead of stalling per-frame.
+const preloadMediaBlob = (url) => {
+  if (!url || typeof window === "undefined") return;
+  const lower = url.toLowerCase();
+  if (lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".ogg")) {
+    const v = document.createElement("video");
+    v.preload = "auto";
+    v.muted = true;
+    v.playsInline = true;
+    v.src = url;
+  } else {
+    const img = new Image();
+    img.decoding = "async";
+    img.src = url;
+  }
+};
+
 function formatTimeAgo(dateStr) {
   if (!dateStr) return "";
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -267,6 +287,37 @@ const StatusViewer = () => {
       setProgress(0);
     };
   }, [isOpen, currentStatus?._id, viewingIndex]);
+
+  // Prefetch every other status in the current group's media URL in parallel
+  // the moment the viewer opens, so forwarding through a group never blocks on
+  // a freshly fetched signed URL. Also warm the next status's actual blob so
+  // the browser has it cached before we swipe to it.
+  useEffect(() => {
+    const group = viewingStatusGroup;
+    if (!isOpen || !group?.statuses?.length) return;
+    const all = group.statuses;
+    all.forEach((s) => {
+      if (s.media?.url) statusMediaCache.set(s._id, s.media.url);
+    });
+    const missing = all.filter((s) => !statusMediaCache.has(s._id));
+    if (missing.length > 0) {
+      Promise.allSettled(
+        missing.map((s) => fetchMediaUrlSafe(s._id).then((url) => {
+          if (url) {
+            statusMediaCache.set(s._id, url);
+            preloadMediaBlob(url);
+          }
+        }))
+      );
+    }
+    const next = all[viewingIndex + 1];
+    if (next) {
+      const nextUrl = statusMediaCache.get(next._id) || next.media?.url;
+      if (nextUrl) preloadMediaBlob(nextUrl);
+    }
+    const currentUrl = mediaUrl || currentStatus?.media?.url;
+    if (currentUrl) preloadMediaBlob(currentUrl);
+  }, [isOpen, viewingStatusGroup?._id, viewingIndex, currentStatus?._id, fetchMediaUrlSafe, mediaUrl]);
 
   useEffect(() => {
     if (!socket) return;

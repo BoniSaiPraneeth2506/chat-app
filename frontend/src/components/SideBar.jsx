@@ -361,7 +361,7 @@ import useAuthStore from "../store/useAuthStore";
 import { useGroupStore } from "../store/useGroupStore";
 import SidebarSkeleton from "./skeletons/SidebarSkeleton";
 import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus, Lock, 
-MessageSquare, RefreshCw, Phone } from "lucide-react";
+MessageSquare, RefreshCw, Phone, Megaphone } from "lucide-react";
 import { useNicknames, displayNameOf } from "../lib/contacts";
 import { formatMessageTime } from "../lib/utils";
 import toast from "react-hot-toast";
@@ -370,6 +370,7 @@ import { useChatLockStore } from "../store/useChatLockStore";
 import LockPasswordPrompt from "./LockPasswordPrompt";
 import UpdatesTab from "./UpdatesTab";
 import CallsTab from "./CallsTab";
+import ChannelsTab from "./ChannelsTab";
 import { useUpdatesStore } from "../store/useUpdatesStore";
 import { isBiometryAvailable, verifyBiometry, hasStoredLockSecret, readLockSecret } from "../lib/biometrics";
 
@@ -1041,6 +1042,7 @@ const SideBar = () => {
           {([
             { id: "chats", Icon: MessageSquare },
             { id: "updates", Icon: RefreshCw },
+            { id: "channels", Icon: Megaphone },
             { id: "calls", Icon: Phone },
           ]).map((t) => {
             const isActive = activeTab === t.id;
@@ -1049,7 +1051,7 @@ const SideBar = () => {
               <button
                 key={t.id}
                 onClick={() => useUpdatesStore.getState().setActiveTab(t.id)}
-                title={t.id === "chats" ? "Chats" : t.id === "calls" ? "Calls" : "Updates"}
+                title={t.id === "chats" ? "Chats" : t.id === "updates" ? "Updates" : t.id === "channels" ? "Channels" : "Calls"}
                 className={`flex items-center justify-center w-11 h-11 rounded-xl transition-colors select-none mx-1 ${
                   isActive
                     ? "text-primary bg-base-200"
@@ -1223,6 +1225,9 @@ const SideBar = () => {
         <div className={`${activeTab === "updates" ? "flex" : "hidden"} h-full flex-col min-h-0 min-w-0`}>
           <UpdatesTab />
         </div>
+        <div className={`${activeTab === "channels" ? "flex" : "hidden"} h-full flex-col min-h-0 min-w-0`}>
+          <ChannelsTab />
+        </div>
         </div>
       </div>
 
@@ -1232,18 +1237,21 @@ const SideBar = () => {
         <div className="relative flex flex-1 bg-base-200/90 backdrop-blur-md rounded-2xl border border-base-300/80 p-1 shadow-sm">
           {/* Animated active pill slides behind the selected tab */}
           <span
-            className={`absolute top-1 bottom-1 w-[calc((100%-0.5rem)/3)] rounded-xl bg-base-100 shadow-sm border border-base-300/70 transition-transform duration-300 ease-out ${
+            className={`absolute top-1 bottom-1 w-[calc((100%-0.5rem)/4)] rounded-xl bg-base-100 shadow-sm border border-base-300/70 transition-transform duration-300 ease-out ${
               activeTab === "chats"
                 ? "translate-x-0"
                 : activeTab === "updates"
                 ? "translate-x-[100%]"
-                : "translate-x-[200%]"
+                : activeTab === "channels"
+                ? "translate-x-[200%]"
+                : "translate-x-[300%]"
             }`}
             style={{ left: "0.25rem" }}
           />
           {([
             { id: "chats", label: "Chats", Icon: MessageSquare },
             { id: "updates", label: "Updates", Icon: RefreshCw },
+            { id: "channels", label: "Channels", Icon: Megaphone },
             { id: "calls", label: "Calls", Icon: Phone },
           ]).map((t) => {
             const isActive = activeTab === t.id;

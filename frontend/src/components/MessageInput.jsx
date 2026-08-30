@@ -172,6 +172,26 @@ const MessageInput = () => {
     }
   }, [editingMessage]);
 
+  // Replying always surfaces the composer, whether triggered by a swipe or by
+  // tapping the reply action. Raising the keyboard here makes the gesture feel
+  // deliberate (WhatsApp does the same): the moment a reply is armed the caret
+  // lands in an already-focused field instead of the user having to tap again.
+  // With the caret at the end, continued typing prefaces the quoted message.
+  useEffect(() => {
+    if (!replyingToMessage) return;
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      const end = el.value?.length ?? 0;
+      try {
+        el.setSelectionRange(end, end);
+      } catch {
+        // Not all input types support selection ranges.
+      }
+    });
+  }, [replyingToMessage?._id]);
+
   useEffect(() => {
     // Reset typing status and recording on unmount
     return () => {

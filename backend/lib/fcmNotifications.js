@@ -31,6 +31,7 @@ const CHANNEL_BY_TYPE = {
   message_request: "requests",
   status: "status",
   reaction: "messages",
+  channel_post: "channels",
 };
 
 /** A message preview stripped to something sane for a notification body. */
@@ -155,6 +156,16 @@ export async function sendPushNotification({
   } else if (type === "status") {
     title = senderName || "ChatApp";
     body = "posted a status update";
+  } else if (type === "channel_post") {
+    // Channels are one-way broadcasts: the senderName carried here is the
+    // channel name, so the body reads like a broadcast preview.
+    const text = preview(messageContent?.text);
+    if (messageContent?.image) body = text ? `📷 ${text}` : "📷 New photo";
+    else if (messageContent?.attachments?.some((a) => a.kind === "video")) {
+      body = text ? `🎬 ${text}` : "🎬 New video";
+    } else {
+      body = text || "New post";
+    }
   } else if (type === "reaction") {
     body = "Reacted to your message";
   }

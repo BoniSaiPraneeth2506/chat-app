@@ -510,10 +510,22 @@ const ChatContainer = () => {
   // of the arrow's two appearances applies, so it changes at most twice per swipe
   // while the movement itself stays at native speed.
   const [swipe, setSwipe] = useState({ id: null, stage: 0 });
-  const swipeDxRef = useRef(0);
+  const swipeDxRef = useRef({ id: null, dx: 0, startX: 0, done: false });
+  const swipeAnimRef = useRef(null);
 
   const SWIPE_REPLY_THRESHOLD = 60;
   const SWIPE_ARROW_THRESHOLD = 20;
+  const SWIPE_MAX = 90;
+
+  // Rubber-band resistance past the max so the drag never slams into a hard
+  // wall — beyond SWIPE_MAX each extra pixel moves the bubble a fraction less,
+  // exactly like iOS/Android momentum-pull handles. Returns the eased offset.
+  const resisted = (dx) => {
+    const sign = dx < 0 ? -1 : 1;
+    const abs = Math.abs(dx);
+    if (abs <= SWIPE_MAX) return dx;
+    return sign * (SWIPE_MAX + (abs - SWIPE_MAX) * 0.25);
+  };
 
   // 0 = nothing shown, 1 = arrow visible, 2 = arrow armed. Anything between the
   // same two thresholds looks identical, so it needs no render.
@@ -524,11 +536,22 @@ const ChatContainer = () => {
     return 0;
   };
 
+  // Paint the current drag offset straight onto the bubble. Using translate3d and
+  // a persistent will-change keeps the WebView on a dedicated compositor layer,
+  // so the drag rides the GPU: no layout, no repaint of the list, no jank.
+  const paintSwipe = (node, dx, id) => {
+    if (!node) return;
+    const eased = resisted(dx);
+    node.style.transform = `translate3d(${eased}px,0,0)`;
+    node.style.willChange = "transform";
+  };
+
   const handleBubbleTouchStart = (message, e) => {
     if (isSelectionMode) return;
     if (e.target.closest(".mobile-action-bar")) return;
 
     const touch = e.touches[0];
+    swipeDxRef.current = { id: message._id, dx: 0, startX: touch.clientX, done: false };
     touchStartRef.current = { x: touch.clientX, y: touch.clientY, id: message._id };
 
     longPressTimerRef.current = setTimeout(() => {
@@ -549,10 +572,10 @@ const ChatContainer = () => {
     if (!start || start.id !== message._id) return;
 
     const touch = e.touches[0];
-    const dx = touch.clientX - start.x;
+    const rawDx = touch.clientX - start.x;
     const dy = touch.clientY - start.y;
 
-    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+    if (Math.abs(rawDx) > 10 || Math.abs(dy) > 10) {
       if (longPressTimerRef.current) {
         clearTimeout(longPressTimerRef.current);
         longPressTimerRef.current = null;
@@ -560,13 +583,15 @@ const ChatContainer = () => {
     }
 
     // Only track a mostly-horizontal drag so vertical scrolling stays untouched.
-    if (Math.abs(dx) > Math.abs(dy) * 1.5 && Math.abs(dx) > 10) {
-      const clamped = Math.max(-90, Math.min(90, dx));
-      swipeDxRef.current = clamped;
-      e.currentTarget.style.transform = `translateX(${clamped}px)`;
-      start.swiping = true;
+    if (Math.abs(rawDx) > Math.abs(dy) * 1.5 && Math.abs(rawDx) > 4) {
+      e.currentTarget.style.transition = "none";
+      const eased = resisted(rawDx);
+      swipeDxRef.current.dx = eased;
+      swipeDxRef.current.startX = start.x;
+      swipeDxRef.current.done = true;
+      paintSwipe(e.currentTarget, eased, message._id);
 
-      const stage = stageFor(clamped);
+      const stage = stageFor(eased);
       if (swipe.id !== message._id || swipe.stage !== stage) {
         setSwipe({ id: message._id, stage });
       }
@@ -579,22 +604,54 @@ const ChatContainer = () => {
 
     const start = touchStartRef.current;
     touchStartRef.current = null;
-    const swiped = start?.swiping && Math.abs(swipeDxRef.current) >= SWIPE_REPLY_THRESHOLD;
-    // Clearing state removes the inline transform on the next render, and the
-    // transition class is back by then, so the bubble still glides home.
-    swipeDxRef.current = 0;
-    if (swipe.id !== null) setSwipe({ id: null, stage: 0 });
-    else if (start?.swiping && e.currentTarget) e.currentTarget.style.transform = "";
+    const swiped = start?.swiping || (swipeDxRef.current.done && swipeDxRef.current.id === message._id)
+      ? Math.abs(swipeDxRef.current.dx) >= SWIPE_REPLY_THRESHOLD
+      : false;
+
+    if (swipeAnimRef.current) {
+      cancelAnimationFrame(swipeAnimRef.current);
+      swipeAnimRef.current = null;
+    }
 
     if (swiped) {
       if (longPressTimerRef.current) {
         clearTimeout(longPressTimerRef.current);
         longPressTimerRef.current = null;
       }
-      setReplyingToMessage(message);
+      // Gentle, quick spring back — the message glides home on a short
+      // ease-out curve rather than snapping, so a successful swipe reads as
+      // one fluid gesture instead of a jump.
+      const node = e.currentTarget;
+      swipeDxRef.current = { id: null, dx: 0, startX: 0, done: false };
+      setSwipe({ id: null, stage: 0 });
+      requestAnimationFrame(() => {
+        if (!node) return;
+        node.style.transition = "transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1.2)";
+        node.style.transform = "translate3d(0,0,0)";
+        const clear = setTimeout(() => {
+          node.style.transition = "";
+          node.style.willChange = "";
+        }, 200);
+        swipeAnimRef.current = requestAnimationFrame(() => clearTimeout(clear));
+      });
       suppressClickRef.current = Date.now();
       haptic("impact");
+      setReplyingToMessage(message);
       return;
+    }
+
+    swipeDxRef.current = { id: null, dx: 0, startX: 0, done: false };
+    if (swipe.id !== null) {
+      setSwipe({ id: null, stage: 0 });
+    } else if (start?.swiping && e.currentTarget) {
+      const node = e.currentTarget;
+      node.style.transition = "transform 220ms cubic-bezier(0.25, 0.8, 0.25, 1)";
+      node.style.transform = "translate3d(0,0,0)";
+      const clear = setTimeout(() => {
+        node.style.transition = "";
+        node.style.willChange = "";
+      }, 240);
+      swipeAnimRef.current = requestAnimationFrame(() => clearTimeout(clear));
     }
     if (start?.swiping) return;
 
@@ -1334,16 +1391,40 @@ const ChatContainer = () => {
                     onTouchStart={(e) => handleBubbleTouchStart(message, e)}
                     onTouchEnd={(e) => handleBubbleTouchEnd(message, e)}
                     onTouchMove={(e) => handleBubbleTouchMove(message, e)}
+                    onTouchCancel={(e) => {
+                      // OS interrupted the gesture (notification, app switch, low
+                      // battery). Snap the bubble home so it never stays stranded
+                      // mid-drag.
+                      swipeDxRef.current = { id: null, dx: 0, startX: 0, done: false };
+                      const node = e.currentTarget;
+                      if (node) {
+                        node.style.transition = "transform 200ms cubic-bezier(0.25,0.8,0.25,1)";
+                        node.style.transform = "translate3d(0,0,0)";
+                        setTimeout(() => {
+                          if (node) {
+                            node.style.transition = "";
+                            node.style.willChange = "";
+                          }
+                        }, 220);
+                      }
+                      if (swipe.id !== null) setSwipe({ id: null, stage: 0 });
+                      if (touchStartRef.current) touchStartRef.current = null;
+                    }}
                     style={swipe.id === message._id ? {
-                      transform: `translateX(${swipeDxRef.current}px)`,
+                      transform: `translate3d(${resisted(swipeDxRef.current.dx)}px,0,0)`,
+                      willChange: "transform",
+                      transition: "transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1.2)",
                     } : undefined}
                     className={`flex flex-col py-2 px-2.5 chat-bubble relative min-w-[72px] pr-12 transition-colors duration-300 select-none cursor-default pb-3 ${(message.senderId?._id || message.senderId) === authUser._id ? "bubble-mine" : ""} ${isSelectionMode ? "cursor-pointer" : ""} ${swipe.id === message._id ? "" : "transition-transform"}`}
                   >
                   {swipe.id === message._id && swipe.stage >= 1 && (
                     <span
-                      className={`absolute top-1/2 -translate-y-1/2 ${swipeDxRef.current > 0 ? "-left-8" : "-right-8"} ${
-                        swipe.stage === 2 ? "text-primary" : ""
-                      }`}
+                      className={`absolute flex items-center justify-center transition-all select-none ${
+                        swipe.stage === 2
+                          ? "text-primary scale-125 bg-primary/10 rounded-full p-1.5"
+                          : "text-base-content/60 scale-100"
+                      } ${swipeDxRef.current.dx > 0 ? "-left-9" : "-right-9"}`}
+                      style={{ top: "50%", transform: `translateY(-50%) ${swipe.stage === 2 ? "scale(1.25)" : "scale(1)"}` }}
                     >
                       <CornerUpLeft size={16} />
                     </span>
