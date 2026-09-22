@@ -23,6 +23,7 @@
     "@capacitor/share": "^8.0.1",
     "@capawesome/capacitor-badge": "^8.0.2",
     "@capgo/capacitor-social-login": "^8.4.2",
+    "@capgo/capacitor-updater": "^8.51.21",
     "@react-oauth/google": "^0.13.5",
     "axios": "^1.10.0",
     "chat-app": "file:..",

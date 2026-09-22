@@ -129,6 +129,41 @@ if (process.env.NODE_ENV === "production" && fs.existsSync(frontendIndex)) {
   });
 }
 
+// ── Live-update feed (self-hosted Capacitor Updater) ─────────────────────────
+// Serves OTA bundles and answers the plugin's version-check POST. The feed is a
+// plain folder (manifest.json + <zip>) written by scripts/publish-update.cjs —
+// nothing here invents bundles. `checksum` is the SHA-256 of the zip so plugins
+// can verify the file before applying it. Native HTTP has no Origin header, so
+// the CORS allowlist accepts it; the CSP headers only apply to the WebView and
+// don't govern its requests.
+const updatesDir = path.join(__dirname, "updates");
+if (process.env.NODE_ENV === "production" && fs.existsSync(path.join(updatesDir, "manifest.json"))) {
+  app.use("/updates", express.static(updatesDir));
+}
+app.post("/updates/check", (req, res) => {
+  let manifest = null;
+  try {
+    const manifestPath = path.join(updatesDir, "manifest.json");
+    if (fs.existsSync(manifestPath)) {
+      manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    }
+  } catch (err) {
+    console.error("[updates/check] unreadable manifest:", err.message);
+  }
+  if (!manifest?.version || !manifest?.file) {
+    return res.json({ message: "No new version available", kind: "up_to_date" });
+  }
+  const clientVersion = req.body?.version_name ?? req.body?.version ?? req.body?.version_code;
+  if (clientVersion && clientVersion === manifest.version) {
+    return res.json({ version: manifest.version, message: "No new version available", kind: "up_to_date" });
+  }
+  res.json({
+    version: manifest.version,
+    url: `${req.protocol}://${req.get("host")}/updates/${manifest.file}`,
+    checksum: manifest.checksum || undefined,
+  });
+});
+
 // ── Last-resort guards ────────────────────────────────────────────────────────
 //
 // Node terminates the process on an unhandled promise rejection. For a socket

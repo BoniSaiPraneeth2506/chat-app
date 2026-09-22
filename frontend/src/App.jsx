@@ -88,6 +88,8 @@ import StatusViewersSheet from './components/StatusViewersSheet'
 import { useGroupStore } from './store/useGroupStore'
 import useLiveLocationStore from './store/useLiveLocationStore'
 import { App as CapacitorApp } from '@capacitor/app'
+import { Capacitor } from '@capacitor/core'
+import { CapacitorUpdater } from '@capgo/capacitor-updater'
 import OfflineBanner from './components/OfflineBanner'
 import { initPushListeners, initPushRegistration, reportActiveConversation } from './lib/pushNotifications'
 import { setNotificationNavigator, setAuthReady, resetNotificationNavigation } from './lib/notificationNavigation'
@@ -326,6 +328,35 @@ const App = () => {
       }
     }
   }, [authUser, isCheckingAuth]);
+
+  // Live-update the installed web build from the hosted feed (native only).
+  // Runs after auth settles so a fresh version is in place before heavy work.
+  // Pure additive: no UI, state or existing behavior is touched.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    if (isCheckingAuth) return;
+    let cancelled = false;
+    const apply = async () => {
+      try {
+        const latest = await CapacitorUpdater.getLatest();
+        if (cancelled) return;
+        if (latest?.url && latest.version) {
+          const bundle = await CapacitorUpdater.download({ url: latest.url, version: latest.version });
+          if (bundle?.id && !cancelled) {
+            await CapacitorUpdater.next({ id: bundle.id });
+          }
+        }
+      } catch (err) {
+        console.warn("[LiveUpdate] check/download failed:", err?.message || err);
+      } finally {
+        if (!cancelled) {
+          CapacitorUpdater.notifyAppReady().catch(() => {});
+        }
+      }
+    };
+    apply();
+    return () => { cancelled = true; };
+  }, [isCheckingAuth]);
 
   // Install the FCM + local-notification native listeners once and turn on push
   // when signed in. Listeners are added once regardless of auth.
