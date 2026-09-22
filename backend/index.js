@@ -159,7 +159,10 @@ app.post("/updates/check", (req, res) => {
   }
   res.json({
     version: manifest.version,
-    url: `${req.protocol}://${req.get("host")}/updates/${manifest.file}`,
+    // Render terminates TLS at its proxy, so req.protocol reads "http" unless
+    // trust proxy is set; the native downloader gets this URL and Android
+    // (targetSdk 28+) blocks cleartext http by default — always hand back https.
+    url: `https://${req.get("host")}/updates/${manifest.file}`,
     checksum: manifest.checksum || undefined,
   });
 });
