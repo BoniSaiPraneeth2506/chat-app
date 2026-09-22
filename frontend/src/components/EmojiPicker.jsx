@@ -59,27 +59,27 @@ export default function EmojiPicker({ onPick, onClose, tone = 0 }) {
         }}
       />
       <div
-        className="fixed left-1/2 bottom-[14vh] sm:bottom-[18vh] -translate-x-1/2 z-[1100] flex w-[min(92vw,340px)] flex-col rounded-2xl bg-white shadow-2xl ring-1 ring-black/10 dark:bg-neutral-800 dark:ring-white/10"
+        className="fixed left-1/2 bottom-[14vh] sm:bottom-[18vh] -translate-x-1/2 z-[1100] flex w-[min(92vw,340px)] flex-col rounded-2xl bg-base-200 shadow-2xl ring-1 ring-base-300"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2 border-b border-black/5 p-2 dark:border-white/10">
+        <div className="flex items-center gap-2 border-b border-base-300 p-2">
           <input
             autoFocus={false}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search emoji"
-            className="min-w-0 flex-1 rounded-lg bg-black/5 px-2.5 py-1.5 text-sm outline-none placeholder:text-black/40 dark:bg-white/10 dark:placeholder:text-white/40"
+            className="min-w-0 flex-1 rounded-lg bg-base-300 px-2.5 py-1.5 text-sm text-base-content outline-none placeholder:text-base-content/40"
           />
           <button
             onClick={onClose}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-black/60 hover:bg-black/5 dark:text-white/60 dark:hover:bg-white/10"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-base-content/60 hover:bg-base-300"
             aria-label="Close emoji picker"
           >
             ✕
           </button>
         </div>
 
-        <div className="flex items-center gap-1 overflow-x-auto border-b border-black/5 px-2 py-1.5 dark:border-white/10">
+        <div className="flex items-center gap-1 overflow-x-auto border-b border-base-300 px-2 py-1.5">
           <button
             onClick={() => setTab("recent")}
             className={`shrink-0 rounded-full px-2 py-0.5 text-sm ${tab === "recent" ? "bg-primary text-white" : "text-black/60 dark:text-white/60"}`}
@@ -102,8 +102,8 @@ export default function EmojiPicker({ onPick, onClose, tone = 0 }) {
           ))}
         </div>
 
-        <div className="flex items-center gap-1 border-b border-black/5 px-2 py-1.5 dark:border-white/10">
-          <span className="mr-1 text-[10px] font-semibold uppercase tracking-wide text-black/40 dark:text-white/40">Tone</span>
+        <div className="flex items-center gap-1 border-b border-base-300 px-2 py-1.5">
+          <span className="t-faint mr-1 text-[10px] font-semibold uppercase tracking-wide">Tone</span>
           {SKIN_TONE_SUFFIXES.map((suffix, i) => (
             <button
               key={i}
