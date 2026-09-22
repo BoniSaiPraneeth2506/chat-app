@@ -54,6 +54,17 @@ const isRichMediaMessage = (message) =>
       message.contact?.user
   );
 
+// Fill content to the bubble edge leaves the timestamp chip touching it. Media
+// bubbles get a hair more bottom padding so the chip floats just below the
+// photo/video/file/gallery; location bubbles need a taller band (the chip would
+// otherwise sit on top of the "View on map" row). Text, voice and link
+// previews keep their original roomier frame.
+const bubblePaddingClass = (message) => {
+  if (message.location) return "py-2 px-2.5 pb-6 pr-12";
+  if (isRichMediaMessage(message)) return "py-1 px-1.5 pb-2 pr-10";
+  return "py-2 px-2.5 pb-3 pr-12";
+};
+
 const LinkPreviewCard = ({ url }) => {
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1511,7 +1522,7 @@ const ChatContainer = () => {
                       if (touchStartRef.current) touchStartRef.current = null;
                     }}
                     style={{ touchAction: "pan-y" }}
-                    className={`flex flex-col chat-bubble relative min-w-[72px] transition-colors duration-300 select-none cursor-default ${isRichMediaMessage(message) ? "py-1 px-1.5 pb-1.5 pr-10" : "py-2 px-2.5 pb-3 pr-12"} ${(message.senderId?._id || message.senderId) === authUser._id ? "bubble-mine" : ""} ${isSelectionMode ? "cursor-pointer" : ""}`}
+                    className={`flex flex-col chat-bubble relative min-w-[72px] transition-colors duration-300 select-none cursor-default ${bubblePaddingClass(message)} ${(message.senderId?._id || message.senderId) === authUser._id ? "bubble-mine" : ""} ${isSelectionMode ? "cursor-pointer" : ""}`}
                   >
                   {/* Swipe-to-reply arrow. Always rendered, hidden by default
                       (opacity-0) and shown purely via direct DOM writes during a
