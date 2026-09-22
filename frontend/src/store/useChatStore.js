@@ -70,6 +70,7 @@ import {
 } from "../lib/db";
 import { isNetworkError } from "../lib/network";
 import { uploadAttachment, createLocalUrl, releaseLocalUrl } from "../lib/attachments";
+import { startLiveShareTicker, stopLiveShareTicker } from "../lib/liveShareEngine";
 
 // Local cache keys are shared with db.js's per-conversation message store —
 // "dm:<userId>" keeps a DM's cache distinct from a group's ("group:<id>").
@@ -212,8 +213,9 @@ const patchSidebarPreview = (setState, messageId, patch) => {
   if (nextGroup) useGroupStore.setState({ latestGroupMessages: nextGroup });
 };
 
-/** Content carried over when forwarding; a deleted message forwards empty. */
+/** Content carried over when forwarding; a deleted or restricted message never forwards. */
 const buildForwardPayload = (message) => {
+  if (message.restricted) return null; // anti-forward: blocked
   const payload = { isForwarded: true };
   if (!message.isDeletedForEveryone) {
     if (message.text) payload.text = message.text;
@@ -593,7 +595,7 @@ export const useChatStore = create((set, get) => ({
    * The local file is rendered directly rather than downloaded back once the
    * upload finishes, so the bubble never flickers between the two.
    */
-  sendAttachmentMessage: async ({ file, kind, text = "", localUrl: staged = "", posterUrl = "" }) => {
+  sendAttachmentMessage: async ({ file, kind, text = "", localUrl: staged = "", posterUrl = "", restricted = false }) => {
     const authUser = useAuthStore.getState().authUser;
     const { selectedUser } = get();
     const selectedGroup = useGroupStore.getState().selectedGroup;
@@ -616,6 +618,7 @@ export const useChatStore = create((set, get) => ({
         { kind, name: file.name, mime: file.type, size: file.size, localUrl, posterUrl, pending: true },
       ],
       uploadProgress: 0,
+      restricted: restricted || false,
       isSending: true,
       createdAt: new Date().toISOString(),
     };
@@ -660,6 +663,7 @@ export const useChatStore = create((set, get) => ({
       const payload = {
         attachments: [posterUrl ? { ...attachment, posterUrl } : attachment],
         clientId: tempId,
+        restricted,
       };
       if (text) payload.text = text;
       const res = inGroup
@@ -830,6 +834,8 @@ export const useChatStore = create((set, get) => ({
       images: messageData.images || [],
       voice: messageData.voice || "",
       isOneView: messageData.isOneView || false,
+      restricted: messageData.restricted || false,
+      location: messageData.location,
       replyTo: replyingToMessage,
       createdAt: new Date().toISOString(),
       isSending: true,
@@ -862,6 +868,23 @@ export const useChatStore = create((set, get) => ({
         }
       }));
       cacheMessages(authUser._id, dmKey(selectedUser._id), [sentMessage]);
+
+      // Live location lifecycle on the sender: start heartbeats for a new live
+      // share, or stop the running heartbeat when the "stop" message is sent.
+      if (sentMessage.location?.isLive && !sentMessage.location.stop) {
+        startLiveShareTicker(sentMessage, selectedUser._id);
+      } else if (sentMessage.location?.stop) {
+        // Stop the most recent active share in this chat.
+        const activeShare = get()
+          .messages.filter(
+            (m) =>
+              m.location?.isLive &&
+              !m.location.stop &&
+              Date.now() < new Date(m.location.expiresAt || 0).getTime()
+          )
+          .pop();
+        if (activeShare) stopLiveShareTicker(activeShare._id);
+      }
     } catch (error) {
       if (isNetworkError(error)) {
         // Offline: keep the bubble on screen (renderTicks shows it pending)
@@ -1021,6 +1044,10 @@ export const useChatStore = create((set, get) => ({
   forwardMessage: async (message, recipientIds) => {
     try {
       const payload = buildForwardPayload(message);
+      if (!payload) {
+        toast.error("This message cannot be forwarded");
+        return;
+      }
 
       const results = await Promise.all(
         recipientIds.map((id) => axiosInstance.post(`/messages/send/${id}`, payload))
@@ -1064,6 +1091,7 @@ export const useChatStore = create((set, get) => ({
 
       for (const message of msgs) {
         const payload = buildForwardPayload(message);
+        if (!payload) continue; // restricted messages are dropped from a bulk forward
         const results = await Promise.all(
           recipientIds.map((id) => axiosInstance.post(`/messages/send/${id}`, payload))
         );

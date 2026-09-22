@@ -7,6 +7,8 @@ import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2,
 import ForwardModal from "./ForwardModal";
 import MediaGallerySheet from "./MediaGallerySheet";
 import MessageAttachment from "./MessageAttachment";
+import LocationContent from "./LocationContent";
+import LiveLocationModal from "./LiveLocationModal";
 import SocialLinksRow from "./SocialLinksRow";
 import { useNicknames, displayNameOf } from "../lib/contacts";
 import PollMessage from "./PollMessage";
@@ -21,6 +23,8 @@ import ChatHeader from "./ChatHeader";
 import MessageInput from "./MessageInput";
 import MessageSkeleton from "./skeletons/MessageSkeleton";
 import useAuthStore from "../store/useAuthStore";
+import useLiveLocationStore from "../store/useLiveLocationStore";
+import { startLiveShareTicker } from "../lib/liveShareEngine";
 import { formatMessageTime } from "../lib/utils";
 import { haptic } from "../lib/haptics";
 import { stopAllAudio } from "../lib/aiAudio";
@@ -762,6 +766,10 @@ const ChatContainer = () => {
       return <PollMessage message={message} />;
     }
 
+    if (message.location) {
+      return <LocationContent message={message} isLive={Boolean(message.location?.isLive)} />;
+    }
+
     if (message.isOneView) {
       const isSender = message.senderId === authUser._id;
       const isViewed = message.viewedBy?.includes(authUser._id) || (isSender && message.viewedBy?.length > 0);
@@ -886,7 +894,7 @@ const ChatContainer = () => {
                 key={i}
                 src={imgUrl}
                 alt={`Attachment ${i + 1}`}
-                onClick={() => setLightboxImage(imgUrl)}
+                onClick={() => setLightboxImage(imgUrl, message.restricted ? { secure: true } : undefined)}
                 onLoaded={handleMediaLoad}
                 className={`w-full object-cover cursor-zoom-in hover:opacity-95 transition-opacity rounded ${
                   message.images.length === 3 && i === 0 ? "col-span-2 h-36 sm:h-44" : "h-28 sm:h-36"
@@ -899,7 +907,7 @@ const ChatContainer = () => {
             <SmoothImage
               src={message.image}
               alt="Attachment"
-              onClick={() => sendingProgress === null && setLightboxImage(message.image)}
+              onClick={() => sendingProgress === null && setLightboxImage(message.image, message.restricted ? { secure: true } : undefined)}
               onLoaded={handleMediaLoad}
               className="max-w-[220px] sm:max-w-[280px] max-h-[320px] w-auto object-cover rounded-xl mb-1.5 cursor-zoom-in hover:opacity-95 transition-opacity"
             />
@@ -910,6 +918,7 @@ const ChatContainer = () => {
             key={attachment.key || `${message.tempId}-${index}`}
             messageId={message._id}
             attachment={attachment}
+            restricted={Boolean(message.restricted)}
             onOpenImage={setLightboxImage}
             progress={
               // Only while this message is still being sent — a confirmed one has
@@ -1108,6 +1117,25 @@ const ChatContainer = () => {
       getMessages(selectedUser._id);
     }
   }, [selectedUser?._id, getMessages]);
+
+  // Resume heartbeats for the current user's still-active live shares after a
+  // reload / reconnect. Purely additive: startLiveShareTicker ignores ones that
+  // are already ticking.
+  useEffect(() => {
+    if (!selectedUser?._id || selectedGroup) return;
+    const now = Date.now();
+    (Array.isArray(messages) ? messages : []).forEach((m) => {
+      if (
+        m.location?.isLive &&
+        !m.location.stop &&
+        String(m.senderId) === String(authUser?._id) &&
+        !(m.location.expiresAt && now >= new Date(m.location.expiresAt).getTime()) &&
+        !useLiveLocationStore.getState().stoppedShareIds[String(m._id)]
+      ) {
+        startLiveShareTicker(m, selectedUser._id);
+      }
+    });
+  }, [messages, selectedUser?._id, selectedGroup, authUser?._id]);
 
   // An edit leaves the list the same length, so the normal
   // new-message autoscroll never fires. Follow the store's explicit request.
@@ -1564,7 +1592,7 @@ const ChatContainer = () => {
                       ))}
                       <div className="w-[1px] h-3 bg-base-300 mx-1" />
                       <button onClick={() => setReplyingToMessage(message)} className="hover:text-primary transition-colors flex items-center" title="Reply"><CornerUpLeft size={13} /></button>
-                      {!message.isDeletedForEveryone && (<button onClick={(e) => { e.stopPropagation(); setForwardingMessage(message); }} className="hover:text-primary transition-colors flex items-center" title="Forward"><Forward size={13} /></button>)}
+                      {!message.isDeletedForEveryone && !message.restricted && (<button onClick={(e) => { e.stopPropagation(); setForwardingMessage(message); }} className="hover:text-primary transition-colors flex items-center" title="Forward"><Forward size={13} /></button>)}
                       {message.senderId === authUser?._id && !message.isDeletedForEveryone && message.text && (Date.now() - new Date(message.createdAt).getTime() <= 15 * 60 * 1000) && (<button onClick={() => setEditingMessage(message)} className="hover:text-primary transition-colors flex items-center" title="Edit"><Pencil size={13} /></button>)}
                       {!message.isDeletedForEveryone && (<button onClick={() => togglePinMessage(message._id)} className={`transition-colors flex items-center ${message.isPinned ? "text-amber-500 hover:text-amber-600" : "hover:text-amber-500"}`} title={message.isPinned ? "Unpin" : "Pin"}><Pin size={13} /></button>)}
                       {!message.isDeletedForEveryone && (
@@ -1593,6 +1621,13 @@ const ChatContainer = () => {
                         <span className="flex items-center gap-1 text-[9px] font-medium mb-1 select-none">
                           <Forward size={9} className="opacity-60" />
                           Forwarded
+                        </span>
+                      )}
+                      {/* Restricted (anti-forward / screenshot-block) label */}
+                      {message.restricted && (
+                        <span className="flex items-center gap-1 text-[9px] font-medium mb-1 select-none text-error/80">
+                          <ShieldCheck size={9} className="opacity-70" />
+                          Forwarding disabled
                         </span>
                       )}
                       {/* Message Content & Media */}
@@ -1995,6 +2030,9 @@ const ChatContainer = () => {
           authUser={authUser}
         />
       )}
+
+      {/* Interactive shared / live location map */}
+      <LiveLocationModal />
     </div>
   );
 };

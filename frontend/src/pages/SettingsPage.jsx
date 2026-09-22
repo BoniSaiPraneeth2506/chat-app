@@ -9,6 +9,8 @@ import {
   User,
   Ban,
   BookOpen,
+  HardDrive,
+  FileDown,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useThemeStore } from '../store/useThemeStore';
@@ -179,6 +181,21 @@ const SettingsPage = () => {
             title="App Preferences"
             subtitle="Sounds, read receipts, online & typing status"
             onClick={() => navigate('/settings/app-preferences')}
+          />
+        </SettSection>
+
+        <SettSection title="Storage & Data">
+          <SettRow
+            icon={HardDrive}
+            title="Storage Manager"
+            subtitle="Manage media cache & duplicates"
+            onClick={() => navigate('/settings/storage')}
+          />
+          <SettRow
+            icon={FileDown}
+            title="Export Chat as PDF"
+            subtitle="Save a conversation to a PDF file"
+            onClick={() => navigate('/settings/export-pdf')}
           />
         </SettSection>
 

@@ -55,11 +55,13 @@ import ThemeSettingsPage from './pages/ThemeSettingsPage'
 import NotificationSettingsPage from './pages/NotificationSettingsPage'
 import WallpaperSettingsPage from './pages/WallpaperSettingsPage'
 import AppPreferencesPage from './pages/AppPreferencesPage'
+import StorageManagerPage from './pages/StorageManagerPage'
 import LockedChatsPage from './pages/LockedChatsPage'
 import DisappearingMessagesPage from './pages/DisappearingMessagesPage'
 import AccountPage from './pages/AccountPage'
 import FeaturesPage from './pages/FeaturesPage'
 import FeatureDetailPage from './pages/FeatureDetailPage'
+import ExportPdfPage from './pages/ExportPdfPage'
 import ProfilePage from './pages/ProfilePage'
 import LinkedDevicesPage from './pages/LinkedDevicesPage'
 import BlockedUsersPage from './pages/BlockedUsersPage'
@@ -84,6 +86,7 @@ import StatusViewer from './components/StatusViewer'
 import CreateStatusSheet from './components/CreateStatusSheet'
 import StatusViewersSheet from './components/StatusViewersSheet'
 import { useGroupStore } from './store/useGroupStore'
+import useLiveLocationStore from './store/useLiveLocationStore'
 import { App as CapacitorApp } from '@capacitor/app'
 import OfflineBanner from './components/OfflineBanner'
 import { initPushListeners, initPushRegistration, reportActiveConversation } from './lib/pushNotifications'
@@ -192,6 +195,7 @@ const App = () => {
   const { theme } = useThemeStore()
   const { getGroups, subscribeToGroupEvents, unsubscribeFromGroupEvents, selectedGroup, unreadGroupCounts,
     groupPreview, setGroupPreview, setSelectedGroup, setIsGroupDetailsModalOpen, startOrJoinGroupCall } = useGroupStore();
+  const subscribeToLiveLocation = useLiveLocationStore((s) => s.subscribeToLiveLocation);
 
   // Groups whose welcome sheet has been dismissed in this session. The server
   // is the real record (welcomeSeenBy); this only stops the sheet reappearing in
@@ -283,6 +287,7 @@ const App = () => {
   useEffect(() => {
     if (authUserId && socket) {
       subscribeToMessages();
+      subscribeToLiveLocation();
       // Ensure group state and socket listeners are initialized globally
       getGroups();
       subscribeToGroupEvents();
@@ -291,7 +296,7 @@ const App = () => {
         unsubscribeFromGroupEvents();
       };
     }
-  }, [authUserId, socket, subscribeToMessages, unsubscribeFromMessages]);
+  }, [authUserId, socket, subscribeToMessages, unsubscribeFromMessages, subscribeToLiveLocation]);
 
   // ── Push notifications (Android / FCM) ─────────────────────────────────────
   // All notification taps funnel to the centralized navigation module
@@ -468,11 +473,13 @@ const App = () => {
         <Route path='/settings/notifications' element={authUser ? <NotificationSettingsPage /> : <Navigate to='/login' />} />
         <Route path='/settings/wallpaper' element={authUser ? <WallpaperSettingsPage /> : <Navigate to='/login' />} />
         <Route path='/settings/app-preferences' element={authUser ? <AppPreferencesPage /> : <Navigate to='/login' />} />
+        <Route path='/settings/storage' element={authUser ? <StorageManagerPage /> : <Navigate to='/login' />} />
         <Route path='/settings/locked-chats' element={authUser ? <LockedChatsPage /> : <Navigate to='/login' />} />
         <Route path='/settings/disappearing-messages' element={authUser ? <DisappearingMessagesPage /> : <Navigate to='/login' />} />
         <Route path='/settings/account' element={authUser ? <AccountPage /> : <Navigate to='/login' />} />
         <Route path='/settings/features' element={authUser ? <FeaturesPage /> : <Navigate to='/login' />} />
         <Route path='/settings/feature/:id' element={authUser ? <FeatureDetailPage /> : <Navigate to='/login' />} />
+        <Route path='/settings/export-pdf' element={authUser ? <ExportPdfPage /> : <Navigate to='/login' />} />
         <Route path='/profile' element={authUser ? <ProfilePage /> : <Navigate to='/login' />} />
         <Route path='/linked-devices' element={authUser ? <LinkedDevicesPage /> : <Navigate to='/login' />} />
         <Route path='/blocked' element={authUser ? <BlockedUsersPage /> : <Navigate to='/login' />} />

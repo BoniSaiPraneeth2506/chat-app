@@ -1,4 +1,4 @@
-import { Image as ImageIcon, Camera, Video, Clapperboard, FileText, User, Mic, Sticker } from "lucide-react";
+import { Image as ImageIcon, Camera, Video, Clapperboard, FileText, User, Mic, Sticker, MapPin } from "lucide-react";
 
 /**
  * What the paperclip opens.
@@ -69,6 +69,13 @@ const ITEMS = [
     hint: "Share someone's card",
     Icon: User,
     tint: "#12a37a",
+  },
+  {
+    id: "location",
+    label: "Location",
+    hint: "Static pin or live share",
+    Icon: MapPin,
+    tint: "#2f9e44",
   },
 ];
 

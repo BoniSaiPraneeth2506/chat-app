@@ -71,7 +71,7 @@ import { transcribeAudioUrl, isTranscriptionConfigured } from "../lib/assemblyai
 import Message from "../models/message.model.js";
 import User from "../models/user.model.js";
 import cloudinary from "../lib/cloudinary.js";
-import { getReceiverSocketId, io, invalidateBlockCache, emitAccountLists } from "../lib/socket.js";
+import { getReceiverSocketId, io, invalidateBlockCache, emitAccountLists, registerLiveShare, unregisterLiveShare, relayLiveLocationStopped } from "../lib/socket.js";
 import sanitizeHtml from "sanitize-html";
 import { destroyMessageAssets, assetUrlsOf, destroyAssets, attachmentKeysOf, destroyObjects } from "../lib/mediaCleanup.js";
 import { isGiphyMediaUrl } from "../lib/giphy.js";
@@ -82,6 +82,7 @@ import {
   MAX_ATTACHMENTS_PER_MESSAGE,
 } from "../lib/attachments.js";
 import { pushDmNotification } from "../lib/fcmNotifications.js";
+import LiveLocation from "../models/liveLocation.model.js";
 
 // ── Security Helpers ──────────────────────────────────────────────────────────
 
@@ -377,6 +378,69 @@ const getBlockedUsers = async (req, res) => {
   } catch (error) {
     console.error("Error in getBlockedUsers:", error.message);
     res.status(500).json({ message: "Could not load blocked users" });
+  }
+};
+
+// ── Live Location Share Helpers ──────────────────────────────────────────────
+
+/**
+ * Creates (or refreshes) the live-location share that backs a `location.isLive`
+ * message. Only one active share can exist between a pair at a time — a newer
+ * live message supersedes an older one.
+ */
+const upsertLiveShare = async ({ sharerId, recipientId, messageId, duration, expiresAt, lat, lng }) => {
+  await LiveLocation.updateOne(
+    { sharerId, recipientId, isActive: true },
+    { $set: { isActive: false } }
+  ).catch(() => {});
+  await LiveLocation.deleteMany({
+    $or: [{ sharerId, recipientId }, { sharerId: recipientId, recipientId: sharerId }],
+    isActive: false,
+    expiresAt: { $lt: new Date() },
+  }).catch(() => {});
+
+  const shareDoc = await LiveLocation.findOneAndUpdate(
+    { messageId },
+    {
+      sharerId,
+      recipientId,
+      messageId,
+      duration,
+      expiresAt,
+      isActive: true,
+      latestLat: lat,
+      latestLng: lng,
+      lastUpdateAt: new Date(),
+    },
+    { upsert: true, new: true }
+  ).catch(() => null);
+
+  if (shareDoc) {
+    registerLiveShare({
+      messageId: shareDoc._id,
+      sharerId: shareDoc.sharerId,
+      recipientId: shareDoc.recipientId,
+      expiresAt: shareDoc.expiresAt,
+      lat: shareDoc.latestLat,
+      lng: shareDoc.latestLng,
+    });
+  }
+  return shareDoc;
+};
+
+/**
+ * Marks all active shares for the pair as stopped (a `stop` location message
+ * or the sharer ending it from the modal).
+ */
+const updateLiveShareStopped = async (sharerId, recipientId) => {
+  const active = await LiveLocation.find({ sharerId, recipientId, isActive: true }).lean().catch(() => []);
+  await LiveLocation.updateMany(
+    { sharerId, recipientId, isActive: true },
+    { $set: { isActive: false } }
+  ).catch(() => {});
+  for (const share of active) {
+    unregisterLiveShare(share._id);
+    relayLiveLocationStopped(share._id);
   }
 };
 
@@ -727,7 +791,7 @@ const getMessages = async (req, res) => {
 const sendMessage = async (req, res) => {
   try {
     const { id: receiverId } = req.params;
-    const { text, image, images, voice, replyTo, isForwarded, isOneView, scheduledAt, attachments, contact, clientId } = req.body;
+    const { text, image, images, voice, replyTo, isForwarded, isOneView, scheduledAt, attachments, contact, clientId, restricted, location } = req.body;
     const senderId = req.user._id;
 
     // Check block list
@@ -851,6 +915,39 @@ const sendMessage = async (req, res) => {
       };
     }
 
+    // A location payload is validated here so a client cannot smuggle in
+    // anything that isn't a plain lat/lng pair. Live shares must carry a
+    // duration from the allowed set (15m / 1h / 8h); the expiry is computed
+    // server-side so a lying client can't make a "live" share run forever.
+    let locationData = undefined;
+    if (location && typeof location === "object") {
+      const lat = Number(location.lat);
+      const lng = Number(location.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return res.status(400).json({ message: "Invalid location coordinates" });
+      }
+      if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+        return res.status(400).json({ message: "Invalid location coordinates" });
+      }
+      locationData = {
+        lat,
+        lng,
+        label: String(location.label || "").slice(0, 200),
+        isLive: Boolean(location.isLive),
+      };
+      if (location.isLive) {
+        const duration = Number(location.duration);
+        const allowed = [15, 60, 480];
+        if (!allowed.includes(duration)) {
+          return res.status(400).json({ message: "Live location duration must be 15, 60 or 480 minutes" });
+        }
+        locationData.duration = duration;
+        locationData.expiresAt = new Date(Date.now() + duration * 60 * 1000);
+      } else {
+        locationData.stop = false;
+      }
+    }
+
     const timer = sender?.disappearingTimers?.get(receiverId) || sender?.messageTimer || "off";
 
     let deleteAt = undefined;
@@ -887,6 +984,8 @@ const sendMessage = async (req, res) => {
         replyTo: replyTo || null,
         isForwarded: isForwarded || false,
         isOneView: isOneView || false,
+        restricted: restricted || false,
+        location: locationData,
         scheduledAt: scheduledDate,
         scheduledStatus: "scheduled",
         scheduledBy: senderId,
@@ -907,12 +1006,33 @@ const sendMessage = async (req, res) => {
       replyTo: replyTo || null,
       isForwarded: isForwarded || false,
       isOneView: isOneView || false,
+      restricted: restricted || false,
+      location: locationData,
       attachments: verifiedAttachments.length > 0 ? verifiedAttachments : undefined,
       contact: contactCard,
     });
 
     await newMessage.save();
     await newMessage.populate("replyTo");
+
+    // Live location lifecycle — starting a new live share or stopping an active
+    // one is recorded so a recipient can always recover the sharer's latest
+    // point (and so a "you stopped sharing" state survives reconnects).
+    if (newMessage.location) {
+      if (newMessage.location.isLive) {
+        await upsertLiveShare({
+          sharerId: senderId,
+          recipientId: receiverId,
+          messageId: newMessage._id,
+          duration: newMessage.location.duration,
+          expiresAt: newMessage.location.expiresAt,
+          lat: newMessage.location.lat,
+          lng: newMessage.location.lng,
+        });
+      } else if (newMessage.location.stop) {
+        await updateLiveShareStopped(senderId, receiverId);
+      }
+    }
 
     // Either side writing again undoes the deletion, on both accounts: the sender
     // is plainly in this conversation once more, and the recipient has something
@@ -2093,12 +2213,18 @@ const getCallHistory = async (req, res) => {
     const userId = req.user._id;
     const limit = Math.min(parseInt(req.query.limit) || 100, 200);
 
+    // The groups this user is actually a member of — group call logs must only
+    // surface for participants, never the whole DB.
+    const userGroupIds = (await Group.find({ "members.user": userId }).distinct("_id")) || [];
+
     const calls = await Message.find({
       isCallLog: true,
       $or: [
         { senderId: userId, groupId: null, receiverId: { $exists: true } },
         { receiverId: userId, groupId: null },
-        { groupId: { $exists: true } },
+        // Group calls are only visible to actual members — the logged-in user's
+        // own chat list must not leak every group's call log in the DB.
+        ...(userGroupIds.length > 0 ? [{ groupId: { $in: userGroupIds } }] : []),
       ],
     })
       .sort({ createdAt: -1 })

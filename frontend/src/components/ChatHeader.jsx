@@ -218,8 +218,8 @@ const ChatHeader = () => {
 
   // Multi-select actions. These are rendered mobile-only (lg:hidden) so the
   // desktop toolbar keeps exactly the buttons it had before.
-  const copyableCount = selectedMsgs.filter((m) => m.text && !m.isDeletedForEveryone).length;
-  const forwardableMsgs = selectedMsgs.filter((m) => !m.isDeletedForEveryone);
+  const copyableCount = selectedMsgs.filter((m) => m.text && !m.isDeletedForEveryone && !m.restricted).length;
+  const forwardableMsgs = selectedMsgs.filter((m) => !m.isDeletedForEveryone && !m.restricted);
 
   const handleCopySelected = async () => {
     const text = messagesToClipboardText(selectedMsgs, {
@@ -313,7 +313,7 @@ const ChatHeader = () => {
               <Forward size={18} />
             </button>
           )}
-          {soleSelected && !soleSelected.isDeletedForEveryone && (
+          {soleSelected && !soleSelected.isDeletedForEveryone && !soleSelected.restricted && (
             <button
               onClick={() => { setForwardingMessage(soleSelected); exitSelection(); }}
               className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary"

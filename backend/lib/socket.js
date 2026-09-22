@@ -6,6 +6,7 @@ import User from '../models/user.model.js';
 import Message from '../models/message.model.js';
 import Group from '../models/group.model.js';
 import Status from '../models/status.model.js';
+import LiveLocation from '../models/liveLocation.model.js';
 import { isOriginAllowed } from './origins.js';
 import { canDo } from './groupPermissions.js';
 import { sendPushNotification } from './fcmNotifications.js';
@@ -116,6 +117,60 @@ function socketAllow(userId, key, limit, windowMs) {
 
 // Runtime tracking for active group calls: Map<groupId, { startedBy, type, startTime, participants: Set<socketId>, participantUserIds: Set<userId> }>
 const activeGroupCalls = new Map();
+
+// ── Live Location Shares (runtime registry) ───────────────────────────────────
+//
+// Keep the active share's participants in memory so an incoming coordinate
+// heartbeat can be relayed without a database round-trip every few seconds.
+// Keyed by the `location.isLive` message's id. The Mongo record (LiveLocation)
+// remains the source of truth for recovery after a restart, so this map is
+// treated as a warm cache: a miss falls back to the database.
+const liveLocationShares = new Map(); // messageId -> { sharerId, recipientId, expiresAt, lat, lng }
+
+export function registerLiveShare(entry) {
+  if (!entry?.messageId) return;
+  liveLocationShares.set(String(entry.messageId), {
+    sharerId: String(entry.sharerId),
+    recipientId: String(entry.recipientId),
+    expiresAt: entry.expiresAt ? new Date(entry.expiresAt) : null,
+    lat: entry.lat,
+    lng: entry.lng,
+  });
+}
+
+export function unregisterLiveShare(messageId) {
+  if (messageId) liveLocationShares.delete(String(messageId));
+}
+
+/** Emits `liveLocation:update` to both participants (all their devices). */
+export function relayLiveLocationUpdate(messageId, lat, lng) {
+  const share = liveLocationShares.get(String(messageId));
+  if (!share) return false;
+  if (share.expiresAt && new Date(share.expiresAt).getTime() <= Date.now()) {
+    liveLocationShares.delete(String(messageId));
+    return false;
+  }
+  const payload = { messageId: String(messageId), lat, lng, sharerId: share.sharerId, recipientId: share.recipientId };
+  const targets = new Set([share.sharerId, share.recipientId]);
+  for (const uid of targets) {
+    const room = isUserOnline(uid) ? roomForUser(uid) : undefined;
+    if (room) io.to(room).emit("liveLocation:update", payload);
+  }
+  return true;
+}
+
+/** Emits `liveLocation:stopped` to both participants. */
+export function relayLiveLocationStopped(messageId) {
+  const share = liveLocationShares.get(String(messageId));
+  if (!share) return;
+  const payload = { messageId: String(messageId) };
+  const targets = new Set([share.sharerId, share.recipientId]);
+  for (const uid of targets) {
+    const room = isUserOnline(uid) ? roomForUser(uid) : undefined;
+    if (room) io.to(room).emit("liveLocation:stopped", payload);
+  }
+  liveLocationShares.delete(String(messageId));
+}
 
 // ── Blocking, enforced on relayed socket traffic ─────────────────────────────
 //
@@ -663,6 +718,66 @@ io.on("connection", async (socket) => {
                 });
             }
         } catch {}
+    });
+
+    // ── Live Location Sharing ──────────────────────────────────────────────
+    // Sharer's device heartbeats its coordinates; the server validates the
+    // sharer's claim, persists the latest point (rate-limited), and relays the
+    // update to both parties' devices so the map markers actually move.
+    socket.on("liveLocation:update", async ({ messageId, lat, lng, recipientId }) => {
+      if (!messageId || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return;
+      const key = String(messageId);
+      let share = liveLocationShares.get(key);
+      if (!share) {
+        try {
+          const doc = await LiveLocation.findById(messageId).lean();
+          if (doc && doc.isActive && doc.sharerId?.toString() === userId.toString()) {
+            share = {
+              sharerId: String(doc.sharerId),
+              recipientId: String(doc.recipientId),
+              expiresAt: doc.expiresAt,
+              lat: doc.latestLat,
+              lng: doc.latestLng,
+            };
+            liveLocationShares.set(key, share);
+          }
+        } catch (err) {
+          return;
+        }
+      }
+      if (!share) return;
+      // Only the sharer may publish coordinates for their own share.
+      if (share.sharerId !== userId.toString()) return;
+      if (share.expiresAt && new Date(share.expiresAt).getTime() <= Date.now()) {
+        liveLocationShares.delete(key);
+        return;
+      }
+      share.lat = lat;
+      share.lng = lng;
+      relayLiveLocationUpdate(key, lat, lng);
+      // Persist latest point to a fresh map field, at most every ~5s to keep the
+      // DB warm for a receiver that opens the map after a reconnect.
+      const now = Date.now();
+      if (!share.lastPersistedAt || now - share.lastPersistedAt > 5000) {
+        share.lastPersistedAt = now;
+        LiveLocation.updateOne({ _id: messageId }, { $set: { latestLat: lat, latestLng: lng, lastUpdateAt: new Date() } }).catch(() => {});
+      }
+    });
+
+    // Either party (or the system) stops a live share.
+    socket.on("liveLocation:stop", async ({ messageId }) => {
+      if (!messageId) return;
+      const key = String(messageId);
+      const share = liveLocationShares.get(key);
+      const sharerId = share?.sharerId;
+      if (share && sharerId === userId.toString()) {
+        try {
+          await LiveLocation.updateOne({ _id: messageId, sharerId: userId }, { $set: { isActive: false } });
+        } catch {}
+        relayLiveLocationStopped(key);
+        io.to(roomForUser(userId) || "").emit("liveLocation:stopped", { messageId: String(messageId), sharerId: String(userId) });
+      }
     });
 
     // ── Event: activeConversation ──────────────────────────────────────────

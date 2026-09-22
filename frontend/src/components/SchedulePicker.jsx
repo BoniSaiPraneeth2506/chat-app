@@ -92,7 +92,7 @@ const SchedulePicker = ({ value, onConfirm, onClose }) => {
     "focus:ring-2 focus:ring-primary/40 transition-shadow";
 
   return (
-    <div className="absolute bottom-full right-0 mb-2 z-40 w-[290px] rounded-2xl bg-base-100 shadow-2xl overflow-hidden cg-dialog">
+    <div className="absolute bottom-full right-0 mb-2 z-[1100] w-[290px] rounded-2xl bg-base-100 shadow-2xl overflow-hidden cg-dialog">
       <div className="flex items-center justify-between px-4 pt-3 pb-2">
         <span className="flex items-center gap-1.5 text-[13px] font-semibold text-base-content">
           <Clock size={14} className="text-primary" />

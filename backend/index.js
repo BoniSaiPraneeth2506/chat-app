@@ -12,6 +12,7 @@ import statusRoutes from "./routes/status.route.js";
 import notificationRoutes from "./routes/notification.route.js";
 import aiRoutes from "./routes/ai.route.js";
 import channelRoutes from "./routes/channel.route.js";
+import liveLocationRoutes from "./routes/liveLocation.route.js";
 import connectDB from './lib/db.js';
 import path from "path";
 import fs from "fs";
@@ -111,6 +112,7 @@ app.use('/api/status', statusRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/channels', channelRoutes);
+app.use('/api/locations', liveLocationRoutes);
 
 app.get('/', (req, res) => {
   res.send("api is working");

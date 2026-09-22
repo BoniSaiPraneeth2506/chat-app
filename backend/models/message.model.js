@@ -236,6 +236,31 @@ const messageSchema = new Schema(
       default: []
     }]
     ,
+    // A "restricted" message disables forwarding, downloading and copy on the
+    // receiving client, and (on native) enables the OS anti-screenshot flag
+    // (FLAG_SECURE). The sender opts into this when composing the message.
+    restricted: {
+      type: Boolean,
+      default: false
+    },
+    // Location sharing — a static pin snippet, or a live location broadcast.
+    // isLive: true means the coordinates are refreshed over Socket.IO until
+    // expiresAt (durations 15m / 1h / 8h). A distinct liveLocation message is
+    // used as the "stop sharing" control.
+    location: {
+      type: {
+        lat: { type: Number, required: true },
+        lng: { type: Number, required: true },
+        label: { type: String, default: "" },
+        isLive: { type: Boolean, default: false },
+        // Duration in minutes: 15, 60 or 480.
+        duration: { type: Number, default: null },
+        expiresAt: { type: Date, default: null },
+        // Marks the message that stops an active live location share.
+        stop: { type: Boolean, default: false },
+      },
+      default: undefined,
+    },
     // Scheduling fields (optional)
     scheduledAt: {
       type: Date,

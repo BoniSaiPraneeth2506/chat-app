@@ -2,6 +2,7 @@ import { useRef, useState, useEffect } from "react";
 import GifPicker from "./GifPicker";
 import AttachMenu from "./AttachMenu";
 import ContactPickerSheet from "./ContactPickerSheet";
+import LocationPicker from "./LocationPicker";
 import {
   fetchUploadLimits,
   validateFile,
@@ -13,7 +14,7 @@ import {
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
 import useAuthStore from "../store/useAuthStore";
-import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3, Pencil, EyeOff, Paperclip, FileText, Video, Loader } from "lucide-react";
+import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3, Pencil, EyeOff, Paperclip, FileText, Video, Loader, ShieldCheck, MoreHorizontal } from "lucide-react";
 import toast from "react-hot-toast";
 import { haptic } from "../lib/haptics";
 import { focusWithKeyboard } from "../lib/keyboard";
@@ -50,6 +51,7 @@ const MessageInput = () => {
   // post the rest of a conversation namelessly by accident.
   const [askAnonymously, setAskAnonymously] = useState(false);
   const [isOneView, setIsOneView] = useState(false);
+  const [sensitive, setSensitive] = useState(false);
   const [isSendingAnimation, setIsSendingAnimation] = useState(false);
   const fileInputRef = useRef(null);
   const videoInputRef = useRef(null);
@@ -63,6 +65,10 @@ const MessageInput = () => {
   // The attachment menu, the contact picker, and the one large file being sent.
   const [isAttachOpen, setIsAttachOpen] = useState(false);
   const [isContactOpen, setIsContactOpen] = useState(false);
+  const [isLocationOpen, setIsLocationOpen] = useState(false);
+  // Mobile-only: Forward and Schedule collapse into one toggle, so a small
+  // screen keeps the composer from crowding. Desktop keeps both inline.
+  const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [limits, setLimits] = useState({ enabled: false });
   // A chosen video or document waiting to be sent: { file, kind, previewUrl }.
   // Nothing is uploaded until the send button is pressed, the same as a photo.
@@ -439,6 +445,10 @@ const MessageInput = () => {
       setIsContactOpen(true);
       return;
     }
+    if (id === "location") {
+      setIsLocationOpen(true);
+      return;
+    }
     // GIFs and stickers never upload a file — the bubble keeps GIPHY's URL — so
     // they do not need the bucket-based file sharing the other kinds do.
     if (id === "gifs" || id === "stickers") {
@@ -619,6 +629,7 @@ const MessageInput = () => {
     const currentImages = [...imagePreviews];
     const currentStaged = stagedFile;
     const messageOneView = isOneView;
+    const messageSensitive = sensitive;
     const currentEditing = editingMessage;
 
     // A bare slash command is the picker's input, not a message. Sending it would
@@ -640,6 +651,8 @@ const MessageInput = () => {
     // thumbnails above the input showed it in two places at once.
     setImagePreviews([]);
     setIsOneView(false);
+    setSensitive(false);
+    setShowMoreOptions(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -661,6 +674,7 @@ const MessageInput = () => {
           text: messageText,
           localUrl: currentStaged.previewUrl,
           posterUrl: currentStaged.poster || "",
+          restricted: messageSensitive,
         });
       } else if (currentEditing) {
         // Checked ahead of selectedGroup: an edit is an edit in both DMs and
@@ -693,6 +707,7 @@ const MessageInput = () => {
               image: currentImages[0] || "",
               images: currentImages.length > 1 ? currentImages : [],
               isOneView: messageOneView,
+              restricted: messageSensitive,
               scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
             });
             setScheduledAt("");
@@ -706,6 +721,7 @@ const MessageInput = () => {
           } finally {
             setImagePreviews([]);
             setIsOneView(false);
+            setSensitive(false);
             if (fileInputRef.current) fileInputRef.current.value = "";
           }
         } else {
@@ -714,6 +730,7 @@ const MessageInput = () => {
               text: messageText,
               images: currentImages,
               isOneView: false, // Multi-image doesn't use View Once
+              restricted: messageSensitive,
               scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
             });
             setScheduledAt("");
@@ -722,6 +739,7 @@ const MessageInput = () => {
               text: messageText,
               image: currentImages[0] || "",
               isOneView: messageOneView,
+              restricted: messageSensitive,
               scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
             });
             setScheduledAt("");
@@ -906,6 +924,23 @@ const MessageInput = () => {
           </div>
         )}
 
+        {sensitive && (
+          <div className="flex items-center gap-2 px-3 py-2 mb-1 rounded-xl s-tile">
+            <ShieldCheck size={14} className="text-error shrink-0" />
+            <span className="flex-1 text-xs text-base-content">
+              Forwarding, downloads &amp; copy disabled for this message
+            </span>
+            <button
+              type="button"
+              onClick={() => setSensitive(false)}
+              className="p-1 rounded-full t-dim hover:text-base-content"
+              aria-label="Cancel sensitive mode"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         {askAnonymously && (
           <div className="flex items-center gap-2 px-3 py-2 mb-1 rounded-xl s-tile">
             <EyeOff size={14} className="text-primary shrink-0" />
@@ -1026,6 +1061,10 @@ const MessageInput = () => {
 
         {isAttachOpen && (
           <AttachMenu onPick={handleAttachPick} onClose={() => setIsAttachOpen(false)} />
+        )}
+
+        {isLocationOpen && (
+          <LocationPicker onClose={() => setIsLocationOpen(false)} />
         )}
 
         {isContactOpen && (
@@ -1223,29 +1262,94 @@ const MessageInput = () => {
                 onKeyDown={handleKeyDown}
               />
               <div id="msg-help" className="sr-only">Press Ctrl+Enter to send on desktop. Use Arrow Up to edit your last message.</div>
-              {/* Schedule send.
-                  The clock opens the native date/time picker directly. The
-                  input stays in the DOM because showPicker() has to be called
-                  on a real, rendered field — but it's visually collapsed, so
-                  the bare rectangle that used to appear beside the clock is
-                  gone. Tapping the clock again clears the schedule. */}
+              {/* Forward + Schedule now live inside one toggle on every size, so
+                  the composer never crowds. Tapping it lifts a small list above
+                  the input; tapping it again (or picking an option, or tapping
+                  anywhere else) closes it. Functions unchanged. */}
               <div className="relative flex items-center ml-2">
                 <button
                   type="button"
-                  title={scheduledAt ? "Clear scheduled time" : isSchedulerOpen ? "Close scheduler" : "Schedule message"}
-                  onClick={openSchedulePicker}
+                  aria-expanded={showMoreOptions}
+                  aria-pressed={sensitive || isSchedulerOpen || Boolean(scheduledAt)}
+                  title={showMoreOptions ? "Close more options" : "More options"}
+                  onClick={() => { haptic("tap"); setShowMoreOptions((v) => !v); }}
                   className={`p-1 rounded-full transition-colors ${
-                    scheduledAt || isSchedulerOpen
+                    sensitive || isSchedulerOpen || scheduledAt
                       ? "text-primary"
-                      : "hover:bg-base-200"
+                      : "hover:bg-base-200 t-dim hover:text-base-content"
                   }`}
                 >
-                  <Clock size={16} />
+                  <MoreHorizontal size={18} />
                 </button>
+
+                {showMoreOptions && (
+                  <>
+                    {/* Backdrop: any tap outside the card closes it. Must sit
+                        above the Leaflet mini-maps (their panes run up to
+                        z-800), so it dismisses even over a map bubble. */}
+                    <div
+                      className="fixed inset-0 z-[1000]"
+                      onClick={() => setShowMoreOptions(false)}
+                    />
+                    <div className="absolute bottom-full right-0 mb-2 z-[1100] w-64 rounded-2xl bg-base-100 shadow-2xl cg-dialog">
+                      {!selectedGroup && (
+                        <button
+                          type="button"
+                          onClick={() => { haptic("tap"); setSensitive((v) => !v); setShowMoreOptions(false); }}
+                          className={`flex items-center w-full gap-3 px-3.5 py-2.5 text-left transition-colors s-row border-b border-base-300/40 ${
+                            sensitive ? "bg-error/5" : ""
+                          }`}
+                        >
+                          <span className={`grid place-items-center size-9 shrink-0 rounded-full ${
+                            sensitive ? "bg-error/15 text-error" : "bg-base-200 t-dim"
+                          }`}>
+                            {sensitive ? <ShieldCheck size={17} /> : <Lock size={17} />}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-[13px] font-medium text-base-content">
+                              {sensitive ? "Forwarding off" : "Forwarding on"}
+                            </span>
+                            <span className="block text-[11px] truncate t-dim">
+                              {sensitive
+                                ? "Blocked forwarding, downloads & screenshots"
+                                : "Disable forward + screenshot lock for this message"}
+                            </span>
+                          </span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => { openSchedulePicker(); setShowMoreOptions(false); }}
+                        className={`flex items-center w-full gap-3 px-3.5 py-2.5 text-left transition-colors s-row ${
+                          scheduledAt || isSchedulerOpen ? "bg-primary/5" : ""
+                        }`}
+                      >
+                        <span className={`grid place-items-center size-9 shrink-0 rounded-full ${
+                          scheduledAt || isSchedulerOpen ? "bg-primary/15 text-primary" : "bg-base-200 t-dim"
+                        }`}>
+                          <Clock size={17} />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[13px] font-medium text-base-content">
+                            {scheduledAt ? "Clear schedule" : "Schedule send"}
+                          </span>
+                          <span className="block text-[11px] truncate t-dim">
+                            {scheduledAt
+                              ? `Sends ${new Date(scheduledAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
+                              : "Pick a time for this message"}
+                          </span>
+                        </span>
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {/* The picker itself pops above the composer and stays open even
+                    though the option list above has closed. */}
                 {isSchedulerOpen && (
                   <SchedulePicker
                     value={scheduledAt}
-                    onConfirm={(v) => { setScheduledAt(v); setIsSchedulerOpen(false); }}
+                    onConfirm={(v) => { setScheduledAt(v); setIsSchedulerOpen(false); setShowMoreOptions(false); }}
                     onClose={() => setIsSchedulerOpen(false)}
                   />
                 )}

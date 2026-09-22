@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Play, FileText, Download, Loader, AlertCircle, X } from "lucide-react";
+import { Play, FileText, Download, Loader, AlertCircle, X, ShieldAlert } from "lucide-react";
 import { fetchAttachmentUrl, formatBytes, isLiveObjectUrl } from "../lib/attachments";
 
 /**
@@ -29,7 +29,7 @@ const DOC_LABELS = {
   "text/csv": "CSV",
 };
 
-const MessageAttachment = ({ messageId, attachment, onOpenImage, progress, onCancel }) => {
+const MessageAttachment = ({ messageId, attachment, onOpenImage, progress, onCancel, restricted = false }) => {
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -175,7 +175,7 @@ const MessageAttachment = ({ messageId, attachment, onOpenImage, progress, onCan
       <span
         role="button"
         tabIndex={0}
-        onClick={() => !isUploading && shown && onOpenImage?.(shown)}
+        onClick={() => !isUploading && shown && onOpenImage?.(shown, restricted ? { secure: true } : undefined)}
         className="relative block mb-1.5 overflow-hidden rounded-xl bg-base-200 max-w-[220px] sm:max-w-[280px]"
         style={{ aspectRatio: attachment.width && attachment.height ? `${attachment.width}/${attachment.height}` : undefined }}
       >
@@ -239,6 +239,7 @@ const MessageAttachment = ({ messageId, attachment, onOpenImage, progress, onCan
     <button
       type="button"
       onClick={async () => {
+        if (restricted) return; // downloading/opening disabled for restricted messages
         const next = await resolve();
         // Opened rather than navigated to: this bubble sits inside a conversation
         // the reader is still in, and the signed link is short-lived either way.
@@ -260,7 +261,9 @@ const MessageAttachment = ({ messageId, attachment, onOpenImage, progress, onCan
           {formatBytes(attachment.size)} · {label}
         </span>
       </span>
-      {isLoading ? (
+      {restricted ? (
+        <ShieldAlert size={14} className="t-dim shrink-0" />
+      ) : isLoading ? (
         <Loader size={14} className="animate-spin t-dim shrink-0" />
       ) : (
         <Download size={14} className="t-dim shrink-0" />

@@ -51,3 +51,51 @@ export const saveTextFile = async (fileName, contents, mimeType = "application/j
   setTimeout(() => URL.revokeObjectURL(url), 10000);
   return { downloaded: true };
 };
+
+/**
+ * Saves a binary file (base64 payload) to local storage — used for PDF exports
+ * which saveTextFile cannot handle (it is utf8/text only).
+ *
+ * On native it writes to the Cache directory then hands it to the share sheet,
+ * mirroring the text path; on the web it triggers an `<a download>`.
+ */
+export const saveBinaryFile = async (fileName, base64, mimeType = "application/pdf") => {
+  if (Capacitor.isNativePlatform()) {
+    const written = await Filesystem.writeFile({
+      path: fileName,
+      data: base64,
+      directory: Directory.Cache,
+    });
+
+    const canShare = await Share.canShare().catch(() => ({ value: false }));
+    if (canShare?.value) {
+      await Share.share({
+        title: fileName,
+        url: written.uri,
+        dialogTitle: "Save or send this file",
+      });
+      return { shared: true };
+    }
+
+    await Filesystem.writeFile({
+      path: fileName,
+      data: base64,
+      directory: Directory.Documents,
+    });
+    return { savedTo: `Documents/${fileName}` };
+  }
+
+  const byteChars = atob(base64);
+  const bytes = new Uint8Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+  const blob = new Blob([bytes], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  return { downloaded: true };
+};
