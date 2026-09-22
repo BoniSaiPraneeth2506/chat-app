@@ -909,25 +909,32 @@ const ChatHeader = () => {
                             />
                           </label>
                         </li>
-                        <li className="px-3 pt-1 pb-2 grid grid-cols-3 gap-1">
-                          {AI_LANGUAGES.map((lang) => (
-                            <button
-                              key={lang.code}
-                              onClick={() => {
-                                setConvAutoTranslate(mutedConvId, { on: autoTranslateOn, lang: lang.code });
-                                setAutoTranslateTick((t) => t + 1);
-                                document.activeElement.blur();
-                              }}
-                              className={`rounded-lg px-1.5 py-1 text-[11px] text-center transition-colors ${
-                                autoTranslateLang === lang.code
-                                  ? "bg-primary text-primary-content font-semibold"
-                                  : "hover:bg-base-200"
-                              }`}
-                            >
-                              {lang.name}
-                            </button>
-                          ))}
-                        </li>
+<li className="px-3 pt-1.5 pb-2">
+  <div className="grid grid-cols-3 gap-1.5">
+    {AI_LANGUAGES.map((lang) => {
+      const active = autoTranslateOn && autoTranslateLang === lang.code;
+      return (
+        <button
+          key={lang.code}
+          onClick={() => {
+            // Choosing a language also switches auto-translate on, and the
+            // menu stays open so it's obvious what just happened. It only
+            // closes when the on/off switch changes.
+            setConvAutoTranslate(mutedConvId, { on: true, lang: lang.code });
+            setAutoTranslateTick((t) => t + 1);
+          }}
+          className={`rounded-lg border px-1 py-2 text-center text-xs transition-colors ${
+            active
+              ? "border-primary bg-primary text-primary-content font-semibold"
+              : "border-base-300 hover:bg-base-200"
+          }`}
+        >
+          {lang.name}
+        </button>
+      );
+    })}
+  </div>
+</li>
                       </ul>
                     </details>
                   </li>

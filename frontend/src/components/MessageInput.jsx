@@ -14,14 +14,13 @@ import {
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
 import useAuthStore from "../store/useAuthStore";
-import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3, Pencil, EyeOff, Paperclip, FileText, Video, Loader, ShieldCheck, MoreHorizontal, Smile } from "lucide-react";
+import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3, Pencil, EyeOff, Paperclip, FileText, Video, Loader, ShieldCheck, MoreHorizontal } from "lucide-react";
 import toast from "react-hot-toast";
 import { haptic } from "../lib/haptics";
 import { focusWithKeyboard } from "../lib/keyboard";
 import ImageEditorModal from "./ImageEditorModal";
 import CreatePollModal from "./CreatePollModal";
 import SchedulePicker from "./SchedulePicker";
-import EmojiPicker from "./EmojiPicker";
 import { transcribeSpeech } from "../lib/sarvamApi";
 
 // About five lines; past that the field scrolls instead of pushing the chat up.
@@ -101,8 +100,6 @@ const MessageInput = () => {
   const dictationChunksRef = useRef([]);
   const dictationLongPressRef = useRef(null);
   const dictationActiveRef = useRef(false);
-  // Emoji keyboard in the composer
-  const [emojiOpen, setEmojiOpen] = useState(false);
   // Poll composer
   const [showPollModal, setShowPollModal] = useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
@@ -922,23 +919,6 @@ const MessageInput = () => {
     }
   };
 
-  // Insert an emoji at the textarea cursor, falling back to appending.
-  const insertEmoji = (emoji) => {
-    const el = inputRef.current;
-    const start = el?.selectionStart ?? text.length;
-    const end = el?.selectionEnd ?? text.length;
-    const next = text.slice(0, start) + emoji + text.slice(end);
-    setText(next);
-    requestAnimationFrame(() => {
-      if (el) {
-        el.focus();
-        const caret = start + emoji.length;
-        el.setSelectionRange(caret, caret);
-      }
-    });
-    setEmojiOpen(false);
-  };
-
   if (isBlocked) {
     return (
       <div className="w-full px-4 py-4 flex items-center justify-center text-sm font-medium border-t border-base-300">
@@ -1376,22 +1356,6 @@ const MessageInput = () => {
                   the composer never crowds. Tapping it lifts a small list above
                   the input; tapping it again (or picking an option, or tapping
                   anywhere else) closes it. Functions unchanged. */}
-              <div className="relative flex items-center ml-1">
-                <button
-                  type="button"
-                  aria-label="Emoji"
-                  title="Emoji"
-                  onClick={() => { haptic("tap"); setEmojiOpen((v) => !v); }}
-                  className={`p-1 rounded-full transition-colors ${
-                    emojiOpen ? "text-primary bg-base-200" : "hover:bg-base-200 t-dim hover:text-base-content"
-                  }`}
-                >
-                  <Smile size={18} />
-                </button>
-                {emojiOpen && (
-                  <EmojiPicker onPick={insertEmoji} onClose={() => setEmojiOpen(false)} />
-                )}
-              </div>
               <div className="relative flex items-center ml-2">
                 <button
                   type="button"
