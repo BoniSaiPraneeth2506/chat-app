@@ -81,6 +81,8 @@ import { saveTextFile } from "../lib/download";
 import { copyText, messagesToClipboardText } from "../lib/clipboard";
 import { haptic } from "../lib/haptics";
 import { isChatMuted, muteConversation, unmuteConversation } from "../lib/mute";
+import { getConvAutoTranslate, setConvAutoTranslate } from "../lib/translatePrefs";
+import { AI_LANGUAGES, languageName } from "../lib/sarvamApi";
 import { scheduleReminder } from "../lib/reminders";
 import MessageInfoSheet from "./MessageInfoSheet";
 import AiActionMenu from "./ai/AiActionMenu";
@@ -88,7 +90,7 @@ import axiosInstance from "../lib/axios";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import toast from "react-hot-toast";
 
 const formatLastSeen = (lastSeenTime) => {
@@ -187,6 +189,8 @@ const ChatHeader = () => {
   // nested "Remind me" / time submenu stays open while choosing.
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const moreMenuRef = useRef(null);
+  // Bump this to re-read the per-chat auto-translate pref (stored locally).
+  const [autoTranslateTick, setAutoTranslateTick] = useState(0);
 
   useEffect(() => {
     if (!moreMenuOpen) return;
@@ -207,6 +211,13 @@ const ChatHeader = () => {
   const isOnline = onlineUsers.includes(selectedUser?._id);
   const mutedConvId = selectedGroup ? selectedGroup._id : selectedUser?._id;
   const chatIsMuted = isChatMuted(mutedConvId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const autoTranslatePref = useMemo(
+    () => getConvAutoTranslate(mutedConvId || ""),
+    [mutedConvId, autoTranslateTick]
+  );
+  const autoTranslateOn = autoTranslatePref.on;
+  const autoTranslateLang = autoTranslatePref.lang;
   const showLastSeen = selectedUser?.onlinePrivacy !== false;
   const isTyping = typingUsers?.[selectedUser?._id];
 
@@ -860,6 +871,63 @@ const ChatHeader = () => {
                             </button>
                           </li>
                         )}
+                      </ul>
+                    </details>
+                  </li>
+                )}
+
+                {!isSelf && (
+                  <li>
+                    {/* Auto-translate incoming messages to a language of your
+                        choice. The choice is per-conversation and stored on the
+                        device; the rendered translated rows live in ChatContainer. */}
+                    <details className="text-xs">
+                      <summary className="flex items-center gap-2 py-1.5 px-3 rounded-lg hover:bg-base-200 transition-colors cursor-pointer">
+                        <Sparkles size={14} />
+                        <span>Auto-translate</span>
+                        {autoTranslateOn && (
+                          <span className="ml-auto text-[9px] font-bold text-primary uppercase tracking-wide">{languageName(autoTranslateLang)}</span>
+                        )}
+                      </summary>
+                      <ul>
+                        <li>
+                          <label className="flex items-center justify-between gap-3 py-1.5 px-3 cursor-pointer select-none">
+                            <span className="flex items-center gap-2">
+                              <Sparkles size={14} />
+                              <span>{autoTranslateOn ? "On" : "Off"}</span>
+                            </span>
+                            <input
+                              type="checkbox"
+                              className="toggle toggle-primary toggle-sm"
+                              checked={autoTranslateOn}
+                              onChange={(e) => {
+                                setConvAutoTranslate(mutedConvId, { on: e.target.checked, lang: autoTranslateLang });
+                                setAutoTranslateTick((t) => t + 1);
+                                toast.success(e.target.checked ? "Auto-translate on" : "Auto-translate off");
+                                document.activeElement.blur();
+                              }}
+                            />
+                          </label>
+                        </li>
+                        <li className="px-3 pt-1 pb-2 grid grid-cols-3 gap-1">
+                          {AI_LANGUAGES.map((lang) => (
+                            <button
+                              key={lang.code}
+                              onClick={() => {
+                                setConvAutoTranslate(mutedConvId, { on: autoTranslateOn, lang: lang.code });
+                                setAutoTranslateTick((t) => t + 1);
+                                document.activeElement.blur();
+                              }}
+                              className={`rounded-lg px-1.5 py-1 text-[11px] text-center transition-colors ${
+                                autoTranslateLang === lang.code
+                                  ? "bg-primary text-primary-content font-semibold"
+                                  : "hover:bg-base-200"
+                              }`}
+                            >
+                              {lang.name}
+                            </button>
+                          ))}
+                        </li>
                       </ul>
                     </details>
                   </li>

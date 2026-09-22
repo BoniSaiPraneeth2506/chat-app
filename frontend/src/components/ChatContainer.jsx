@@ -15,8 +15,11 @@ import PollMessage from "./PollMessage";
 import VoiceNote from "./VoiceNote";
 import VoiceTranscript from "./VoiceTranscript";
 import MessageAiPanel from "./ai/MessageAiPanel";
+import AutoTranslateRow from "./AutoTranslateRow";
 import { useThemeStore } from "../store/useThemeStore";
 import { getWallpaperStyle } from "../pages/SettingsPage";
+import EmojiPicker from "./EmojiPicker";
+import MessageEffects from "./MessageEffects";
 
 
 import ChatHeader from "./ChatHeader";
@@ -523,6 +526,8 @@ const ChatContainer = () => {
   // handing Reply/Pin/Delete/Forward off to ChatHeader's selection toolbar
   // instead of a separate floating pill (see ChatHeader.jsx).
   const [mobileEmojiId, setMobileEmojiId] = useState(null);
+  // Message whose emoji "+" menu is currently open (mobile bar or desktop hover bar).
+  const [reactionPickerId, setReactionPickerId] = useState(null);
   const longPressTimerRef = useRef(null);
   // Mobile gestures: horizontal swipe = quote reply, double tap = heart reaction
   const touchStartRef = useRef(null);
@@ -1050,6 +1055,16 @@ const ChatContainer = () => {
             })()}
           </div>
         )}
+        {/* Auto-translate: per-chat switch + target language live in the header
+            ⋯ menu. Only incoming text bubbles get a translated row, and only
+            when the pref is on — results are cached so scrolling never spams
+            the AI endpoint. */}
+        {message.text && (message.senderId?._id || message.senderId) !== authUser?._id && (
+          <AutoTranslateRow
+            message={message}
+            convId={selectedUser?._id || selectedGroup?._id}
+          />
+        )}
       </>
     );
   };
@@ -1536,6 +1551,8 @@ const ChatContainer = () => {
                       <CornerUpLeft size={16} />
                     </span>
                   </span>
+                  {/* Celebration burst for special messages — see MessageEffects */}
+                  <MessageEffects message={message} />
                   {/* Group Message Sender Name Label.
                       An anonymous question arrives with no author — the server
                       strips it — so it always shows this label, including for the
@@ -1596,6 +1613,30 @@ const ChatContainer = () => {
                           {emoji}
                         </button>
                       ))}
+                      <div className="relative">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            haptic("tap");
+                            setReactionPickerId(reactionPickerId === message._id ? null : message._id);
+                          }}
+                          className="grid h-6 w-6 place-items-center rounded-full bg-base-300/60 text-sm leading-none text-base-content active:scale-110 transition-transform"
+                          title="More emoji"
+                        >
+                          +
+                        </button>
+                        {reactionPickerId === message._id && (
+                          <EmojiPicker
+                            onPick={(emoji) => {
+                              toggleReaction(message._id, emoji);
+                              setReactionPickerId(null);
+                              setMobileEmojiId(null);
+                              if (isSelectionMode) setSelectionMode(false);
+                            }}
+                            onClose={() => setReactionPickerId(null)}
+                          />
+                        )}
+                      </div>
                     </div>
                   )}
 
@@ -1613,6 +1654,24 @@ const ChatContainer = () => {
                           {emoji}
                         </button>
                       ))}
+                      <div className="relative">
+                        <button
+                          onClick={() => setReactionPickerId(reactionPickerId === message._id ? null : message._id)}
+                          className="grid h-6 w-6 place-items-center rounded-full bg-base-300/60 text-sm leading-none text-base-content hover:scale-110 transition-transform duration-100"
+                          title="More emoji"
+                        >
+                          +
+                        </button>
+                        {reactionPickerId === message._id && (
+                          <EmojiPicker
+                            onPick={(emoji) => {
+                              toggleReaction(message._id, emoji);
+                              setReactionPickerId(null);
+                            }}
+                            onClose={() => setReactionPickerId(null)}
+                          />
+                        )}
+                      </div>
                       <div className="w-[1px] h-3 bg-base-300 mx-1" />
                       <button onClick={() => setReplyingToMessage(message)} className="hover:text-primary transition-colors flex items-center" title="Reply"><CornerUpLeft size={13} /></button>
                       {!message.isDeletedForEveryone && !message.restricted && (<button onClick={(e) => { e.stopPropagation(); setForwardingMessage(message); }} className="hover:text-primary transition-colors flex items-center" title="Forward"><Forward size={13} /></button>)}
@@ -1935,6 +1994,36 @@ const ChatContainer = () => {
                       });
                     } catch {
                       toast.error("Could not update read receipt setting");
+                    }
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Per-contact online-status hiding */}
+            {selectedUser._id !== authUser._id && (
+              <div className="flex items-center justify-between p-3.5 rounded-2xl bg-base-200">
+                <div className="space-y-0.5">
+                  <span className="text-xs font-semibold text-base-content">Hide online status</span>
+                  <p className="text-[10px] text-base-content/50">
+                    {authUser?.presenceHidden?.[selectedUser._id]
+                      ? `${selectedUser.fullName || "This contact"} won't see when you're online`
+                      : `${selectedUser.fullName || "This contact"} sees when you're online`}
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  className="toggle toggle-primary toggle-sm"
+                  checked={Boolean(authUser?.presenceHidden?.[selectedUser._id])}
+                  onChange={async (e) => {
+                    const hidden = e.target.checked;
+                    try {
+                      const res = await axiosInstance.put(`/auth/presence/${selectedUser._id}`, { hidden });
+                      useAuthStore.setState({
+                        authUser: { ...authUser, presenceHidden: res.data.presenceHidden },
+                      });
+                    } catch {
+                      toast.error("Could not update online-status setting");
                     }
                   }}
                 />

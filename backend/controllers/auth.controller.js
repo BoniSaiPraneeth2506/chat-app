@@ -5,7 +5,7 @@ import { generateToken } from "../lib/utils.js";
 import User from "../models/user.model.js";
 import bcrypt from 'bcryptjs'
 import cloudinary from "../lib/cloudinary.js";
-import { updateUserPrivacyState, updateTypingPrivacyState, disconnectRevokedSessions } from "../lib/socket.js";
+import { updateUserPrivacyState, updateTypingPrivacyState, disconnectRevokedSessions, broadcastOnlineUsers, invalidatePresenceCache } from "../lib/socket.js";
 import { sendPasswordResetOtp } from "../lib/mailer.js";
 import Message from "../models/message.model.js";
 import Group from "../models/group.model.js";
@@ -140,6 +140,8 @@ const sanitizeUser = (user) => ({
   chatStreaks: mapToObject(user.chatStreaks),
   // Per-contact read receipt hiding — which contacts don't get blue ticks.
   readReceiptsHidden: mapToObject(user.readReceiptsHidden),
+  // Per-contact presence hiding — which contacts never see you as online.
+  presenceHidden: mapToObject(user.presenceHidden),
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
 });
@@ -652,4 +654,41 @@ const toggleReadReceiptsHidden = async (req, res) => {
   }
 };
 
-export { signup, login, logout, googleAuth, updateProfile, checkAuth, deleteAccount, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions, toggleReadReceiptsHidden };
+/**
+ * Toggles per-contact online-status hiding for a specific user.
+ *
+ * When enabled, the socket layer excludes this user from that contact's
+ * online/offline broadcasts — the contact never learns when they come or go.
+ * The global onlinePrivacy switch still hides from everyone; this hides from
+ * one specific person on top of it.
+ */
+const togglePresenceHidden = async (req, res) => {
+  try {
+    const { userId: targetId } = req.params;
+    const { hidden } = req.body;
+    if (!targetId) return res.status(400).json({ message: "User ID is required" });
+
+    const currentUserId = req.user._id;
+    if (targetId === currentUserId.toString()) {
+      return res.status(400).json({ message: "Cannot change settings for yourself" });
+    }
+
+    await User.updateOne(
+      { _id: currentUserId },
+      { $set: { [`presenceHidden.${targetId}`]: Boolean(hidden) } }
+    );
+
+    // Reflect the change in the live online lists right away — no need to
+    // wait for the next connect/disconnect broadcast.
+    invalidatePresenceCache(currentUserId);
+    broadcastOnlineUsers();
+
+    const updatedUser = await User.findById(currentUserId);
+    res.status(200).json({ presenceHidden: mapToObject(updatedUser.presenceHidden) });
+  } catch (err) {
+    console.error("Error in togglePresenceHidden:", err.message);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export { signup, login, logout, googleAuth, updateProfile, checkAuth, deleteAccount, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions, toggleReadReceiptsHidden, togglePresenceHidden };

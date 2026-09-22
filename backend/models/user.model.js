@@ -292,6 +292,14 @@ const userSchema=new mongoose.Schema({
         of:Boolean,
         default:new Map()
     },
+    // Per-contact online-status hiding: keyed by the other user's id. When
+    // true, the socket layer keeps this user out of that person's
+    // online/offline broadcasts so the contact never sees them as online.
+    presenceHidden:{
+        type:Map,
+        of:Boolean,
+        default:new Map()
+    },
     // ── Push-notification preferences ────────────────────────────────────────────
     // Global switch for incoming FCM pushes. Per-conversation overrides (mute)
     // are held separately below so a single toggle here can silence everything

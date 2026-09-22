@@ -56,4 +56,17 @@ export async function textToSpeech(text, languageCode) {
   return { blob, url, language: languageCode, languageName: languageName(languageCode) };
 }
 
+/**
+ * Transcribe a microphone capture (base64 data URL) into text.
+ * The capture never leaves as raw bytes — everything is a JSON body, exactly
+ * like the other AI endpoints. Returns { text, languageCode }.
+ */
+export async function transcribeSpeech(base64Audio, mime = "audio/webm") {
+  const { data } = await axiosInstance.post("/ai/speech-to-text", {
+    audio: base64Audio,
+    mime,
+  });
+  return data; // { text, languageCode }
+}
+
 export { aiError, languageName };

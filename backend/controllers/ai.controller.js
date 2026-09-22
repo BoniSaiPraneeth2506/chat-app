@@ -11,6 +11,7 @@ import {
   sarvamIdentifyLanguage,
   sarvamTransliterate,
   sarvamTextToSpeech,
+  sarvamSpeechToText,
 } from "../lib/sarvam.js";
 
 // ── Supported languages ──────────────────────────────────────────────────────
@@ -176,6 +177,47 @@ export const textToSpeech = async (req, res) => {
   } catch (err) {
     console.error("Error in ai/text-to-speech:", err.code || "", err.message);
     if (res.headersSent) return res.end();
+    return res.status(err.status || 502).json({ message: err.message });
+  }
+};
+
+/**
+ * POST /api/ai/speech-to-text — body { audio, mime }
+ * `audio` is base64-encoded microphone capture; the server decodes it, sends
+ * it to Sarvam (saaras:v3) as a multipart upload, and returns the transcript.
+ * Base64 keeps the route a plain JSON body — same transport as every other AI
+ * endpoint, no multipart middleware on the express app.
+ */
+export const speechToText = async (req, res) => {
+  try {
+    if (!isSarvamConfigured()) {
+      return res.status(503).json({ message: "AI is not set up on this server yet" });
+    }
+    if (rateLimited(req.user._id.toString())) {
+      return res.status(429).json({ message: "Too many AI requests — try again in a moment" });
+    }
+
+    const { audio, mime } = req.body || {};
+    if (typeof audio !== "string" || !audio.trim()) {
+      return res.status(400).json({ message: "Audio is missing" });
+    }
+    const base64 = audio.replace(/^data:[^;]+;base64,/, "");
+    if (base64.length > 20_000_000) {
+      return res.status(400).json({ message: "Audio is too long to transcribe" });
+    }
+    let buffer;
+    try {
+      buffer = Buffer.from(base64, "base64");
+    } catch {
+      return res.status(400).json({ message: "Audio is corrupted" });
+    }
+    if (!buffer.length) return res.status(400).json({ message: "Audio is empty" });
+
+    const mimeVal = typeof mime === "string" && mime ? mime : "audio/webm";
+    const result = await sarvamSpeechToText(buffer, mimeVal);
+    res.status(200).json({ text: result.text, languageCode: result.languageCode || "" });
+  } catch (err) {
+    console.error("Error in ai/speech-to-text:", err.code || "", err.message);
     return res.status(err.status || 502).json({ message: err.message });
   }
 };

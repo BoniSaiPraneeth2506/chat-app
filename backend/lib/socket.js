@@ -214,9 +214,70 @@ const isBlockedBetween = async (a, b) => {
     return aBlocks.has(b.toString()) || bBlocks.has(a.toString());
 };
 
-const broadcastOnlineUsers = () => {
-    const visibleOnlineUsers = onlineUserIds().filter(id => !privateUsersSet.has(id));
+// ── Per-contact presence hiding ──────────────────────────────────────────────
+//
+// The global `onlinePrivacy` toggle strips a user from the global online list
+// for everyone. Per-contact hiding (`presenceHidden` on the user) is finer:
+// user A hides from B, so B's "getOnlineUsers" list simply omits A — everyone
+// else still sees A. Broadcasting is therefore tailored: one global emit for
+// users without overrides, then a per-room re-emit for anyone who hides from
+// someone. Results are cached briefly (same 30s window as blocks) and dropped
+// instantly on toggle so changes apply immediately.
+const PRESENCE_CACHE_TTL_MS = 30_000;
+const presenceHiddenCache = new Map(); // userId -> Set<targetId>
+
+async function presenceHiddenFor(userId) {
+    const key = String(userId);
+    const hit = presenceHiddenCache.get(key);
+    if (hit && Date.now() - hit.at < PRESENCE_CACHE_TTL_MS) return hit.ids;
+    try {
+        const user = await User.findById(key).select("presenceHidden").lean();
+        const hidden = user?.presenceHidden || {};
+        const ids = new Set(
+            Object.keys(hidden)
+                .filter((t) => Boolean(hidden[t]))
+                .map((t) => String(t))
+        );
+        presenceHiddenCache.set(key, { at: Date.now(), ids });
+        return ids;
+    } catch (err) {
+        console.error("Error loading presence-hidden list:", err.message);
+        return hit?.ids || new Set();
+    }
+}
+
+export function invalidatePresenceCache(userId) {
+    if (userId) presenceHiddenCache.delete(String(userId));
+}
+
+export const broadcastOnlineUsers = async () => {
+    const visibleOnlineUsers = onlineUserIds().filter((id) => !privateUsersSet.has(id));
+    // Default for most viewers: the full visible list.
     io.emit("getOnlineUsers", visibleOnlineUsers);
+    // Per-contact hiding is viewer-specific: user A hiding from B means B's
+    // list must omit A, while everyone else still sees A. Collect, per live
+    // viewer, the set of online users who hide from them, then re-emit those
+    // viewers' rooms with the hiders filtered out. Lookups are cached (30s) so
+    // this stays cheap even on the periodic heartbeat.
+    const hiddenByViewer = new Map(); // viewerId -> Set<hiderId>
+    for (const uid of onlineUserIds()) {
+        let hidden;
+        try {
+            hidden = await presenceHiddenFor(uid);
+        } catch {
+            continue;
+        }
+        if (hidden.size === 0) continue;
+        for (const targetId of hidden) {
+            if (!isUserOnline(targetId)) continue;
+            if (!hiddenByViewer.has(targetId)) hiddenByViewer.set(targetId, new Set());
+            hiddenByViewer.get(targetId).add(uid);
+        }
+    }
+    for (const [viewerId, hiders] of hiddenByViewer) {
+        const tailored = visibleOnlineUsers.filter((id) => !hiders.has(id));
+        io.to(roomForUser(viewerId)).emit("getOnlineUsers", tailored);
+    }
 };
 
 /**

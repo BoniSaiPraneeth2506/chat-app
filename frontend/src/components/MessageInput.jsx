@@ -14,13 +14,15 @@ import {
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
 import useAuthStore from "../store/useAuthStore";
-import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3, Pencil, EyeOff, Paperclip, FileText, Video, Loader, ShieldCheck, MoreHorizontal } from "lucide-react";
+import { Image, Send, X, CornerDownLeft, Mic, Trash2, Lock, Clock, BarChart3, Pencil, EyeOff, Paperclip, FileText, Video, Loader, ShieldCheck, MoreHorizontal, Smile } from "lucide-react";
 import toast from "react-hot-toast";
 import { haptic } from "../lib/haptics";
 import { focusWithKeyboard } from "../lib/keyboard";
 import ImageEditorModal from "./ImageEditorModal";
 import CreatePollModal from "./CreatePollModal";
 import SchedulePicker from "./SchedulePicker";
+import EmojiPicker from "./EmojiPicker";
+import { transcribeSpeech } from "../lib/sarvamApi";
 
 // About five lines; past that the field scrolls instead of pushing the chat up.
 const MAX_INPUT_HEIGHT = 112;
@@ -92,6 +94,15 @@ const MessageInput = () => {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const timerIntervalRef = useRef(null);
+  // Long-press voice dictation (tap = voice note, hold = speak-to-text)
+  const [isDictating, setIsDictating] = useState(false);
+  const dictationRecorderRef = useRef(null);
+  const dictationStreamRef = useRef(null);
+  const dictationChunksRef = useRef([]);
+  const dictationLongPressRef = useRef(null);
+  const dictationActiveRef = useRef(false);
+  // Emoji keyboard in the composer
+  const [emojiOpen, setEmojiOpen] = useState(false);
   // Poll composer
   const [showPollModal, setShowPollModal] = useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
@@ -829,6 +840,105 @@ const MessageInput = () => {
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
+  // ── Voice dictation (long-press the mic) ──────────────────────────────────
+  //
+  // A separate MediaRecorder from the voice-note path: while the mic is held,
+  // whatever is said is captured; on release the clip is transcribed through
+  // /api/ai/speech-to-text (Sarvam saaras:v3) and appended into the composer.
+  // The stream is torn down immediately so the mic indicator never lingers.
+  const startDictation = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      dictationChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      dictationRecorderRef.current = mediaRecorder;
+      dictationStreamRef.current = stream;
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) dictationChunksRef.current.push(event.data);
+      };
+      mediaRecorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        dictationStreamRef.current = null;
+        dictationRecorderRef.current = null;
+        finishDictation();
+      };
+      mediaRecorder.start();
+      setIsDictating(true);
+      dictationActiveRef.current = true;
+      sendTypingStatus("recording");
+    } catch (err) {
+      console.error("Dictation mic error:", err);
+      toast.error("Could not access microphone");
+      setIsDictating(false);
+    }
+  };
+
+  const stopDictation = () => {
+    const rec = dictationRecorderRef.current;
+    if (rec && rec.state !== "inactive") rec.stop();
+    else finishDictation();
+  };
+
+  const finishDictation = async () => {
+    setIsDictating(false);
+    dictationActiveRef.current = false;
+    sendTypingStatus(false);
+    const blob = new Blob(dictationChunksRef.current, { type: "audio/webm" });
+    dictationChunksRef.current = [];
+    if (blob.size === 0) return;
+    try {
+      const reader = new FileReader();
+      const base64Audio = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      const { text: spoken } = await transcribeSpeech(base64Audio);
+      if (spoken && spoken.trim()) {
+        setText((prev) => (prev.trim() ? `${prev.replace(/\s+$/, "")} ${spoken.trim()}` : spoken.trim()));
+      }
+    } catch (err) {
+      console.error("Dictation transcription error:", err);
+      toast.error("Couldn't hear that — try speaking a little closer");
+    }
+  };
+
+  const dictationHoldStart = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    // Touch already armed the press (mousedown is a later synthetic echo on
+    // Android); keep a single timer so a real long-press never cancels itself.
+    if (dictationLongPressRef.current) return;
+    const t = setTimeout(() => {
+      dictationLongPressRef.current = null;
+      startDictation();
+    }, 420);
+    dictationLongPressRef.current = t;
+  };
+
+  const dictationHoldEnd = () => {
+    if (dictationLongPressRef.current) {
+      clearTimeout(dictationLongPressRef.current);
+      dictationLongPressRef.current = null;
+    }
+  };
+
+  // Insert an emoji at the textarea cursor, falling back to appending.
+  const insertEmoji = (emoji) => {
+    const el = inputRef.current;
+    const start = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + emoji + text.slice(end);
+    setText(next);
+    requestAnimationFrame(() => {
+      if (el) {
+        el.focus();
+        const caret = start + emoji.length;
+        el.setSelectionRange(caret, caret);
+      }
+    });
+    setEmojiOpen(false);
+  };
+
   if (isBlocked) {
     return (
       <div className="w-full px-4 py-4 flex items-center justify-center text-sm font-medium border-t border-base-300">
@@ -1266,6 +1376,22 @@ const MessageInput = () => {
                   the composer never crowds. Tapping it lifts a small list above
                   the input; tapping it again (or picking an option, or tapping
                   anywhere else) closes it. Functions unchanged. */}
+              <div className="relative flex items-center ml-1">
+                <button
+                  type="button"
+                  aria-label="Emoji"
+                  title="Emoji"
+                  onClick={() => { haptic("tap"); setEmojiOpen((v) => !v); }}
+                  className={`p-1 rounded-full transition-colors ${
+                    emojiOpen ? "text-primary bg-base-200" : "hover:bg-base-200 t-dim hover:text-base-content"
+                  }`}
+                >
+                  <Smile size={18} />
+                </button>
+                {emojiOpen && (
+                  <EmojiPicker onPick={insertEmoji} onClose={() => setEmojiOpen(false)} />
+                )}
+              </div>
               <div className="relative flex items-center ml-2">
                 <button
                   type="button"
@@ -1358,7 +1484,19 @@ const MessageInput = () => {
           )}
         </div>
 
-        {isRecording ? (
+        {isDictating ? (
+          <button
+            type="button"
+            onClick={() => stopDictation()}
+            className="w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-md flex-shrink-0 bg-primary text-primary-content hover:scale-105 active:scale-95"
+            title="Stop dictation"
+          >
+            <span className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-content opacity-60"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-primary-content"></span>
+            </span>
+          </button>
+        ) : isRecording ? (
           <button
             type="button"
             onClick={() => stopRecording(true)}
@@ -1377,8 +1515,25 @@ const MessageInput = () => {
                   : "bg-base-100 border hover:bg-base-200"
               }
             `}
-            onMouseDown={(e) => e.preventDefault()}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              if (!text.trim() && imagePreviews.length === 0 && !stagedFile && !isSendingAnimation) {
+                dictationHoldStart(e);
+              }
+            }}
+            onMouseUp={() => { dictationHoldEnd(); if (dictationActiveRef.current) stopDictation(); }}
+            onMouseLeave={dictationHoldEnd}
+            onTouchStart={() => {
+              if (!text.trim() && imagePreviews.length === 0 && !stagedFile && !isSendingAnimation) {
+                dictationHoldStart();
+              }
+            }}
+            onTouchEnd={() => { dictationHoldEnd(); if (dictationActiveRef.current) stopDictation(); }}
             onClick={(e) => {
+              if (dictationActiveRef.current) {
+                stopDictation();
+                return;
+              }
               if (!text.trim() && imagePreviews.length === 0 && !stagedFile && !isSendingAnimation) {
                 e.preventDefault();
                 startRecording();
@@ -1393,6 +1548,9 @@ const MessageInput = () => {
             ) : (
               <Mic size={18} />
             )}
+            <span className="sr-only">
+              {dictationActiveRef.current ? "Listening — release to type" : "Tap for voice note, hold to type by voice"}
+            </span>
           </button>
         )}
       </form>

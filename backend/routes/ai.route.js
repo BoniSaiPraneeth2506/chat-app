@@ -5,6 +5,7 @@ import {
   translate,
   transliterate,
   textToSpeech,
+  speechToText,
 } from "../controllers/ai.controller.js";
 
 const router = express.Router();
@@ -15,5 +16,6 @@ router.get("/languages", protectRoute, getAiLanguages);
 router.post("/translate", protectRoute, translate);
 router.post("/transliterate", protectRoute, transliterate);
 router.post("/text-to-speech", protectRoute, textToSpeech);
+router.post("/speech-to-text", protectRoute, speechToText);
 
 export default router;

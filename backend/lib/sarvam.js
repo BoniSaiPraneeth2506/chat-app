@@ -13,6 +13,7 @@
 //   POST /transliterate    -> { transliterated_text, source_language_code }
 //   POST /text-lid         -> { language_code, script_code }
 //   POST /text-to-speech   -> { audios: [ base64 ] }
+//   POST /v1/audio/speech-to-text -> { text } (multipart; model saaras:v3)
 // Auth header for all: `api-subscription-key: <key>`.
 
 const SARVAM_BASE = "https://api.sarvam.ai";
@@ -23,6 +24,10 @@ const TRANSLATION_MODEL = "mayura:v1";
 // TTS model + speaker. bulbul:v3, default voice "shubh".
 const TTS_MODEL = "bulbul:v3";
 const TTS_SPEAKER = "shubh";
+
+// Speech-to-text model.
+const STT_MODEL = "saaras:v3";
+const STT_MODE = "transcribe";
 
 // How long we wait on Sarvam before giving up (ms). TTS can take a moment.
 const TIMEOUT_MS = 60000;
@@ -175,4 +180,75 @@ export async function sarvamTextToSpeech(input, languageCode) {
     throw new SarvamError("AI returned no audio", "upstream_error", 502);
   }
   return Buffer.from(joined, "base64");
+}
+
+/**
+ * Transcribe spoken `audio` (raw bytes) to text using the saaras:v3 model.
+ *
+ * Sarvam's REST endpoint takes a multipart file upload, so the shared JSON
+ * helper can't serve it. The error handling mirrors sarvamPost so a missing
+ * key, an abort, or an upstream failure all surface identically to callers.
+ */
+export async function sarvamSpeechToText(audioBuffer, mime = "audio/webm") {
+  if (!apiKey()) {
+    throw new SarvamError("AI is not configured on this server yet", "not_configured", 503);
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  const form = new FormData();
+  const blob = new Blob([new Uint8Array(audioBuffer)], { type: mime });
+  const ext = mime.includes("webm") ? "webm" : mime.includes("ogg") ? "ogg" : mime.includes("mp3") ? "mp3" : "wav";
+  form.append("file", blob, `audio.${ext}`);
+  form.append("model", STT_MODEL);
+  form.append("mode", STT_MODE);
+
+  let res;
+  try {
+    res = await fetch(`${SARVAM_BASE}/v1/audio/speech-to-text`, {
+      method: "POST",
+      headers: { "api-subscription-key": apiKey() },
+      body: form,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err.name === "AbortError") {
+      throw new SarvamError("Speech recognition took too long — try again", "timeout", 504);
+    }
+    throw new SarvamError("Could not reach the AI service", "network", 502);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const text = await res.text();
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const parsed = JSON.parse(text);
+      detail = typeof parsed?.message === "string" ? parsed.message : "";
+      if (!detail && typeof parsed?.error_message === "string") detail = parsed.error_message;
+    } catch { /* non-JSON body */ }
+    throw new SarvamError(
+      detail || "Speech recognition failed — try again in a moment",
+      "upstream_error",
+      res.status >= 500 ? 502 : 422
+    );
+  }
+
+  let data = {};
+  try {
+    data = JSON.parse(text);
+  } catch { /* non-JSON body */ }
+
+  const transcript =
+    (typeof data?.text === "string" && data.text) ||
+    (Array.isArray(data?.transcripts) && typeof data.transcripts[0]?.text === "string"
+      ? data.transcripts[0].text
+      : "");
+
+  if (!transcript) {
+    throw new SarvamError("Nothing was heard — try speaking a little closer", "upstream_error", 422);
+  }
+  return { text: transcript, languageCode: data?.language_code || "" };
 }
