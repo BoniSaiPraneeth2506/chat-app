@@ -28,6 +28,7 @@ import { PushNotifications } from "@capacitor/push-notifications";
 import { LocalNotifications } from "@capacitor/local-notifications";
 import axiosInstance from "./axios.js";
 import { handleNotificationTap } from "./notificationNavigation.js";
+import { isChatMuted } from "./mute.js";
 
 // The server references these channel ids in every payload (CHANNEL_BY_TYPE),
 // and the system routes the delivered notification through the channel — so
@@ -90,6 +91,10 @@ export function initPushListeners() {
     const data = notification?.data || {};
     console.log("[Push] received (foreground):", JSON.stringify(data));
     if (data.silent === "true") return;
+    // Muted chats get no foreground card. Background/killed pushes are sent by
+    // the server (which already skips the actively-open conversation), so this
+    // only covers the local re-display path — which is the one we control.
+    if (isChatMuted(String(data?.conversationId || data?.senderId || ""))) return;
     showForegroundNotification(notification);
   });
 

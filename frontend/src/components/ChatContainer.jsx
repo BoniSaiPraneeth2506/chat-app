@@ -42,6 +42,18 @@ const isDirectVideo = (url) => {
   return /\.(mp4|webm|ogg)($|\?)/i.test(url);
 };
 
+// Media / rich-preview bubbles get a slimmer frame so the colored box around
+// photos, videos, documents, contact cards and attached files doesn't
+// dominate. Pure text, voice notes and link-preview messages (a URL inside a
+// text bubble) keep the normal roomier padding below their preview cards.
+const isRichMediaMessage = (message) =>
+  Boolean(
+    (message.images && message.images.length > 0) ||
+      message.image ||
+      (message.attachments && message.attachments.length > 0) ||
+      message.contact?.user
+  );
+
 const LinkPreviewCard = ({ url }) => {
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1499,7 +1511,7 @@ const ChatContainer = () => {
                       if (touchStartRef.current) touchStartRef.current = null;
                     }}
                     style={{ touchAction: "pan-y" }}
-                    className={`flex flex-col py-2 px-2.5 chat-bubble relative min-w-[72px] pr-12 transition-colors duration-300 select-none cursor-default pb-3 ${(message.senderId?._id || message.senderId) === authUser._id ? "bubble-mine" : ""} ${isSelectionMode ? "cursor-pointer" : ""}`}
+                    className={`flex flex-col chat-bubble relative min-w-[72px] transition-colors duration-300 select-none cursor-default ${isRichMediaMessage(message) ? "py-1 px-1.5 pb-1.5 pr-10" : "py-2 px-2.5 pb-3 pr-12"} ${(message.senderId?._id || message.senderId) === authUser._id ? "bubble-mine" : ""} ${isSelectionMode ? "cursor-pointer" : ""}`}
                   >
                   {/* Swipe-to-reply arrow. Always rendered, hidden by default
                       (opacity-0) and shown purely via direct DOM writes during a

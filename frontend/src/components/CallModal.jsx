@@ -241,9 +241,13 @@ const CallModal = () => {
           </p>
         </div>
 
-        {/* Remote Stream Audio Element for Phone/Voice Calls */}
+        {/* Remote Stream Audio Element for Phone/Voice Calls.
+            An <audio> element, not a zero-size <video>: Android WebViews don't
+            reliably play audio from a 0x0 <video>, which is why remote voice
+            went silent on voice calls while the visible call video still
+            produced sound. */}
         {callState === "connected" && (callType === "phone" || callType === "voice") && (
-          <video
+          <audio
             ref={remoteVideoRef}
             autoPlay
             playsInline

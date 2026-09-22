@@ -75,11 +75,13 @@
 // };
 // export default ChatHeader;
 
-import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image, CheckSquare, Users, Info, Mic, MicOff, Maximize2, CornerUpLeft, Pin, Trash2, Forward, Pencil, Tag, Download, Copy, Sparkles } from "lucide-react";
+import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image, CheckSquare, Users, Info, Mic, MicOff, Maximize2, CornerUpLeft, Pin, Trash2, Forward, Pencil, Tag, Download, Copy, Sparkles, BellOff, Bell } from "lucide-react";
 import { useNicknames, displayNameOf, hasNickname } from "../lib/contacts";
 import { saveTextFile } from "../lib/download";
 import { copyText, messagesToClipboardText } from "../lib/clipboard";
 import { haptic } from "../lib/haptics";
+import { isChatMuted, muteConversation, unmuteConversation } from "../lib/mute";
+import { scheduleReminder } from "../lib/reminders";
 import MessageInfoSheet from "./MessageInfoSheet";
 import AiActionMenu from "./ai/AiActionMenu";
 import axiosInstance from "../lib/axios";
@@ -181,8 +183,30 @@ const ChatHeader = () => {
     };
   }, [aiMenuOpen]);
 
+  // Same controlled-dropdown treatment for the selection ⋯ (More) tray so its
+  // nested "Remind me" / time submenu stays open while choosing.
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef(null);
+
+  useEffect(() => {
+    if (!moreMenuOpen) return;
+    const onDown = (e) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target)) {
+        setMoreMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("touchstart", onDown);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("touchstart", onDown);
+    };
+  }, [moreMenuOpen]);
+
   const isSelf = selectedUser?._id === authUser?._id;
   const isOnline = onlineUsers.includes(selectedUser?._id);
+  const mutedConvId = selectedGroup ? selectedGroup._id : selectedUser?._id;
+  const chatIsMuted = isChatMuted(mutedConvId);
   const showLastSeen = selectedUser?.onlinePrivacy !== false;
   const isTyping = typingUsers?.[selectedUser?._id];
 
@@ -206,18 +230,14 @@ const ChatHeader = () => {
   const aiActionable = Boolean(
     soleSelected && soleSelected.text && !soleSelected.isDeletedForEveryone
   );
-  // The overflow tray shows whenever a single message is selected — for an own
-  // text message that means "Message info" plus the AI actions.
+  // The ⋯ tray shows whenever a single message is selected (for an own text
+  // message that means "Message info" plus the Pin / Copy / Remind me actions).
   const showOverflow = Boolean(soleSelected && !soleSelected.isDeletedForEveryone);
-  // Groups keep the ordinary three-dot tray (with Message info for your own
-  // messages); individual chats replace it with a single AI icon that opens the
-  // same three AI actions but no Message info.
-  const isGroup = Boolean(selectedGroup);
 
   const exitSelection = () => setSelectionMode(false);
 
-  // Multi-select actions. These are rendered mobile-only (lg:hidden) so the
-  // desktop toolbar keeps exactly the buttons it had before.
+  // Multi-select actions. Rendered mobile-only (lg:hidden); on desktop the
+  // toolbar shows Reply, Delete, Forward, Edit, AI and ⋯ as above.
   const copyableCount = selectedMsgs.filter((m) => m.text && !m.isDeletedForEveryone && !m.restricted).length;
   const forwardableMsgs = selectedMsgs.filter((m) => !m.isDeletedForEveryone && !m.restricted);
 
@@ -256,15 +276,6 @@ const ChatHeader = () => {
               <CornerUpLeft size={18} />
             </button>
           )}
-          {soleSelected && !soleSelected.isDeletedForEveryone && (
-            <button
-              onClick={() => { togglePinMessage(soleSelected._id); exitSelection(); }}
-              className={`p-2 hover:bg-base-200 rounded-full transition-colors ${soleSelected.isPinned ? "text-amber-500" : "hover:text-primary"}`}
-              title={soleSelected.isPinned ? "Unpin" : "Pin"}
-            >
-              <Pin size={18} />
-            </button>
-          )}
           {selectedMessageIds.length > 0 && (
             <div className="dropdown dropdown-bottom dropdown-end">
               <div tabIndex={0} role="button" className="p-2 hover:bg-base-200 rounded-full transition-colors hover:text-red-500 cursor-pointer" title="Delete">
@@ -292,8 +303,9 @@ const ChatHeader = () => {
               </ul>
             </div>
           )}
-          {/* Copy — mobile only, mirrors WhatsApp's multi-select toolbar */}
-          {copyableCount > 0 && (
+          {/* Copy — mobile-only, multi-select only (single-selection copy lives in
+              the ⋯ dropdown which is shared by both breakpoints). */}
+          {copyableCount > 0 && selectedMessageIds.length >= 2 && (
             <button
               onClick={handleCopySelected}
               className="lg:hidden p-2 hover:bg-base-200 rounded-full transition-colors hover:text-primary"
@@ -302,8 +314,8 @@ const ChatHeader = () => {
               <Copy size={18} />
             </button>
           )}
-          {/* Forward for 2+ — the single-message case is handled below and
-              already shows on both breakpoints, so this only fills the gap. */}
+          {/* Forward for 2+ — mobile-only; the single-message case below shows
+              on both breakpoints. */}
           {forwardableMsgs.length >= 2 && (
             <button
               onClick={() => { haptic("tap"); setForwardingMessages(forwardableMsgs); exitSelection(); }}
@@ -332,82 +344,147 @@ const ChatHeader = () => {
             </button>
           )}
 
-          {/* Action tray. Groups keep the ordinary three-dot tray (with Message
-              info for your own messages); individual chats show a single AI
-              icon that opens the same three AI actions but no Message info. */}
-          {isGroup ? (
-            showOverflow && (
+          {/* AI (Sparkles) — first-class toolbar action shared by DMs, groups and
+              both breakpoints. */}
+          {aiActionable && (
+            <div
+              className={`dropdown dropdown-bottom dropdown-end ${aiMenuOpen ? "dropdown-open" : ""}`}
+              ref={aiMenuRef}
+            >
               <div
-                className={`dropdown dropdown-bottom dropdown-end ${aiMenuOpen ? "dropdown-open" : ""}`}
-                ref={aiMenuRef}
+                role="button"
+                className="p-2 hover:bg-base-300 rounded-full transition-colors hover:text-primary cursor-pointer"
+                title="AI actions"
+                onClick={() => setAiMenuOpen((o) => !o)}
               >
-                <div
-                  role="button"
-                  className="p-2 hover:bg-base-300 rounded-full transition-colors hover:text-primary cursor-pointer"
-                  title="More"
-                  onClick={() => setAiMenuOpen((o) => !o)}
-                >
-                  <MoreVertical size={18} />
-                </div>
-                <ul
-                  tabIndex={0}
-                  className="dropdown-content z-50 menu p-1.5 shadow-xl bg-base-100 rounded-box w-48 text-xs text-base-content mt-1"
-                >
-                  {isSoleOwn && (
-                    <li>
-                      <button
-                        onClick={() => {
-                          haptic("tap");
-                          setAiMenuOpen(false);
-                          setInfoMessageId(soleSelected._id);
-                        }}
-                        className="hover:bg-primary/15 focus:bg-primary/15 active:bg-primary/25 hover:text-primary focus:text-primary py-2 text-left font-medium flex items-center gap-2"
-                      >
-                        <Info size={14} />
-                        Message info
-                      </button>
-                    </li>
-                  )}
-                  {aiActionable && (
-                    <AiActionMenu
-                      message={soleSelected}
-                      onFinish={() => {
-                        setAiMenuOpen(false);
-                        exitSelection();
-                      }}
-                    />
-                  )}
-                </ul>
+                <Sparkles size={18} />
               </div>
-            )
-          ) : (
-            aiActionable && (
-              <div
-                className={`dropdown dropdown-bottom dropdown-end ${aiMenuOpen ? "dropdown-open" : ""}`}
-                ref={aiMenuRef}
+              <ul
+                tabIndex={0}
+                className="dropdown-content z-50 menu p-1.5 shadow-xl bg-base-100 rounded-box w-48 text-xs text-base-content mt-1"
               >
-                <div
-                  role="button"
-                  className="p-2 hover:bg-base-300 rounded-full transition-colors hover:text-primary cursor-pointer"
-                  title="AI actions"
-                  onClick={() => setAiMenuOpen((o) => !o)}
-                >
-                  <Sparkles size={18} />
-                </div>
-                <ul
-                  tabIndex={0}
-                  className="dropdown-content z-50 menu p-1.5 shadow-xl bg-base-100 rounded-box w-48 text-xs text-base-content mt-1"
-                >
-                  <AiActionMenu
-                    message={soleSelected}
-                    onFinish={() => {
-                      setAiMenuOpen(false);
+                <AiActionMenu
+                  message={soleSelected}
+                  onFinish={() => {
+                    setAiMenuOpen(false);
+                    exitSelection();
+                  }}
+                />
+              </ul>
+            </div>
+          )}
+
+          {/* ⋯ (More) dropdown — shared by both breakpoints: Message info, Pin,
+              Copy and Remind me (1h / 1d). Controlled dropdown so the nested
+              "Remind me" time options stay open while choosing. */}
+          {showOverflow && (
+            <div
+              className={`dropdown dropdown-bottom dropdown-end ${moreMenuOpen ? "dropdown-open" : ""}`}
+              ref={moreMenuRef}
+            >
+              <div
+                role="button"
+                className="p-2 hover:bg-base-300 rounded-full transition-colors hover:text-primary cursor-pointer"
+                title="More"
+                onClick={() => setMoreMenuOpen((o) => !o)}
+              >
+                <MoreVertical size={18} />
+              </div>
+              <ul
+                tabIndex={0}
+                className="dropdown-content z-50 menu p-1.5 shadow-xl bg-base-100 rounded-box w-48 text-xs text-base-content mt-1"
+              >
+                {isSoleOwn && (
+                  <li>
+                    <button
+                      onClick={() => {
+                        haptic("tap");
+                        setMoreMenuOpen(false);
+                        setInfoMessageId(soleSelected._id);
+                      }}
+                      className="hover:bg-primary/15 focus:bg-primary/15 active:bg-primary/25 hover:text-primary focus:text-primary py-2 text-left font-medium flex items-center gap-2"
+                    >
+                      <Info size={14} />
+                      Message info
+                    </button>
+                  </li>
+                )}
+                <li>
+                  <button
+                    onClick={() => {
+                      haptic("tap");
+                      togglePinMessage(soleSelected._id);
+                      setMoreMenuOpen(false);
                       exitSelection();
                     }}
-                  />
-                </ul>
-              </div>
-            )
+                    className={`hover:bg-base-200 py-2 text-left font-medium flex items-center gap-2 ${soleSelected.isPinned ? "text-amber-600" : ""}`}
+                  >
+                    <Pin size={14} />
+                    {soleSelected.isPinned ? "Unpin" : "Pin"}
+                  </button>
+                </li>
+                {soleSelected.text && !soleSelected.isDeletedForEveryone && !soleSelected.restricted && (
+                  <li>
+                    <button
+                      onClick={() => {
+                        handleCopySelected();
+                        setMoreMenuOpen(false);
+                      }}
+                      className="hover:bg-base-200 py-2 text-left font-medium flex items-center gap-2"
+                    >
+                      <Copy size={14} />
+                      Copy
+                    </button>
+                  </li>
+                )}
+                <li>
+                  <details className="text-xs">
+                    <summary className="hover:bg-base-200 py-2 text-left font-medium flex items-center gap-2 cursor-pointer">
+                      <Bell size={14} />
+                      Remind me
+                    </summary>
+                    <ul>
+                      <li>
+                        <button
+                          onClick={() => {
+                            scheduleReminder({
+                              conversationId: mutedConvId,
+                              title: selectedGroup ? selectedGroup.name : contactName,
+                              message: soleSelected,
+                              afterMs: 60 * 60 * 1000,
+                            });
+                            setMoreMenuOpen(false);
+                            exitSelection();
+                          }}
+                          className="hover:bg-base-200 py-2 text-left font-medium flex items-center gap-2"
+                        >
+                          <Clock size={14} />
+                          In 1 hour
+                        </button>
+                      </li>
+                      <li>
+                        <button
+                          onClick={() => {
+                            scheduleReminder({
+                              conversationId: mutedConvId,
+                              title: selectedGroup ? selectedGroup.name : contactName,
+                              message: soleSelected,
+                              afterMs: 24 * 60 * 60 * 1000,
+                            });
+                            setMoreMenuOpen(false);
+                            exitSelection();
+                          }}
+                          className="hover:bg-base-200 py-2 text-left font-medium flex items-center gap-2"
+                        >
+                          <Clock size={14} />
+                          In 1 day
+                        </button>
+                      </li>
+                    </ul>
+                  </details>
+                </li>
+              </ul>
+            </div>
           )}
         </div>
 
@@ -731,6 +808,60 @@ const ChatHeader = () => {
                       </svg>
                       <span>{isSelectionMode ? "Cancel Selection" : "Select Messages"}</span>
                     </button>
+                  </li>
+                )}
+
+                {!isSelf && (
+                  <li>
+                    <details className="text-xs">
+                      <summary className="flex items-center gap-2 py-1.5 px-3 rounded-lg hover:bg-base-200 transition-colors cursor-pointer">
+                        {chatIsMuted ? <BellOff size={14} /> : <Bell size={14} />}
+                        <span>{chatIsMuted ? "Muted (change)" : "Mute Notifications"}</span>
+                      </summary>
+                      <ul>
+                        <li>
+                          <button
+                            onClick={() => {
+                              muteConversation(mutedConvId, 8 * 60 * 60 * 1000);
+                              document.activeElement.blur();
+                              toast.success(chatIsMuted ? "Mute duration updated (8 hours)" : "Notifications muted for 8 hours");
+                            }}
+                            className="flex items-center gap-2 py-1.5 px-3 rounded-lg hover:bg-base-200 transition-colors"
+                          >
+                            <Clock size={14} />
+                            <span>Mute for 8 hours</span>
+                          </button>
+                        </li>
+                        <li>
+                          <button
+                            onClick={() => {
+                              muteConversation(mutedConvId, null);
+                              document.activeElement.blur();
+                              toast.success(chatIsMuted ? "Mute duration updated" : "Notifications muted permanently");
+                            }}
+                            className="flex items-center gap-2 py-1.5 px-3 rounded-lg hover:bg-base-200 transition-colors"
+                          >
+                            <BellOff size={14} />
+                            <span>Mute always</span>
+                          </button>
+                        </li>
+                        {chatIsMuted && (
+                          <li>
+                            <button
+                              onClick={() => {
+                                unmuteConversation(mutedConvId);
+                                document.activeElement.blur();
+                                toast.success("Notifications unmuted");
+                              }}
+                              className="flex items-center gap-2 py-1.5 px-3 rounded-lg hover:bg-base-200 transition-colors text-red-500"
+                            >
+                              <Bell size={14} />
+                              <span>Unmute</span>
+                            </button>
+                          </li>
+                        )}
+                      </ul>
+                    </details>
                   </li>
                 )}
 
