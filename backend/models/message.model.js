@@ -136,6 +136,13 @@ const messageSchema = new Schema(
       type: Boolean,
       default: false
     },
+    // An automated "👋 Welcome {name} to the group!" card, posted by the server
+    // when a member joins. Rendered as a centred system card rather than a
+    // normal bubble.
+    isJoinMessage: {
+      type: Boolean,
+      default: false
+    },
     callType: {
       type: String, // "voice" or "video"
     },

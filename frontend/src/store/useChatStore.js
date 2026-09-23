@@ -268,6 +268,12 @@ export const useChatStore = create((set, get) => ({
   forwardingMessage: null,
   setForwardingMessage: (message) => set({ forwardingMessage: message }),
 
+  // Global search (sidebar) — empty until the first search lands.
+  globalSearchLoading: false,
+  globalSearchResults: [],
+  globalSearchTotal: 0,
+  jumpRequest: null,
+
   // Bumped when something (an edit) should pull the view back to the newest
   // message. A counter rather than a boolean so repeated requests each fire.
   scrollToBottomSignal: 0,
@@ -401,6 +407,47 @@ export const useChatStore = create((set, get) => ({
   setReplyingToMessage: (message) => set({ replyingToMessage: message }),
   setEditingMessage: (message) => set({ editingMessage: message }),
   setShowArchivedOnly: (show) => set({ showArchivedOnly: show }),
+
+  /**
+   * Global search (sidebar magnifier / message tabs).
+   *
+   * Goes one step beyond the chat-list name filter: one request across every
+   * DM and group conversation the user may see, filtered by content kind
+   * (messages / photos / videos / documents / links) with an optional date
+   * range, newest first.
+   */
+  getGlobalSearch: async ({ q = "", type = "messages", from = "", to = "" } = {}) => {
+    set({ globalSearchLoading: true });
+    try {
+      const res = await axiosInstance.get("/messages/search", {
+        params: { q, type, from, to, limit: 40 },
+      });
+      set({
+        globalSearchResults: Array.isArray(res.data?.items) ? res.data.items : [],
+        globalSearchTotal: Number(res.data?.total) || 0,
+      });
+    } catch (error) {
+      if (isNetworkError(error)) {
+        if (q) toast.error("You're offline — search needs a connection");
+      } else {
+        toast.error(error.response?.data?.message || "Search failed");
+      }
+      set({ globalSearchResults: [], globalSearchTotal: 0 });
+    } finally {
+      set({ globalSearchLoading: false });
+    }
+  },
+
+  clearGlobalSearch: () => set({ globalSearchResults: [], globalSearchTotal: 0, globalSearchLoading: false }),
+
+  /**
+   * Asking the open conversation to land on a specific message instead of the
+   * newest. Consumed by ChatContainer the moment the chat is selected, so the
+   * jump and the normal new-message fetch never race each other.
+   */
+  setJumpRequest: (chatId, messageId) =>
+    set({ jumpRequest: { chatId: String(chatId), messageId: String(messageId) } }),
+  consumeJumpRequest: () => set({ jumpRequest: null }),
 
   getUsers: async (search = "") => {
     set({ isUsersLoading: true });

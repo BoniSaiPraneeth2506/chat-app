@@ -361,7 +361,7 @@ import useAuthStore from "../store/useAuthStore";
 import { useGroupStore } from "../store/useGroupStore";
 import SidebarSkeleton from "./skeletons/SidebarSkeleton";
 import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus, Lock, 
-MessageSquare, RefreshCw, Phone, Megaphone } from "lucide-react";
+MessageSquare, RefreshCw, Phone, Megaphone, MessageSquareText, Image, Video, FileText, Link2, Mic } from "lucide-react";
 import { useNicknames, displayNameOf } from "../lib/contacts";
 import { formatMessageTime } from "../lib/utils";
 import toast from "react-hot-toast";
@@ -418,7 +418,13 @@ const SideBar = () => {
     clearChatHistory,
     setProfilePreviewUser,
     toggleContactAction,
-    drafts
+    drafts,
+    getGlobalSearch,
+    clearGlobalSearch,
+    globalSearchResults,
+    globalSearchLoading,
+    globalSearchTotal,
+    setJumpRequest
   } = useChatStore();
 
   const {
@@ -456,6 +462,11 @@ const SideBar = () => {
   const [menuPos, setMenuPos] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterMode, setFilterMode] = useState("all");
+  // Global search tabs. "chats" keeps the classic name filter; every other
+  // value searches message content of that kind across DMs and groups.
+  const [searchType, setSearchType] = useState("chats");
+  const [searchFrom, setSearchFrom] = useState("");
+  const [searchTo, setSearchTo] = useState("");
   // Favourites, archive and pins are stored on the account, not in this
   // browser. They used to live in localStorage, which meant they vanished on
   // reinstall, never followed the user to another device, and — once multi
@@ -496,6 +507,22 @@ const SideBar = () => {
 
     return () => clearTimeout(delayDebounceFn);
   }, [getUsers, searchTerm]);
+
+  // Message-content search (magnifier tabs) is its own pipeline: one request
+  // across every conversation, debounced the same way as the chat-name filter.
+  useEffect(() => {
+    if (searchType === "chats") return;
+    const delayDebounceFn = setTimeout(() => {
+      getGlobalSearch({
+        q: searchTerm,
+        type: searchType,
+        from: searchFrom,
+        to: searchTo,
+      });
+    }, searchTerm ? 450 : 0);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchType, searchTerm, searchFrom, searchTo, getGlobalSearch]);
 
   useEffect(() => {
     getGroups();
@@ -764,6 +791,127 @@ const SideBar = () => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
     return b.at - a.at;
   });
+
+  // Tapping a global-search row opens the conversation and, for DMs, lands on
+  // the exact message (the store handles the jump the moment the chat mounts).
+  const openGlobalResult = (item) => {
+    setSearchTerm("");
+    setSearchType("chats");
+    clearGlobalSearch();
+    haptic("tap");
+    if (item.chatType === "group") {
+      const group = groups.find((g) => String(g._id) === String(item.chatId));
+      if (group) {
+        useChannelStore.getState().closeChannel();
+        setSelectedGroup(group);
+      } else {
+        toast.error("This group is no longer available");
+      }
+    } else {
+      useChannelStore.getState().closeChannel();
+      setSelectedUser({
+        _id: item.chatId,
+        fullName: item.chatName,
+        profilePic: item.avatar,
+      });
+      setJumpRequest(item.chatId, item.messageId);
+    }
+  };
+
+  // Icons and row colours for each content kind in the global results.
+  const GLOBAL_KIND_META = {
+    message: { Icon: MessageSquareText, label: "Messages", cls: "text-base-content/70" },
+    photo: { Icon: Image, label: "Photos", cls: "text-emerald-500" },
+    video: { Icon: Video, label: "Videos", cls: "text-rose-500" },
+    document: { Icon: FileText, label: "Documents", cls: "text-sky-500" },
+    link: { Icon: Link2, label: "Links", cls: "text-violet-500" },
+    audio: { Icon: Mic, label: "Voice", cls: "text-amber-500" },
+  };
+
+  const renderGlobalResults = () => {
+    const results = globalSearchResults || [];
+
+    if (globalSearchLoading && results.length === 0) {
+      return (
+        <div className="px-4 py-10 flex flex-col items-center gap-2 text-base-content/50">
+          <div className="size-6 border-2 border-base-300 border-t-primary rounded-full animate-spin" />
+          <p className="text-sm">Searching…</p>
+        </div>
+      );
+    }
+
+    if (results.length === 0) {
+      return (
+        <div className="px-4 py-10 text-center select-none">
+          <p className="text-sm text-base-content/50">
+            {searchTerm || searchFrom || searchTo
+              ? "No messages found"
+              : "Type something or pick a date to search your chats"}
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <>
+        {globalSearchTotal > results.length && (
+          <div className="px-4 pt-2 pb-1 text-[11px] text-base-content/40">
+            Showing {results.length} of {globalSearchTotal}
+          </div>
+        )}
+        {results.map((item) => {
+          const meta = GLOBAL_KIND_META[item.kind] || GLOBAL_KIND_META.message;
+          const MetaIcon = meta.Icon;
+          const when = new Date(item.createdAt).toLocaleDateString(undefined, {
+            month: "short",
+            day: "numeric",
+          });
+          return (
+            <button
+              key={`${item.chatId}-${item.messageId}`}
+              onClick={() => openGlobalResult(item)}
+              className="w-full py-3 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors group select-none text-left"
+            >
+              <div className="relative flex-shrink-0">
+                {item.avatar ? (
+                  <img
+                    src={item.avatar}
+                    alt=""
+                    className="size-11 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="size-11 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+                    <Users className="size-5" />
+                  </div>
+                )}
+                {item.chatType === "group" && (
+                  <span className="absolute -bottom-0.5 -right-0.5 rounded-full bg-base-200 p-0.5 ring-1 ring-base-100">
+                    <Users className="size-3 text-base-content/70" />
+                  </span>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-sm text-base-content truncate">
+                    {item.chatName}
+                  </span>
+                  <span className="text-[11px] text-base-content/45 flex-shrink-0">
+                    {when}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                  <MetaIcon className={`size-3.5 flex-shrink-0 ${meta.cls}`} />
+                  <span className="text-xs text-base-content/60 truncate">
+                    {item.text || meta.label}
+                  </span>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </>
+    );
+  };
 
   const renderGroupRow = (group) => {
     const isSelected = selectedGroup?._id === group._id;
@@ -1091,14 +1239,18 @@ const SideBar = () => {
             <Search className="absolute -translate-y-1/2 left-4 top-1/2 size-4 text-base-content/40 pointer-events-none" />
             <input
               type="text"
-              placeholder="Search chats or groups..."
+              placeholder={searchType === "chats" ? "Search chats or groups..." : "Search messages, photos, videos..."}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="field-flat w-full h-10 pl-11 pr-10 transition-colors rounded-full border-0 bg-base-200 text-sm text-base-content ph-dim"
             />
             {searchTerm && (
               <button
-                onClick={() => setSearchTerm("")}
+                onClick={() => {
+                  setSearchTerm("");
+                  setSearchType("chats");
+                  clearGlobalSearch();
+                }}
                 className="absolute -translate-y-1/2 right-3 top-1/2 p-1 hover:bg-base-300 rounded-full text-base-content/40 hover:text-base-content transition-colors flex items-center justify-center"
               >
                 <X className="size-3.5" />
@@ -1128,10 +1280,11 @@ const SideBar = () => {
               onClick={() => {
                 setFilterMode(tab.id);
                 setShowArchivedOnly(false);
+                if (searchType !== "chats") setSearchType("chats");
               }}
               className={`px-4 py-1.5 text-xs font-medium rounded-full border transition-all flex-shrink-0 select-none
                 ${
-                  filterMode === tab.id && !showArchivedOnly
+                  filterMode === tab.id && searchType === "chats" && !showArchivedOnly
                     ? "bg-primary text-white border-primary"
                     : "bg-base-200 text-base-content/75 border-base-300 hover:bg-base-300"
                 }
@@ -1141,10 +1294,72 @@ const SideBar = () => {
             </button>
           ))}
         </div>
+
+        {/* Global search type tabs — visible whenever the magnifier is used or
+            a message-content tab is already active (date-only searches). */}
+        {(searchTerm || searchType !== "chats") && (
+          <>
+            <div className="flex items-center gap-2 mt-2 overflow-x-auto no-scrollbar pb-0.5">
+              {[
+                { id: "chats", label: "Chats" },
+                { id: "messages", label: "Messages" },
+                { id: "photos", label: "Photos" },
+                { id: "videos", label: "Videos" },
+                { id: "links", label: "Links" },
+                { id: "documents", label: "Documents" },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setSearchType(tab.id);
+                    setShowArchivedOnly(false);
+                    if (tab.id === "chats") clearGlobalSearch();
+                  }}
+                  className={`px-3.5 py-1.5 text-xs font-medium rounded-full border transition-all flex-shrink-0 select-none
+                    ${
+                      searchType === tab.id
+                        ? "bg-primary text-white border-primary"
+                        : "bg-base-200 text-base-content/75 border-base-300 hover:bg-base-300"
+                    }
+                  `}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Date range filter for message search. Preserves the previous
+                values while a query is being typed so results stay put. */}
+            {searchType !== "chats" && (
+              <div className="flex items-center gap-2 mt-2">
+                <input
+                  type="date"
+                  value={searchFrom}
+                  onChange={(e) => setSearchFrom(e.target.value)}
+                  className="field-flat flex-1 min-w-0 h-8 px-2 text-[11px] rounded-lg border-0 bg-base-200 text-base-content/80"
+                />
+                <span className="text-base-content/40 text-xs flex-shrink-0">to</span>
+                <input
+                  type="date"
+                  value={searchTo}
+                  onChange={(e) => setSearchTo(e.target.value)}
+                  className="field-flat flex-1 min-w-0 h-8 px-2 text-[11px] rounded-lg border-0 bg-base-200 text-base-content/80"
+                />
+                {globalSearchTotal > 0 && (
+                  <span className="text-[11px] text-primary flex-shrink-0 whitespace-nowrap">
+                    {globalSearchTotal} found
+                  </span>
+                )}
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {isUsersLoading && users.length === 0 ? (
+        {searchType !== "chats" ? (
+          renderGlobalResults()
+        ) : isUsersLoading && users.length === 0 ? (
           Array(8).fill(null).map((_, idx) => (
             <div key={idx} className="flex items-center w-full gap-3 py-3.5 px-4 animate-pulse">
               <div className="relative mx-0 flex-shrink-0">

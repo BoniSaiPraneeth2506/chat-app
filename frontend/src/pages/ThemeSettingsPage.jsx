@@ -1,6 +1,6 @@
-import { Send, ArrowLeft, Palette } from "lucide-react";
+import { Send, ArrowLeft, Palette, MessageSquareText } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useThemeStore } from '../store/useThemeStore';
+import { useThemeStore, BUBBLE_STYLES } from '../store/useThemeStore';
 import { useEffect } from 'react';
 import { THEME_COLORS, THEMES } from "../constants";
 import { getWallpaperStyle } from "./SettingsPage";
@@ -11,7 +11,7 @@ const PREVIEW_MESSAGES = [
 ];
 
 const ThemeSettingsPage = () => {
-  const { theme, setTheme, wallpaper } = useThemeStore();
+  const { theme, setTheme, wallpaper, bubbleStyle, setBubbleStyle } = useThemeStore();
   const navigate = useNavigate();
 
   // Apply theme colors to CSS variables so the preview reflects the selection live.
@@ -28,6 +28,11 @@ const ThemeSettingsPage = () => {
       root.style.setProperty('--color-base-300', colors.base300);
     }
   }, [theme]);
+
+  const sentBubbleBg =
+    bubbleStyle && bubbleStyle.id !== "auto"
+      ? `linear-gradient(160deg, ${bubbleStyle.primary}, ${bubbleStyle.accent})`
+      : "var(--color-primary)";
 
   return (
     <div className="container min-h-screen max-w-5xl px-4 pt-20 pb-12 mx-auto"
@@ -83,6 +88,64 @@ const ThemeSettingsPage = () => {
           ))}
         </div>
 
+        {/* Bubble colour — the palette behind your outgoing chat bubbles. This
+            is the app-wide default; a per-chat override can be picked in any
+            conversation's ⋯ menu. */}
+        <div className="space-y-3 pt-2" style={{ borderTop: '2px solid var(--color-base-300)' }}>
+          <div className="flex items-center gap-2">
+            <div className="grid rounded-xl place-items-center size-9 bg-primary/10">
+              <MessageSquareText size={17} className="text-primary" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold leading-tight">Bubble Style</h3>
+              <p className="text-xs opacity-60">
+                Colour of your outgoing bubbles · per-chat overrides live in the ⋯ menu
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8">
+            {BUBBLE_STYLES.map((style) => {
+              const active = bubbleStyle?.id === style.id;
+              return (
+                <button
+                  key={style.id}
+                  className={`
+                    group flex flex-col items-center gap-1.5 p-2 rounded-lg transition-colors border
+                    ${active ? 'border-2' : 'border'}
+                  `}
+                  style={{
+                    backgroundColor: active ? 'var(--color-base-200)' : 'transparent',
+                    borderColor: active ? 'var(--color-primary)' : 'var(--color-base-300)'
+                  }}
+                  onClick={() => setBubbleStyle(style.id)}
+                >
+                  <div
+                    className="w-full h-8 rounded-lg border flex items-end justify-end p-1"
+                    style={{
+                      background:
+                        style.id === "auto"
+                          ? "linear-gradient(165deg, var(--color-base-300), var(--color-base-200))"
+                          : `linear-gradient(165deg, ${style.primary}, ${style.accent})`,
+                      borderColor: 'var(--color-base-300)',
+                    }}
+                  >
+                    <span
+                      className="h-4 w-1.5 rounded-sm"
+                      style={{
+                        backgroundColor:
+                          style.id === "auto" ? "var(--color-base-content)" : "#e8eefc",
+                      }}
+                    />
+                  </div>
+                  <span className="text-[11px] font-medium truncate w-full text-center">
+                    {style.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Live Preview */}
         <div className="space-y-3 pt-2 border-t" style={{ borderColor: 'var(--color-base-300)' }}>
           <h3 className="text-base font-semibold">Preview</h3>
@@ -121,8 +184,8 @@ const ThemeSettingsPage = () => {
                         <div
                           className="max-w-[80%] rounded-xl p-3 shadow-sm"
                           style={{
-                            backgroundColor: message.isSent ? 'var(--color-primary)' : 'var(--color-base-200)',
-                            color: message.isSent ? 'white' : 'var(--color-neutral)'
+                            backgroundColor: message.isSent ? sentBubbleBg : 'var(--color-base-200)',
+                            color: message.isSent ? '#e8eefc' : 'var(--color-neutral)'
                           }}
                         >
                           <p className="text-sm">{message.content}</p>

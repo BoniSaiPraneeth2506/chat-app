@@ -90,6 +90,7 @@ import axiosInstance from "../lib/axios";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
+import { useThemeStore, BUBBLE_STYLES } from "../store/useThemeStore";
 import { useState, useRef, useEffect, useMemo } from "react";
 import toast from "react-hot-toast";
 
@@ -152,6 +153,11 @@ const ChatHeader = () => {
   } = useGroupStore();
 
   const { onlineUsers, authUser } = useAuthStore();
+  // Per-chat bubble palette (Feature 3): an override chosen here beats the
+  // app-wide bubble style for this conversation only.
+  const { bubbleOverrides, setBubbleOverride } = useThemeStore();
+  const bubbleConvKey = selectedGroup?._id || selectedUser?._id || "";
+  const selectedBubblePreset = bubbleOverrides[bubbleConvKey] || "auto";
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const { callState, isScreenSharing, toggleLocalMute, toggleScreenShare, isMuted } = useChatStore();
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
@@ -803,6 +809,46 @@ const ChatHeader = () => {
                     </button>
                   </li>
                 ))}
+
+                <li className="menu-title text-[10px] uppercase tracking-wider font-bold px-2 py-1 select-none flex items-center gap-1 mt-1">
+                  <Sparkles size={12} />
+                  Bubble Style
+                </li>
+                <li className="px-2 pb-1">
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {BUBBLE_STYLES.map((style) => {
+                      const active = selectedBubblePreset === style.id;
+                      return (
+                        <button
+                          key={style.id}
+                          onClick={() => {
+                            haptic("tap");
+                            setBubbleOverride(bubbleConvKey, style.id);
+                            document.activeElement.blur();
+                          }}
+                          title={style.label}
+                          aria-label={style.label}
+                          className={`h-8 rounded-lg flex items-center justify-center text-[9px] font-bold transition-transform ${
+                            active ? "ring-2 ring-primary scale-105" : "hover:scale-105"
+                          }`}
+                          style={{
+                            background:
+                              style.id === "auto"
+                                ? "linear-gradient(165deg, var(--color-base-300), var(--color-base-200))"
+                                : `linear-gradient(165deg, ${style.primary}, ${style.accent})`,
+                            color: style.id === "auto" ? "var(--color-base-content)" : "#e8eefc",
+                          }}
+                        >
+                          {style.id === "auto" ? "A" : style.label.split(" ")[0]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-1.5 text-center text-[10px] text-base-content/50 select-none">
+                    {BUBBLE_STYLES.find((s) => s.id === selectedBubblePreset)?.label || "Default"}
+                    {" "}outgoing bubbles
+                  </div>
+                </li>
 
                 <div className="divider my-1"></div>
                 {(

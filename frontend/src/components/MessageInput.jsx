@@ -93,6 +93,11 @@ const MessageInput = () => {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const timerIntervalRef = useRef(null);
+  // HD default used when a photo is picked straight (no edits); the pencil edit
+  // screen lets it be switched to Standard per photo before sending.
+  const [hdQuality] = useState(
+    () => localStorage.getItem("chat-hd-quality") === "1"
+  );
   // Long-press voice dictation (tap = voice note, hold = speak-to-text)
   const [isDictating, setIsDictating] = useState(false);
   const dictationRecorderRef = useRef(null);
@@ -254,7 +259,7 @@ const MessageInput = () => {
     files.forEach(file => {
       const reader = new FileReader();
       reader.onloadend = () => {
-        compressImage(reader.result, 0.6);
+        compressImage(reader.result);
       };
       reader.readAsDataURL(file);
     });
@@ -348,13 +353,15 @@ const MessageInput = () => {
     };
   }, [imagePreviews, isBlocked, isReadOnlyRestricted, limits]);
 
-  const compressImage = (base64, quality = 0.6) => {
+  const compressImage = (base64, quality = hdQuality ? 0.95 : 0.6) => {
     const img = document.createElement("img");
     img.src = base64;
 
     img.onload = () => {
       const canvas = document.createElement("canvas");
-      const maxSize = 600;
+      // HD keeps more of the source detail (a 1400px cap); Standard stays at the
+      // historical 600px so a chat full of photos stays fast to open.
+      const maxSize = hdQuality ? 1400 : 600;
 
       const scale = Math.min(maxSize / img.width, maxSize / img.height, 1);
       canvas.width = img.width * scale;
@@ -364,7 +371,7 @@ const MessageInput = () => {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
       const compressedBase64 = canvas.toDataURL("image/jpeg", quality);
-      setImagePreviews(prev => [...prev, compressedBase64].slice(0, 5));
+      setImagePreviews(prev => [...prev, { src: compressedBase64, hd: hdQuality }].slice(0, 5));
     };
   };
 
@@ -694,8 +701,8 @@ const MessageInput = () => {
       } else if (selectedGroup) {
         await sendGroupMessage({
           text: messageText,
-          image: currentImages[0] || "",
-          images: currentImages.length > 1 ? currentImages : [],
+          image: currentImages[0]?.src || "",
+          images: currentImages.length > 1 ? currentImages.map((i) => i.src) : [],
           replyTo: replyingToMessage?._id || null,
           mentions: mentionIds,
           scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
@@ -712,8 +719,8 @@ const MessageInput = () => {
           try {
             await useChatStore.getState().sendMessageWithProgress({
               text: messageText,
-              image: currentImages[0] || "",
-              images: currentImages.length > 1 ? currentImages : [],
+              image: currentImages[0]?.src || "",
+              images: currentImages.length > 1 ? currentImages.map((i) => i.src) : [],
               isOneView: messageOneView,
               restricted: messageSensitive,
               scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
@@ -736,7 +743,7 @@ const MessageInput = () => {
           if (currentImages.length > 1) {
             await sendMessage({
               text: messageText,
-              images: currentImages,
+              images: currentImages.map((i) => i.src),
               isOneView: false, // Multi-image doesn't use View Once
               restricted: messageSensitive,
               scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
@@ -807,7 +814,13 @@ const MessageInput = () => {
       sendTypingStatus("recording");
 
       timerIntervalRef.current = setInterval(() => {
-        setRecordingTime((prev) => prev + 1);
+        setRecordingTime((prev) => {
+          if (prev + 1 > MAX_VOICE_SECONDS) {
+            stopRecording(true);
+            return prev;
+          }
+          return prev + 1;
+        });
       }, 1000);
     } catch (err) {
       console.error("Error accessing microphone:", err);
@@ -831,11 +844,15 @@ const MessageInput = () => {
     }
   };
 
-  const formatTime = (secs) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m}:${s < 10 ? "0" : ""}${s}`;
-  };
+  // Voice-note clips cap at fifteen seconds — the visualizer counts up to the
+  // 00:15 limit and the clip is sent automatically the moment it is reached.
+  const MAX_VOICE_SECONDS = 15;
+  const formatTimer = (secs) =>
+    `${String(Math.floor(secs / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`;
+
+  // Uneven on purpose: a constant pulse reads as an alert, a ragged wave reads
+  // as the voice being heard. The animation adds the motion on top.
+  const BAR_HEIGHTS = [42, 78, 55, 92, 38, 66, 82, 48, 96, 46, 70, 34, 86, 58, 74, 40, 100, 62, 44, 78, 50, 88, 60, 36, 72];
 
   // ── Voice dictation (long-press the mic) ──────────────────────────────────
   //
@@ -941,10 +958,15 @@ const MessageInput = () => {
       {editingIndex !== null && imagePreviews[editingIndex] && (
         <ImageEditorModal
           key={editingIndex}
-          src={imagePreviews[editingIndex]}
+          src={imagePreviews[editingIndex].src}
+          initialHd={imagePreviews[editingIndex].hd ?? hdQuality}
           onCancel={() => setEditingIndex(null)}
-          onSave={(edited) => {
-            setImagePreviews((prev) => prev.map((v, i) => (i === editingIndex ? edited : v)));
+          onSave={(edited, chosenHd) => {
+            setImagePreviews((prev) =>
+              prev.map((v, i) =>
+                i === editingIndex ? { src: edited, hd: Boolean(chosenHd) } : v
+              )
+            );
             setEditingIndex(null);
           }}
         />
@@ -1050,10 +1072,10 @@ const MessageInput = () => {
 
         {imagePreviews.length > 0 && (
           <div className="flex items-center gap-2 mb-1 overflow-x-auto pb-1 max-w-full animate-in slide-in-from-bottom duration-200">
-            {imagePreviews.map((imgSrc, idx) => (
+            {imagePreviews.map((img, idx) => (
               <div key={idx} className="relative shrink-0">
                 <img
-                  src={imgSrc}
+                  src={img.src}
                   alt={`Preview ${idx + 1}`}
                   className="object-cover w-24 h-24 rounded-xl"
                 />
@@ -1076,6 +1098,18 @@ const MessageInput = () => {
                     <Pencil className="size-3.5 text-white" />
                   </button>
                 )}
+                {/* Quality of this photo: set in the pencil editor, or the
+                    remembered default when it was picked straight. */}
+                <span
+                  className={`absolute bottom-1 left-1 w-6 h-6 rounded-full flex items-center justify-center font-extrabold text-[10px] tracking-wide select-none ${
+                    img.hd
+                      ? "bg-emerald-500 text-white"
+                      : "bg-base-300/85 backdrop-blur-sm text-base-content"
+                  }`}
+                  title={img.hd ? "HD photo" : "Standard photo"}
+                >
+                  {img.hd ? "HD" : "SD"}
+                </span>
                 {imagePreviews.length === 1 && (
                   <button
                     onClick={() => setIsOneView(!isOneView)}
@@ -1228,10 +1262,24 @@ const MessageInput = () => {
         <form onSubmit={handleSendMessage} className="flex items-end gap-3">
         <div className="flex-1 min-w-0 flex items-end gap-3 bg-base-100 rounded-3xl px-4 py-1.5 min-h-[42px] border field-hair shadow-sm">
           {isRecording ? (
-            <div className="flex items-center justify-between w-full px-2">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
-                <span className="text-xs text-base-content font-medium">Recording {formatTime(recordingTime)}</span>
+            <div className="flex items-center justify-between w-full px-2 py-1">
+              <div className="flex items-center gap-2.5 min-w-0">
+                {/* Pulsing red dot */}
+                <span className="rec-dot" aria-hidden="true" />
+                {/* 00:15-style count-up timer */}
+                <span className="text-xs font-semibold text-red-500 tabular-nums shrink-0">
+                  {formatTimer(recordingTime)}
+                </span>
+                {/* Live sound-wave visualizer */}
+                <span className="voice-viz" aria-hidden="true">
+                  {BAR_HEIGHTS.map((h, i) => (
+                    <span
+                      key={i}
+                      className="voice-bar"
+                      style={{ "--i": i, height: `${h}%` }}
+                    />
+                  ))}
+                </span>
               </div>
               <button
                 type="button"

@@ -677,6 +677,159 @@ const getUsersForSidebar = async (req, res) => {
   }
 };
 
+// ── Global search (top search bar → type/date filters) ──────────────────────
+//
+// The sidebar search is a name search over the chat list. This is the message
+// side of it: one query across the user's DMs and groups, filtered by content
+// kind (messages / photos / videos / documents / links) and an optional date
+// range, returning the best matches newest-first so tapping one opens straight
+// to that conversation.
+const searchMessages = async (req, res) => {
+  try {
+    const { q = "", type = "messages", from = "", to = "" } = req.query;
+    const me = req.user._id;
+    const LIMIT = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 50);
+    const safeQ = escapeRegex(String(q).trim().slice(0, 80));
+
+    // Conversation scope for 1-on-1 messages this user can see.
+    const dmClauses = [
+      {
+        $or: [{ senderId: me, groupId: null }, { receiverId: me, groupId: null }],
+      },
+      { deletedFor: { $ne: me } },
+      unexpired(),
+    ];
+
+    // What kind of result is being asked for.
+    const typeClauses = [];
+    if (type === "photos") {
+      typeClauses.push({
+        $or: [{ image: { $nin: [null, ""] } }, { "images.0": { $exists: true } }],
+      });
+    } else if (type === "videos") {
+      typeClauses.push({ "attachments.kind": "video" });
+    } else if (type === "documents") {
+      typeClauses.push({ "attachments.kind": "document" });
+    } else if (type === "links") {
+      // A link is a URL in the text. An explicit query narrows the URLs, an
+      // empty one finds everything link-shaped.
+      typeClauses.push(
+        q ? { text: { $regex: safeQ, $options: "i" } } : { text: { $regex: /https?:\/\/[^\s]+/i } }
+      );
+    } else if (q) {
+      typeClauses.push({ text: { $regex: safeQ, $options: "i" } });
+    }
+
+    // Optional date range, applied to both conversations.
+    const dateClauses = [];
+    if (from) {
+      const start = new Date(from);
+      if (!isNaN(start.getTime())) dateClauses.push({ createdAt: { $gte: start } });
+    }
+    if (to) {
+      const end = new Date(to);
+      if (!isNaN(end.getTime())) dateClauses.push({ createdAt: { $lte: end } });
+    }
+    if (dateClauses.length) typeClauses.push({ $and: dateClauses });
+
+    const buildClauses = (base) =>
+      typeClauses.length ? { $and: [...base, ...typeClauses] } : { $and: base };
+
+    const myGroups = await Group.find({ "members.user": me })
+      .select("_id name groupPic")
+      .lean();
+
+    const FIELDS =
+      "text image images voice attachments senderId receiverId groupId createdAt";
+
+    const [dms, groupResults, docCounts, groupDocCounts] = await Promise.all([
+      Message.find(buildClauses(dmClauses))
+        .sort({ createdAt: -1 })
+        .limit(LIMIT)
+        .select(FIELDS)
+        .lean(),
+      myGroups.length
+        ? Message.find(buildClauses([{ groupId: { $in: myGroups.map((g) => g._id) } }, { deletedFor: { $ne: me } }, unexpired()]))
+            .sort({ createdAt: -1 })
+            .limit(LIMIT)
+            .select(FIELDS)
+            .lean()
+        : Promise.resolve([]),
+      Message.countDocuments(buildClauses(dmClauses)),
+      myGroups.length
+        ? Message.countDocuments(buildClauses([{ groupId: { $in: myGroups.map((g) => g._id) } }, { deletedFor: { $ne: me } }, unexpired()]))
+        : Promise.resolve(0),
+    ]);
+
+    // Resolve the other party of every DM in one query, so the result rows have
+    // a name and avatar without an N+1.
+    const otherIds = [...new Set(dms.map((m) => (String(m.senderId) === String(me) ? m.receiverId : m.senderId)).filter((id) => id && String(id) !== String(me)).map(String))];
+    const contactMap = {};
+    if (otherIds.length) {
+      const contacts = await User.find({ _id: { $in: otherIds } })
+        .select("fullName profilePic")
+        .lean();
+      contacts.forEach((c) => { contactMap[String(c._id)] = c; });
+    }
+    const groupMap = {};
+    myGroups.forEach((g) => { groupMap[String(g._id)] = g; });
+
+    // A short human label for the type badge on each row.
+    const kindOf = (m) => {
+      if (m.image || (m.images && m.images.length)) return "photo";
+      if ((m.attachments || []).some((a) => a.kind === "video")) return "video";
+      if ((m.attachments || []).some((a) => a.kind === "document")) return "document";
+      if (m.text && /https?:\/\/[^\s]+/i.test(m.text)) return "link";
+      if (m.voice) return "audio";
+      return "message";
+    };
+
+    const rows = [];
+    const pushRows = (messages, dm) => {
+      messages.forEach((m) => {
+        let chatName = "Chat";
+        let avatar = "";
+        let chatId;
+        let chatType = dm ? "dm" : "group";
+        if (dm) {
+          const otherId = String(m.senderId) === String(me) ? m.receiverId : m.senderId;
+          const contact = contactMap[String(otherId)];
+          chatName = contact?.fullName || "Unknown";
+          avatar = contact?.profilePic || "";
+          chatId = otherId;
+        } else {
+          const group = groupMap[String(m.groupId)];
+          chatName = group?.name || "Group";
+          avatar = group?.groupPic || "";
+          chatId = m.groupId;
+        }
+        rows.push({
+          messageId: m._id,
+          chatId,
+          chatType,
+          chatName,
+          avatar,
+          kind: kindOf(m),
+          text: m.text || "",
+          createdAt: m.createdAt,
+        });
+      });
+    };
+    pushRows(dms, true);
+    pushRows(groupResults, false);
+
+    rows.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.status(200).json({
+      items: rows.slice(0, LIMIT),
+      total: docCounts + groupDocCounts,
+      hasMore: rows.length > LIMIT,
+    });
+  } catch (error) {
+    console.error("Error in searchMessages:", error);
+    res.status(500).json({ message: "Search failed" });
+  }
+};
+
 const getMessages = async (req, res) => {
   try {
     const { id: userToChatId } = req.params;
@@ -1422,61 +1575,145 @@ const getSharedMedia = async (req, res) => {
     const LIMIT = Math.min(Math.max(parseInt(req.query.limit, 10) || 60, 1), 120);
     const SKIP = Math.max(parseInt(req.query.skip, 10) || 0, 0);
 
-    const scope = {
+    // Which view is open: media (images + videos), docs, links, audio — or
+    // "mixed", the social-media-style blend the profile preview uses.
+    const type = ["media", "docs", "links", "audio", "mixed"].includes(req.query.type)
+      ? req.query.type
+      : "media";
+
+    const conversation = {
+      $or: [
+        { senderId: myId, receiverId: contact, groupId: null },
+        { senderId: contact, receiverId: myId, groupId: null },
+      ],
+    };
+
+    const baseScope = {
       $and: [
-        {
-          $or: [
-            { senderId: myId, receiverId: contact, groupId: null },
-            { senderId: contact, receiverId: myId, groupId: null },
-          ],
-        },
-        { $or: [{ image: { $nin: [null, ""] } }, { "images.0": { $exists: true } }] },
+        conversation,
         unexpired(),
       ],
       deletedFor: { $ne: myId },
       isDeletedForEveryone: { $ne: true },
     };
 
-    const [recent, totals] = await Promise.all([
-      Message.find(scope)
-        .sort({ createdAt: -1 })
-        .skip(SKIP)
-        .limit(LIMIT)
-        .select("image images createdAt")
-        .lean(),
-      Message.aggregate([
-        { $match: scope },
-        {
-          $project: {
-            pictures: {
-              $add: [
-                { $cond: [{ $gt: [{ $strLenCP: { $ifNull: ["$image", ""] } }, 0] }, 1, 0] },
-                { $size: { $ifNull: ["$images", []] } },
-              ],
-            },
-          },
-        },
-        { $group: { _id: null, total: { $sum: "$pictures" } } },
-      ]),
-    ]);
+    const FIELDS = "image images attachments voice text createdAt";
 
-    const total = totals[0]?.total || 0;
+    const contentScopeFor = (kind) => {
+      if (kind === "media") {
+        // Photos plus bucket-backed videos (kind "video" attachments).
+        return {
+          $or: [
+            { image: { $nin: [null, ""] } },
+            { "images.0": { $exists: true } },
+            { "attachments.kind": "video" },
+          ],
+        };
+      }
+      if (kind === "docs") return { "attachments.kind": "document" };
+      if (kind === "audio") return { voice: { $nin: [null, ""] } };
+      return { text: { $regex: /https?:\/\/[^\s]+/i } };
+    };
 
-    // One entry per picture, newest first, so a message carrying five of them
-    // contributes five tiles rather than one.
-    const items = [];
-    for (const message of recent) {
-      const urls = message.image ? [message.image] : [];
+    // Every row carries its kind so the profile preview can tell a photo tile
+    // from a document tile without a second request.
+    const imageRows = (message) => {
+      const rows = [];
+      const urls = [];
+      if (message.image) urls.push(message.image);
       if (Array.isArray(message.images)) urls.push(...message.images.filter(Boolean));
       urls.forEach((url, index) => {
-        items.push({ _id: `${message._id}-${index}`, url, createdAt: message.createdAt });
+        rows.push({ _id: `${message._id}-image-${index}`, kind: "media", url, createdAt: message.createdAt });
       });
+      if (Array.isArray(message.attachments)) {
+        message.attachments
+          .filter((a) => a.kind === "video")
+          .forEach((a, index) => {
+            rows.push({
+              _id: `${message._id}-video-${index}`,
+              kind: "video",
+              poster: a.posterUrl || "",
+              key: a.key,
+              messageId: message._id,
+              createdAt: message.createdAt,
+            });
+          });
+      }
+      return rows;
+    };
+
+    const documentRows = (message) =>
+      (message.attachments || [])
+        .filter((a) => a.kind === "document")
+        .map((a, index) => ({
+          _id: `${message._id}-doc-${index}`,
+          kind: "document",
+          name: a.name || "Document",
+          size: a.size,
+          key: a.key,
+          messageId: message._id,
+          createdAt: message.createdAt,
+        }));
+
+    const linkRows = (message) => {
+      const urls = (message.text.match(/https?:\/\/[^\s]+/gi) || []).slice(0, 5);
+      return urls.map((url, index) => ({
+        _id: `${message._id}-link-${index}`,
+        kind: "link",
+        url,
+        text: message.text,
+        createdAt: message.createdAt,
+      }));
+    };
+
+    const audioRows = (message) => [
+      { _id: `${message._id}-audio`, kind: "audio", voice: message.voice, createdAt: message.createdAt },
+    ];
+
+    const fetchKind = async (kind, limit, skip = 0) => {
+      const scope = { ...baseScope, ...contentScopeFor(kind) };
+      const recent = await Message.find(scope)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .select(FIELDS)
+        .lean();
+      if (kind === "docs") return recent.flatMap(documentRows);
+      if (kind === "links") return recent.flatMap(linkRows);
+      if (kind === "audio") return recent.flatMap(audioRows);
+      return recent.flatMap(imageRows);
+    };
+
+    let items;
+    let total;
+
+    if (type === "mixed") {
+      // The profile preview: a taste of every kind, newest first.
+      const [mediaSet, docsSet, linksSet, audioSet] = await Promise.all([
+        fetchKind("media", 12),
+        fetchKind("docs", 4),
+        fetchKind("links", 4),
+        fetchKind("audio", 4),
+      ]);
+      const [mediaCount, docsCount, linksCount, audioCount] = await Promise.all([
+        Message.countDocuments({ ...baseScope, ...contentScopeFor("media") }),
+        Message.countDocuments({ ...baseScope, ...contentScopeFor("docs") }),
+        Message.countDocuments({ ...baseScope, ...contentScopeFor("links") }),
+        Message.countDocuments({ ...baseScope, ...contentScopeFor("audio") }),
+      ]);
+      items = [...mediaSet, ...docsSet, ...linksSet, ...audioSet]
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .slice(0, LIMIT);
+      total = mediaCount + docsCount + linksCount + audioCount;
+    } else {
+      items = await fetchKind(type, LIMIT, SKIP);
+      total = await Message.countDocuments({ ...baseScope, ...contentScopeFor(type) });
     }
 
     res.status(200).json({
       items,
       total,
-      hasMore: recent.length === LIMIT,
+      hasMore: type === "mixed" ? false : SKIP + items.length < total,
       skip: SKIP,
     });
   } catch (error) {
@@ -2308,4 +2545,5 @@ export {
   ,requestTranscript
   ,SIDEBAR_USER_FIELDS
   ,attachUnreadCounts
+  ,searchMessages
 };

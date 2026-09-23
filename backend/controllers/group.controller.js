@@ -32,6 +32,44 @@ const getUserRole = (group, userId) => {
   return member ? member.role : null;
 };
 
+// Posts an automated "welcome to the group" card into the chat the moment a
+// member joins. The card lives as a real message so it scrolls with history,
+// survives reloads, and is picked up by the same socket path as any other
+// group message — every member's screen, including the newcomer's, gets it.
+const postGroupWelcome = async (groupId, memberId) => {
+  try {
+    const person = await User.findById(memberId).select("fullName profilePic").lean();
+    if (!person) return;
+    const name = person.fullName || "a new member";
+
+    const card = new Message({
+      senderId: memberId,
+      groupId,
+      text: `👋 Welcome ${name} to the group! Say hello.`,
+      isJoinMessage: true,
+    });
+    await card.save();
+
+    const populated = await Message.findById(card._id).populate(
+      "senderId",
+      "fullName profilePic"
+    );
+
+    const payload = populated.toObject
+      ? populated.toObject()
+      : { ...populated };
+    payload.clientId = null;
+
+    io.to(`group_${groupId.toString()}`).emit("newGroupMessage", payload);
+    // The newcomer may not have joined the room relay yet, so their own
+    // session is addressed directly as well.
+    const joinerSocketId = getReceiverSocketId(memberId.toString());
+    if (joinerSocketId) io.to(joinerSocketId).emit("newGroupMessage", payload);
+  } catch (error) {
+    console.error("Error posting group welcome:", error.message);
+  }
+};
+
 // 1. Create a new Group
 export const createGroup = async (req, res) => {
   try {
@@ -341,9 +379,11 @@ export const addGroupMembers = async (req, res) => {
 
     const existingMemberIds = group.members.map((m) => m.user.toString());
 
+    const freshlyAdded = [];
     newMembers.forEach((memberId) => {
       if (!existingMemberIds.includes(memberId.toString())) {
         group.members.push({ user: memberId, role: "member", joinedAt: new Date() });
+        freshlyAdded.push(memberId.toString());
       }
     });
 
@@ -355,6 +395,12 @@ export const addGroupMembers = async (req, res) => {
     );
 
     io.to(`group_${groupId}`).emit("groupUpdated", updatedGroup);
+
+    // Automatically greet each newcomer in the chat itself.
+    await Promise.all(
+      freshlyAdded.map((memberId) => postGroupWelcome(groupId, memberId))
+    );
+
     res.status(200).json(updatedGroup);
   } catch (error) {
     console.error("Error adding group members:", error);
@@ -973,6 +1019,8 @@ export const joinGroupByInvite = async (req, res) => {
       io.to(`group_${group._id.toString()}`).emit("groupUpdated", populated);
       const joinerSocketId = getReceiverSocketId(userId.toString());
       if (joinerSocketId) io.to(joinerSocketId).emit("groupCreated", populated);
+      // Greet the newcomer inside the chat itself.
+      await postGroupWelcome(group._id, userId.toString());
     }
 
     res.status(200).json({ group: populated, alreadyMember });

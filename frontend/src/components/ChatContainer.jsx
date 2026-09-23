@@ -3,9 +3,10 @@ import { useGroupStore } from "../store/useGroupStore";
 import { useEffect, useMemo, useRef, useLayoutEffect, useState } from "react";
 import axiosInstance from "../lib/axios";
 import toast from "react-hot-toast";
-import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image, Link2, EyeOff, ChevronRight } from "lucide-react";
+import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image, Link2, EyeOff, ChevronRight, Mic, Play } from "lucide-react";
 import ForwardModal from "./ForwardModal";
 import MediaGallerySheet from "./MediaGallerySheet";
+import { fetchAttachmentUrl } from "../lib/attachments";
 import MessageAttachment from "./MessageAttachment";
 import LocationContent from "./LocationContent";
 import LiveLocationModal from "./LiveLocationModal";
@@ -19,7 +20,9 @@ import AutoTranslateRow from "./AutoTranslateRow";
 import { useThemeStore } from "../store/useThemeStore";
 import { getWallpaperStyle } from "../pages/SettingsPage";
 import EmojiPicker from "./EmojiPicker";
-import MessageEffects from "./MessageEffects";
+import MessageEffects, { shouldBurst } from "./MessageEffects";
+import JumpToLatest from "./JumpToLatest";
+import { BUBBLE_STYLES } from "../store/useThemeStore";
 
 
 import ChatHeader from "./ChatHeader";
@@ -486,6 +489,9 @@ const ChatContainer = () => {
     forwardingMessages,
     setForwardingMessages,
     scrollToBottomSignal,
+    jumpRequest,
+    consumeJumpRequest,
+    sendMessage,
   } = useChatStore();
 
   const {
@@ -504,9 +510,31 @@ const ChatContainer = () => {
   // which is what made the media appear and then disappear a second later.
   const [sharedMedia, setSharedMedia] = useState(null); // null = not loaded yet
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+  const [galleryTab, setGalleryTab] = useState("media");
 
   const { authUser, onlineUsers } = useAuthStore();
-  const { theme, wallpaper, privacyReadReceipts } = useThemeStore();
+  const { theme, wallpaper, privacyReadReceipts, textSize, bubbleStyle, bubbleOverrides } = useThemeStore();
+
+  // Message text scale (Features: Custom Bubble Styles). Extra Large reads
+  // comfortably without reflowing the composer or the header.
+  const TEXT_SCALE = {
+    small: 0.86,
+    medium: 1,
+    large: 1.14,
+    "extra-large": 1.28,
+  }[textSize] ?? 1;
+
+  // The bubble palette active for this conversation: a per-chat override (picked
+  // from the ⋯ menu) wins over the app-wide bubble style. Outgoing bubbles get
+  // these colours as CSS variables, so the same bubble CSS drives both themes.
+  const activeBubble = useMemo(() => {
+    const key = selectedGroup?._id || selectedUser?._id || "";
+    const overrideId = key ? bubbleOverrides[key] : null;
+    return (
+      BUBBLE_STYLES.find((s) => s.id === (overrideId || bubbleStyle?.id)) ||
+      BUBBLE_STYLES[0]
+    );
+  }, [bubbleOverrides, bubbleStyle, selectedUser?._id, selectedGroup?._id]);
 
   // Stop any synthesized speech when switching chats or leaving — a clip from
   // one conversation must not keep playing over another.
@@ -1016,7 +1044,10 @@ const ChatContainer = () => {
           </>
         )}
         {message.text && (
-          <div className="text-sm leading-loose break-words pr-10 select-text">
+          <div
+            className="text-sm leading-loose break-words pr-10 select-text"
+            style={TEXT_SCALE !== 1 ? { fontSize: `${TEXT_SCALE * 100}%` } : undefined}
+          >
             <p>{renderWithMentions(message, highlightText(message.text, messageSearchQuery))}</p>
             {(() => {
               const urls = message.text.match(URL_REGEX);
@@ -1125,6 +1156,12 @@ const ChatContainer = () => {
       (r) => (r.userId === authUser._id || r.userId?._id === authUser._id)
     );
 
+    // Feature 4: a change since last render makes the chip pulse once and
+    // floats a couple of new hearts/fires up off it — both ends of the chat see
+    // it, whether the reaction was added here or arrived over the socket.
+    const burstAt = reactionBursts[message._id];
+    const burstEmojis = burstAt ? Object.keys(counts).slice(0, 3) : [];
+
     return (
       <div
         onClick={(e) => {
@@ -1135,9 +1172,27 @@ const ChatContainer = () => {
           // and now discoverable rather than hidden in a tooltip.
           setReactionsSheet(message);
         }}
-        className={`absolute bottom-[-8px] right-[-4px] flex items-center gap-1 bg-base-200 rounded-full px-1.5 py-0.5 shadow-sm text-[10px] select-none z-10 text-base-content font-medium cursor-pointer hover:bg-base-300 transition-colors ${myReaction ? "ring-1" : ""}`}
+        className={`absolute bottom-[-8px] right-[-4px] flex items-center gap-1 bg-base-200 rounded-full px-1.5 py-0.5 shadow-sm text-[10px] select-none z-10 text-base-content font-medium cursor-pointer hover:bg-base-300 transition-colors ${myReaction ? "ring-1" : ""} ${burstAt ? "rx-pulse" : ""}`}
         title="See who reacted"
       >
+        {burstAt && burstEmojis.length > 0 && (
+          <span className="rx-burst" key={burstAt} aria-hidden="true">
+            {burstEmojis.map((emoji, ei) => (
+              <span
+                key={ei}
+                className="rx-particle"
+                style={{
+                  left: `${30 + ei * 30 - 50}%`,
+                  "--rx-drift": `${(ei - 1) * 14}px`,
+                  "--rx-rot": `${(ei - 1) * 22}deg`,
+                  animationDelay: `${ei * 0.12}s`,
+                }}
+              >
+                {emoji}
+              </span>
+            ))}
+          </span>
+        )}
         <span className="flex gap-0.5">
           {Object.keys(counts).map((emoji) => (
             <span key={emoji}>{emoji}</span>
@@ -1151,12 +1206,20 @@ const ChatContainer = () => {
   };
 
   useEffect(() => {
-    if (selectedUser?._id) {
-      getMessages(selectedUser._id);
+    if (!selectedUser?._id) return;
+    // A global-search result asked this conversation to land on one message
+    // rather than the newest. Route it straight to the jump instead of the
+    // normal fetch so the two never race each other for the store.
+    if (jumpRequest && String(jumpRequest.chatId) === String(selectedUser._id)) {
+      const { messageId } = jumpRequest;
+      consumeJumpRequest();
+      jumpToMessage(selectedUser._id, messageId).then((ok) => {
+        if (!ok) getMessages(selectedUser._id);
+      });
+      return;
     }
-  }, [selectedUser?._id, getMessages]);
-
-  // Resume heartbeats for the current user's still-active live shares after a
+    getMessages(selectedUser._id);
+  }, [selectedUser?._id, getMessages, jumpRequest, consumeJumpRequest, jumpToMessage]);
   // reload / reconnect. Purely additive: startLiveShareTicker ignores ones that
   // are already ticking.
   useEffect(() => {
@@ -1188,7 +1251,9 @@ const ChatContainer = () => {
 
     (async () => {
       try {
-        const res = await axiosInstance.get(`/messages/media/${selectedUser._id}`);
+        const res = await axiosInstance.get(`/messages/media/${selectedUser._id}`, {
+          params: { type: "mixed", limit: 30 },
+        });
         if (cancelled) return;
         setSharedMedia({
           items: Array.isArray(res.data?.items) ? res.data.items : [],
@@ -1236,6 +1301,89 @@ const ChatContainer = () => {
   // events, so it is never measured after a late-loading image has already moved
   // things — by then the answer would be wrong.
   const isNearBottomRef = useRef(true);
+
+  // ── Full-screen celebration overlay (Feature 7) ──────────────────────────
+  //
+  // The chat already fires a per-bubble confetti spray (MessageEffects) for
+  // keyword messages; this adds the big one seen by BOTH ends of the chat. It
+  // fires only when a celebratory message ARRIVES at the very end of the
+  // conversation — history synced when a chat opens or the page refreshes is
+  // recorded silently, so opening a chat never triggers it for messages you've
+  // already seen. Both the record and the "is it the newest?" check reset when
+  // the user switches to another conversation.
+  const conversationKey = selectedGroup?._id || selectedUser?._id || "";
+  const convoKeyRef = useRef(null);
+  const celebrationSeenRef = useRef(new Set());
+  const celebrationBootstrappedRef = useRef(false);
+  const [celebrationFx, setCelebrationFx] = useState(null); // { key, emojis }
+  const CELEB_EMOJI_BANK = ["🎉", "🎊", "🥳", "🎂", "✨", "🎆", "🍾", "🎁", "❤️", "🔥", "🎈", "💖"];
+
+  useEffect(() => {
+    const list = Array.isArray(activeMessages) ? activeMessages : [];
+    if (list.length === 0) return;
+
+    // Switching conversation (or opening one) restarts the celebration clock:
+    // that batch is history, so it never fires the overlay.
+    if (convoKeyRef.current !== conversationKey) {
+      convoKeyRef.current = conversationKey;
+      celebrationSeenRef.current = new Set();
+      celebrationBootstrappedRef.current = false;
+    }
+    const first = !celebrationBootstrappedRef.current;
+    if (first) celebrationBootstrappedRef.current = true;
+
+    // Only the newest message in the conversation may trigger the overlay; the
+    // rest are just recorded so they never fire if they get re-synced later.
+    const newest = list[list.length - 1];
+    const fresh = [];
+    for (const m of list) {
+      if (m.isDeletedForEveryone) continue;
+      if (shouldBurst(m.text) && !celebrationSeenRef.current.has(m._id)) {
+        celebrationSeenRef.current.add(m._id);
+        if (!first && m._id === newest?._id) fresh.push(m);
+      }
+    }
+    if (fresh.length === 0) return;
+
+    const emojis = Array.from(
+      { length: 16 },
+      (_, i) => CELEB_EMOJI_BANK[(i + (Math.random() * 3)) % CELEB_EMOJI_BANK.length]
+    );
+    setCelebrationFx({ key: `${Date.now()}-${fresh[0]._id}`, emojis });
+    const timer = setTimeout(() => setCelebrationFx(null), 5200);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMessages]);
+
+  // ── Animated reactions (Feature 4) ───────────────────────────────────────
+  //
+  // Reacts whenever a message's reactions change while on screen — the user's
+  // own tap, someone else's over the socket, or an undo. The chip pulses once
+  // and a couple of the bursty hearts/fires float up out of it.
+  const prevReactionKeysRef = useRef({});
+  const [reactionBursts, setReactionBursts] = useState({}); // messageId -> Date.now()
+
+  useEffect(() => {
+    const list = Array.isArray(activeMessages) ? activeMessages : [];
+    let changedId = null;
+    for (const m of list) {
+      const key = JSON.stringify(m.reactions || []);
+      const prev = prevReactionKeysRef.current[m._id];
+      if (prev !== undefined && prev !== key) changedId = m._id;
+      prevReactionKeysRef.current[m._id] = key;
+    }
+    if (!changedId) return;
+    setReactionBursts((prev) => ({ ...prev, [changedId]: Date.now() }));
+    const timer = setTimeout(
+      () => setReactionBursts((prev) => {
+        const next = { ...prev };
+        delete next[changedId];
+        return next;
+      }),
+      1500
+    );
+    return () => clearTimeout(timer);
+  }, [activeMessages]);
 
   const handleScroll = async () => {
     const container = scrollableRef.current;
@@ -1455,7 +1603,47 @@ const ChatContainer = () => {
                 new Date(message.createdAt).toDateString();
 
               if (message.isCallLog) {
+// Automated "welcome to the group" system card — see
+              // postGroupWelcome on the backend. Centered, not a bubble, with
+              // quick-tap greeting stickers that send straight into the chat.
+              if (message.isJoinMessage) {
                 return [
+                  isNewDay && <DateSeparator key={`sep-${message._id}-w`} date={message.createdAt} bare={index === 0} />,
+                  <div key={`welcome-${message._id}`} className="select-none" role="note" aria-label="Group welcome">
+                    <div className="msg-welcome">
+                      <div className="msg-welcome-card cg-fade">
+                        <span className="welcome-emoji" aria-hidden="true">👋</span>
+                        <span>{message.text}</span>
+                        <span
+                          className="welcome-actions"
+                          onClick={(e) => e.stopPropagation()}
+                          onTouchStart={(e) => e.stopPropagation()}
+                        >
+                          {["👋", "🥳", "✨"].map((emoji, ei) => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              className="greet-emoji-btn"
+                              style={{ animationDelay: `${0.05 * (ei + 1)}s` }}
+                              title={`Say ${emoji}`}
+                              aria-label={`Send ${emoji}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                haptic("tap");
+                                sendMessage({ text: emoji });
+                              }}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </span>
+                      </div>
+                    </div>
+                  </div>,
+                ].filter(Boolean);
+              }
+
+              return [
                   isNewDay && <DateSeparator key={`sep-${message._id}`} date={message.createdAt} bare={index === 0} />,
                   <div key={message._id} className="flex justify-center my-3 select-none w-full animate-in fade-in duration-200">
                     <div className="border border-base-300 rounded-full px-4 py-1.5 flex items-center gap-2 text-xs font-medium shadow-sm">
@@ -1536,7 +1724,16 @@ const ChatContainer = () => {
                       resetSwipe(e.currentTarget);
                       if (touchStartRef.current) touchStartRef.current = null;
                     }}
-                    style={{ touchAction: "pan-y" }}
+                    style={{
+                      touchAction: "pan-y",
+                      ...(((message.senderId?._id || message.senderId) === authUser._id) && activeBubble.id !== "auto"
+                        ? {
+                            "--bb-primary": activeBubble.primary,
+                            "--bb-gradient": `linear-gradient(165deg, ${activeBubble.primary}, ${activeBubble.accent})`,
+                            "--bb-fg": "#e8eefc",
+                          }
+                        : {}),
+                    }}
                     className={`flex flex-col chat-bubble relative min-w-[72px] transition-colors duration-300 select-none cursor-default ${bubblePaddingClass(message)} ${(message.senderId?._id || message.senderId) === authUser._id ? "bubble-mine" : ""} ${isSelectionMode ? "cursor-pointer" : ""}`}
                   >
                   {/* Swipe-to-reply arrow. Always rendered, hidden by default
@@ -1768,6 +1965,48 @@ const ChatContainer = () => {
           </button>
         )}
 
+        {/* Feature 6: Jump to latest — floats whenever the reader has scrolled
+            up, with a pill counting messages that arrived while away. */}
+        <JumpToLatest
+          scrollableRef={scrollableRef}
+          isNearBottomRef={isNearBottomRef}
+          messages={activeMessages}
+        />
+
+        {/* Feature 7: full-screen keyword celebration — emoji float up while
+            confetti tumbles across the screen, on both ends of the chat. */}
+        {celebrationFx && (
+          <div className="celeb-overlay" key={celebrationFx.key} aria-hidden="true">
+            {celebrationFx.emojis.map((emoji, i) => (
+              <span
+                key={`e-${i}`}
+                className="celeb-emoji"
+                style={{
+                  "--x": `${(i * 12.7 + 4) % 92}%`,
+                  "--s": `${34 + ((i * 11) % 34)}px`,
+                  "--d": `${3.6 + ((i * 7) % 18) / 10}s`,
+                  "--dl": `${((i * 13) % 30) / 10}s`,
+                }}
+              >
+                {emoji}
+              </span>
+            ))}
+            {Array.from({ length: 34 }).map((_, i) => (
+              <span
+                key={`p-${i}`}
+                className="celeb-piece"
+                style={{
+                  "--x": `${(i * 29 + 11) % 96}%`,
+                  "--d": `${2.6 + ((i * 5) % 14) / 10}s`,
+                  "--dl": `${((i * 9) % 20) / 10}s`,
+                  "--sway": `${((i % 5) - 2) * 22}px`,
+                  "--c": ["#fbbf24", "#f472b6", "#60a5fa", "#34d399", "#f87171", "#a78bfa"][i % 6],
+                }}
+              />
+            ))}
+          </div>
+        )}
+
         <MessageInput />
 
         {/* Selection-mode actions (DM) now live in ChatHeader's toolbar
@@ -1848,26 +2087,36 @@ const ChatContainer = () => {
             {/* Media, links and docs gallery section (WhatsApp Desktop style) */}
             {(() => {
               // Until the request lands, the open page is used so the panel is
-              // never blank; after it lands the full conversation's media replaces
-              // it. Multi-image messages contribute each of their pictures.
+              // never blank; after it lands the mixed preview (photos, videos,
+              // docs, links, voice notes) replaces it.
               const fallback = Array.isArray(messages)
                 ? messages
                     .filter((m) => !m.isDeletedForEveryone)
                     .flatMap((m) => {
                       const urls = m.image ? [m.image] : [];
                       if (Array.isArray(m.images)) urls.push(...m.images.filter(Boolean));
-                      return urls.map((url, index) => ({ _id: `${m._id}-${index}`, url }));
+                      return urls.map((url, index) => ({ _id: `${m._id}-${index}`, kind: "media", url }));
                     })
                 : [];
               const mediaMessages = sharedMedia ? sharedMedia.items : fallback;
               const mediaTotal = sharedMedia ? sharedMedia.total : mediaMessages.length;
+              const openGalleryTab = (tab) => {
+                setGalleryTab(tab);
+                setIsGalleryOpen(true);
+              };
+              const openVideo = async (item) => {
+                try {
+                  const url = await fetchAttachmentUrl(item.messageId, item.key);
+                  if (url) window.open(url, "_blank", "noopener");
+                } catch { /* the file is no longer signed out */ }
+              };
               return (
                 <div className="space-y-2.5 pt-2">
                   {/* The heading opens the full gallery; the eight tiles below
                       stay as the preview they were. */}
                   <button
                     type="button"
-                    onClick={() => mediaTotal > 0 && setIsGalleryOpen(true)}
+                    onClick={() => mediaTotal > 0 && openGalleryTab("media")}
                     className="flex items-center justify-between w-full text-left"
                   >
                     <span className="text-xs font-semibold flex items-center gap-1.5 select-none">
@@ -1881,20 +2130,83 @@ const ChatContainer = () => {
                   </button>
                   {mediaMessages.length > 0 ? (
                     <div className="grid grid-cols-4 gap-1.5">
-                      {(sharedMedia ? mediaMessages.slice(0, 8) : mediaMessages.slice(-8).reverse()).map((item) => (
-                        <div 
-                          key={item._id}
-                          onClick={() => setLightboxImage(item.url)}
-                          className="aspect-square rounded-xl overflow-hidden bg-base-200 cursor-zoom-in group relative hover:opacity-90 transition-all"
-                        >
-                          <img 
-                            src={item.url} 
-                            alt="Shared media" 
-                            loading="lazy"
-                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-200" 
-                          />
-                        </div>
-                      ))}
+                      {(sharedMedia ? mediaMessages.slice(0, 8) : mediaMessages.slice(-8).reverse()).map((item) => {
+                        const kind = item.kind || "media";
+                        if (kind === "media") {
+                          return (
+                            <div
+                              key={item._id}
+                              onClick={() => setLightboxImage(item.url)}
+                              className="aspect-square rounded-xl overflow-hidden bg-base-200 cursor-zoom-in group relative hover:opacity-90 transition-all"
+                            >
+                              <img
+                                src={item.url}
+                                alt="Shared media"
+                                loading="lazy"
+                                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-200"
+                              />
+                            </div>
+                          );
+                        }
+                        if (kind === "video") {
+                          return (
+                            <button
+                              key={item._id}
+                              type="button"
+                              onClick={() => openVideo(item)}
+                              className="aspect-square rounded-xl overflow-hidden bg-black relative group hover:opacity-90 transition-all"
+                              title="Shared video"
+                            >
+                              {item.poster ? (
+                                <img
+                                  src={item.poster}
+                                  alt="Shared video"
+                                  loading="lazy"
+                                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-200"
+                                />
+                              ) : (
+                                <span className="w-full h-full grid place-items-center bg-base-200">
+                                  <Video size={18} className="text-base-content/50" />
+                                </span>
+                              )}
+                              <span className="absolute inset-0 grid place-items-center">
+                                <span className="grid place-items-center size-7 rounded-full bg-black/55 backdrop-blur-sm text-white">
+                                  <Play size={13} className="ml-0.5" />
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        }
+                        // docs / links / voice notes open the matching tab.
+                        const Icon =
+                          kind === "document" ? FileText : kind === "link" ? Link2 : Mic;
+                        return (
+                          <button
+                            key={item._id}
+                            type="button"
+                            onClick={() => openGalleryTab(kind === "document" ? "docs" : kind === "link" ? "links" : "audio")}
+                            className="aspect-square rounded-xl overflow-hidden grid place-items-center bg-base-200 hover:bg-base-300/70 transition-colors"
+                            title={
+                              kind === "document"
+                                ? "Documents"
+                                : kind === "link"
+                                ? "Links"
+                                : "Audio"
+                            }
+                          >
+                            <Icon
+                              size={18}
+                              className={
+                                kind === "document"
+                                  ? "text-sky-500"
+                                  : kind === "link"
+                                  ? "text-violet-500"
+                                  : "text-amber-500"
+                              }
+                            />
+                          </button>
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="bg-base-200 p-3 rounded-xl text-center">
@@ -2048,7 +2360,11 @@ const ChatContainer = () => {
         <MediaGallerySheet
           userId={selectedUser._id}
           contactName={displayNameOf(selectedUser, nicknames)}
-          onClose={() => setIsGalleryOpen(false)}
+          initialTab={galleryTab}
+          onClose={() => {
+            setGalleryTab("media");
+            setIsGalleryOpen(false);
+          }}
           onOpenImage={(url) => setLightboxImage(url)}
         />
       )}

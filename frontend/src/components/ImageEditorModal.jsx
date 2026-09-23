@@ -43,12 +43,15 @@ const loadImage = (src) =>
     img.src = src;
   });
 
-const ImageEditorModal = ({ src, onCancel, onSave }) => {
+const ImageEditorModal = ({ src, onCancel, onSave, initialHd = true }) => {
   const canvasRef = useRef(null);          // the working bitmap
   const overlayRef = useRef(null);         // crop/blur rectangle, drawn separately
   const wrapRef = useRef(null);
   const dragRef = useRef(null);
 
+  // Output quality: HD keeps the sharpest image the editor produced, Standard
+  // downsizes to a smaller JPEG before it is returned for sending.
+  const [hd, setHd] = useState(Boolean(initialHd));
   const [tool, setTool] = useState("draw");
   const [color, setColor] = useState("#ffffff");
   const [brush, setBrush] = useState(6);
@@ -282,8 +285,24 @@ const ImageEditorModal = ({ src, onCancel, onSave }) => {
     haptic("success");
     // JPEG rather than PNG: a photo re-encoded as PNG can be several times
     // larger, and this goes on to be base64'd into a request body.
-    const out = canvasRef.current.toDataURL("image/jpeg", 0.9);
-    onSave(out);
+    const canvas = canvasRef.current;
+    if (hd) {
+      onSave(canvas.toDataURL("image/jpeg", 0.95), true);
+      return;
+    }
+    // Standard: a smaller image that loads fast over any connection. Only the
+    // pixels are cut, never the edits — draw, text and crops survive intact.
+    const cap = 800;
+    const scale = Math.min(1, cap / Math.max(canvas.width, canvas.height));
+    if (scale < 1) {
+      const buffer = document.createElement("canvas");
+      buffer.width = Math.round(canvas.width * scale);
+      buffer.height = Math.round(canvas.height * scale);
+      buffer.getContext("2d").drawImage(canvas, 0, 0, buffer.width, buffer.height);
+      onSave(buffer.toDataURL("image/jpeg", 0.65), false);
+    } else {
+      onSave(canvas.toDataURL("image/jpeg", 0.65), false);
+    }
   };
 
   const activeTool = TOOLS.find((t) => t.id === tool);
@@ -321,6 +340,31 @@ const ImageEditorModal = ({ src, onCancel, onSave }) => {
           >
             <RotateCw size={19} />
           </button>
+          <span className="w-px h-5 bg-white/15 mx-1" aria-hidden="true" />
+          <div className="flex rounded-lg overflow-hidden bg-white/10" role="group" aria-label="Photo quality">
+            <button
+              type="button"
+              onClick={() => { haptic("tap"); setHd(true); }}
+              aria-pressed={hd}
+              title="HD — keep the highest detail"
+              className={`px-2 h-8 grid place-items-center text-[10px] font-extrabold tracking-wide transition-colors ${
+                hd ? "bg-white text-black" : "text-white/70 hover:bg-white/10"
+              }`}
+            >
+              HD
+            </button>
+            <button
+              type="button"
+              onClick={() => { haptic("tap"); setHd(false); }}
+              aria-pressed={!hd}
+              title="Standard — smaller size, loads faster"
+              className={`px-2 h-8 grid place-items-center text-[10px] font-extrabold tracking-wide transition-colors ${
+                !hd ? "bg-white text-black" : "text-white/70 hover:bg-white/10"
+              }`}
+            >
+              SD
+            </button>
+          </div>
         </div>
       </div>
 
