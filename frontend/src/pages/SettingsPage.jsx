@@ -2,7 +2,6 @@ import {
   Timer,
   Lock,
   ChevronRight,
-  ChevronDown,
   Palette,
   BellRing,
   Image as ImageIcon,
@@ -16,9 +15,10 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useThemeStore, TEXT_SIZES } from '../store/useThemeStore';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import useAuthStore from '../store/useAuthStore';
 import { THEME_COLORS } from "../constants";
+import FingerprintLockRow from '../components/FingerprintLockRow';
 
 export const getWallpaperStyle = (wallpaper, theme) => {
   if (wallpaper && (wallpaper.startsWith("http://") || wallpaper.startsWith("https://") || wallpaper.startsWith("data:image"))) {
@@ -120,10 +120,9 @@ const SettSection = ({ title, children }) => (
 );
 
 const SettingsPage = () => {
-  const { theme, wallpaper, textSize, setTextSize } = useThemeStore();
+  const { theme, wallpaper, textSize } = useThemeStore();
   const { authUser } = useAuthStore();
   const navigate = useNavigate();
-  const [isTextSizeOpen, setIsTextSizeOpen] = useState(false);
 
   // Apply theme colors to CSS variables
   useEffect(() => {
@@ -170,61 +169,15 @@ const SettingsPage = () => {
             subtitle={wallpaperLabel}
             onClick={() => navigate('/settings/wallpaper')}
           />
-          {/* Feature 3, part B: message text size — S / M / L / XL. One row on
-              the card, clicked to fold out the four choices, exactly like every
-              other Settings row opens its page. Applied app-wide and remembered
-              locally. */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setIsTextSizeOpen((v) => !v)}
-              className="w-full flex items-center justify-between gap-4 px-2 py-4 transition-colors hover:bg-base-200/70 text-left"
-            >
-              <div className="flex items-center gap-4 min-w-0">
-                <div className="grid rounded-xl place-items-center size-11 shrink-0 bg-primary/10">
-                  <Type size={20} className="text-primary" />
-                </div>
-                <div className="min-w-0">
-                  <span className="block text-sm font-medium truncate">Bubble Text Size</span>
-                  <span className="block text-xs opacity-60 truncate">Small · Medium · Large · Extra Large</span>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <span className="text-xs font-semibold">{TEXT_SIZES.find((s) => s.id === textSize)?.label || "Medium"}</span>
-                <ChevronDown size={18} className={`opacity-40 transition-transform ${isTextSizeOpen ? "rotate-180" : ""}`} />
-              </div>
-            </button>
-            {isTextSizeOpen && (
-              <div className="px-2 pb-4 animate-in fade-in slide-in-from-top-1 duration-150">
-                <div className="flex rounded-2xl overflow-hidden border border-base-300/70">
-                  {TEXT_SIZES.map((opt) => {
-                    const short = opt.id === "extra-large" ? "XL" : opt.id.charAt(0).toUpperCase();
-                    const active = textSize === opt.id;
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => setTextSize(opt.id)}
-                        title={opt.label}
-                        className={`flex-1 py-2.5 flex flex-col items-center gap-0.5 transition-colors select-none ${
-                          active
-                            ? "bg-primary text-primary-content"
-                            : "bg-base-200 text-base-content/60 hover:bg-base-300"
-                        }`}
-                      >
-                        <span className="text-[13px] font-bold leading-none">{short}</span>
-                        <span
-                          className={`leading-none ${short === "S" ? "text-[11px]" : short === "M" ? "text-[12px]" : short === "L" ? "text-[13px]" : "text-[14px]"}`}
-                        >
-                          A
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
+          {/* Feature 3, part B: message text size — S / M / L / XL. Opens its
+              own page like every other Settings row, where the sizes are
+              picked. Applied app-wide and remembered locally. */}
+          <SettRow
+            icon={Type}
+            title="Bubble Text Size"
+            subtitle={TEXT_SIZES.find((s) => s.id === textSize)?.label || "Medium"}
+            onClick={() => navigate('/settings/bubble-size')}
+          />
           <SettRow
             icon={BellRing}
             title="Notifications"
@@ -258,6 +211,7 @@ const SettingsPage = () => {
         </SettSection>
 
         <SettSection title="Privacy & Security">
+          <FingerprintLockRow />
           <SettRow
             icon={Lock}
             title="Locked Chats"

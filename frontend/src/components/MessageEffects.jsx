@@ -9,7 +9,7 @@ import { useMemo } from "react";
 // are the same. Rebounding into view replays it naturally on remount.
 
 const EFFECT_EMOJI = ["🎆", "🎇", "✨", "💫", "🎉", "🎊", "❤️", "💖", "⭐", "🌟"];
-const PARTICLE_COUNT = 14;
+const PARTICLE_COUNT = 18;
 
 const TRIGGER_PHRASES = [
   "happy new year", "new year", "merry christmas", "happy birthday", "congratulations",
@@ -37,16 +37,16 @@ export default function MessageEffects({ message }) {
   const particles = useMemo(() => {
     const total = PARTICLE_COUNT;
     return Array.from({ length: total }, (_, i) => {
-      const left = (i * 7.3 + 12) % 86 + 2; // spread across the bubble width
-      const drift = ((i % 3) - 1) * 22; // -22 / 0 / +22 px
+      const left = (i * 5.3 + 10) % 88 + 2; // spread across the bubble width
+      const drift = ((i % 3) - 1) * 26; // -26 / 0 / +26 px
       return {
         key: `fx-${message?._id || message?.tempId || "fx"}-${i}`,
         emoji: EFFECT_EMOJI[i % EFFECT_EMOJI.length],
         left,
         drift,
-        delay: (Math.random() * 0.25).toFixed(2),
-        dur: (0.8 + Math.random() * 0.7).toFixed(2),
-        size: 13 + Math.round(Math.random() * 13),
+        delay: (Math.random() * 0.4).toFixed(2),
+        dur: (1.6 + Math.random() * 1.1).toFixed(2),
+        size: 12 + Math.round(Math.random() * 12),
       };
     });
   }, [message?._id, message?.tempId]);

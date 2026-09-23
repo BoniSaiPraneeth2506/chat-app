@@ -52,6 +52,7 @@ import LoginPage from './pages/LoginPage'
 import SignUpPage from './pages/SignUpPage'
 import SettingsPage from './pages/SettingsPage'
 import ThemeSettingsPage from './pages/ThemeSettingsPage'
+import BubbleTextSizePage from './pages/BubbleTextSizePage'
 import NotificationSettingsPage from './pages/NotificationSettingsPage'
 import WallpaperSettingsPage from './pages/WallpaperSettingsPage'
 import AppPreferencesPage from './pages/AppPreferencesPage'
@@ -479,6 +480,29 @@ const App = () => {
     resumeLockedList();
   }, [returnToLocked, selectedUser, selectedGroup, resumeLockedList]);
 
+  // The app's fixed-height home screen follows the on-screen keyboard. In the
+  // APK the WebView resizes with the keyboard; on mobile browsers the layout
+  // viewport does not shrink, so visualViewport is the only reliable visible
+  // height. Publishing it as a CSS variable lets layouts opt in via
+  // `calc(var(--app-vh) - …)` instead of hard-coded 100vh.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const update = () => {
+      const h = vv ? Math.round(vv.height) : window.innerHeight;
+      document.documentElement.style.setProperty("--app-vh", `${h}px`);
+    };
+    update();
+    if (!vv) return;
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    window.addEventListener("resize", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+
   if (isCheckingAuth && !authUser) {
     return (
       <div className="flex items-center justify-center h-screen" 
@@ -502,6 +526,7 @@ const App = () => {
         <Route path='/signup' element={!authUser ? <SignUpPage /> : <Navigate to='/' />} />
         <Route path='/settings' element={authUser ? <SettingsPage /> : <Navigate to='/login' />} />
         <Route path='/settings/theme' element={authUser ? <ThemeSettingsPage /> : <Navigate to='/login' />} />
+        <Route path='/settings/bubble-size' element={authUser ? <BubbleTextSizePage /> : <Navigate to='/login' />} />
         <Route path='/settings/notifications' element={authUser ? <NotificationSettingsPage /> : <Navigate to='/login' />} />
         <Route path='/settings/wallpaper' element={authUser ? <WallpaperSettingsPage /> : <Navigate to='/login' />} />
         <Route path='/settings/app-preferences' element={authUser ? <AppPreferencesPage /> : <Navigate to='/login' />} />
