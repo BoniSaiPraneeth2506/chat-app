@@ -358,7 +358,6 @@
 import { useEffect, useLayoutEffect, useState, useRef } from "react";
 import { useChatStore } from "../store/useChatStore";
 import useAuthStore from "../store/useAuthStore";
-import { useKeyboardOpen } from "../hooks/useKeyboardOpen";
 import { useGroupStore } from "../store/useGroupStore";
 import SidebarSkeleton from "./skeletons/SidebarSkeleton";
 import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus, Lock, 
@@ -450,11 +449,6 @@ const SideBar = () => {
     (s) => s.isChannelFeedOpen || s.isChannelInfoOpen
   );
 
-  // Never let the bottom tab bar float above the keyboard. When typing (home
-  // search, status composer…) the bar slides away for the keyboard's duration,
-  // like real chat apps; the content column takes its place.
-  const { isKeyboardOpen } = useKeyboardOpen();
-
   const { onlineUsers, authUser } = useAuthStore();
 
   // Where the action menu actually fits.
@@ -484,6 +478,7 @@ const SideBar = () => {
   const pinnedUserIds = asIds(authUser?.pinnedChats);
   const [showArchivedOnly, setShowArchivedOnly] = useState(false);
   const [contextMenu, setContextMenu] = useState(null); // { x, y, id, kind }
+  const [isDebouncingGlobal, setIsDebouncingGlobal] = useState(false);
 
   // Runs before the browser paints, so the menu never appears at the raw pointer
   // position first and jump afterwards.
@@ -507,25 +502,31 @@ const SideBar = () => {
   const pressTimerRef = useRef(null);
 
   useEffect(() => {
-    const delayDebounceFn = setTimeout(() => {
-      getUsers(searchTerm);
-    }, searchTerm ? 400 : 0);
+    // Initial fetch once if users list is empty
+    if (!users || users.length === 0) {
+      getUsers("");
+    }
+  }, [getUsers, users]);
 
-    return () => clearTimeout(delayDebounceFn);
-  }, [getUsers, searchTerm]);
-
-  // Message-content search (magnifier tabs) is its own pipeline: one request
-  // across every conversation, debounced the same way as the chat-name filter.
+  // Message-content search (magnifier tabs) debounced smoothly without empty-state flash.
   useEffect(() => {
-    if (searchType === "chats") return;
-    const delayDebounceFn = setTimeout(() => {
-      getGlobalSearch({
-        q: searchTerm,
-        type: searchType,
-        from: searchFrom,
-        to: searchTo,
-      });
-    }, searchTerm ? 450 : 0);
+    if (searchType === "chats") {
+      setIsDebouncingGlobal(false);
+      return;
+    }
+    setIsDebouncingGlobal(true);
+    const delayDebounceFn = setTimeout(async () => {
+      try {
+        await getGlobalSearch({
+          q: searchTerm,
+          type: searchType,
+          from: searchFrom,
+          to: searchTo,
+        });
+      } finally {
+        setIsDebouncingGlobal(false);
+      }
+    }, searchTerm ? 350 : 80);
 
     return () => clearTimeout(delayDebounceFn);
   }, [searchType, searchTerm, searchFrom, searchTo, getGlobalSearch]);
@@ -836,19 +837,20 @@ const SideBar = () => {
 
   const renderGlobalResults = () => {
     const results = globalSearchResults || [];
+    const isLoading = globalSearchLoading || isDebouncingGlobal;
 
-    if (globalSearchLoading && results.length === 0) {
+    if (isLoading && results.length === 0) {
       return (
-        <div className="px-4 py-10 flex flex-col items-center gap-2 text-base-content/50">
+        <div className="px-4 py-12 flex flex-col items-center justify-center gap-3 text-base-content/50">
           <div className="size-6 border-2 border-base-300 border-t-primary rounded-full animate-spin" />
-          <p className="text-sm">Searching…</p>
+          <p className="text-xs font-medium">Searching messages…</p>
         </div>
       );
     }
 
-    if (results.length === 0) {
+    if (!isLoading && results.length === 0) {
       return (
-        <div className="px-4 py-10 text-center select-none">
+        <div className="px-4 py-12 text-center select-none">
           <p className="text-sm text-base-content/50">
             {searchTerm || searchFrom || searchTo
               ? "No messages found"
@@ -859,7 +861,7 @@ const SideBar = () => {
     }
 
     return (
-      <>
+      <div className={`transition-opacity duration-200 ${isLoading ? "opacity-60 pointer-events-none" : "opacity-100"}`}>
         {globalSearchTotal > results.length && (
           <div className="px-4 pt-2 pb-1 text-[11px] text-base-content/40">
             Showing {results.length} of {globalSearchTotal}
@@ -915,7 +917,7 @@ const SideBar = () => {
             </button>
           );
         })}
-      </>
+      </div>
     );
   };
 
@@ -1199,9 +1201,12 @@ const SideBar = () => {
         ${selectedUser || selectedGroup ? "hidden lg:flex" : "flex"}
       `}
     >
+      {/* Fixed bottom tab bar spacer — on mobile the tab bar is fixed to the
+          physical bottom of the screen, so we need to push content up by the
+          tab bar height. On desktop the tab rail is vertical so no spacer needed. */}
       {/* Desktop vertical rail + content row. The rail sits on the left edge
-          like WhatsApp; on mobile the tab bar moves to the bottom. */}
-      <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden">
+          like WhatsApp; on mobile the tab bar is fixed at the physical bottom. */}
+      <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden pb-[4.5rem] lg:pb-0">
         {/* Desktop: vertical tab rail on the left edge of the sidebar */}
         <div className="hidden lg:flex flex-col items-center flex-shrink-0 w-14 py-2 z-10 border-r border-base-300 bg-base-100">
           {([
@@ -1304,7 +1309,7 @@ const SideBar = () => {
         {/* Global search type tabs — visible whenever the magnifier is used or
             a message-content tab is already active (date-only searches). */}
         {(searchTerm || searchType !== "chats") && (
-          <>
+          <div className="animate-in fade-in duration-200">
             <div className="flex items-center gap-2 mt-2 overflow-x-auto no-scrollbar pb-0.5">
               {[
                 { id: "chats", label: "Chats" },
@@ -1358,27 +1363,16 @@ const SideBar = () => {
                 )}
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
 
       <div className="flex-1 overflow-y-auto">
         {searchType !== "chats" ? (
           renderGlobalResults()
-        ) : isUsersLoading && users.length === 0 ? (
-          Array(8).fill(null).map((_, idx) => (
-            <div key={idx} className="flex items-center w-full gap-3 py-3.5 px-4 animate-pulse">
-              <div className="relative mx-0 flex-shrink-0">
-                <div className="rounded-full bg-base-300 size-12" />
-              </div>
-              <div className="flex-1 min-w-0 text-left space-y-2">
-                <div className="w-32 h-4 bg-base-300 rounded" />
-                <div className="w-16 h-3 bg-base-300 rounded" />
-              </div>
-            </div>
-          ))
         ) : (
           <>
+
             {/* Archived Chats Header/Toggle row */}
             {showArchivedOnly ? (
               <div className="w-full px-4 py-3 flex items-center gap-3 bg-base-200 select-none">
@@ -1463,48 +1457,60 @@ const SideBar = () => {
         </div>
       </div>
 
-      {/* Mobile: bottom tab bar (hidden on desktop) — a clean segmented bar
-          with an animated active pill, so it reads modern on small screens.
-          Hidden while a channel feed / channel-info is open, so the channel
-          feels full-screen like a direct chat. It also steps aside while the
-          keyboard is up, so it never rides above the keys. */}
+      {/* Mobile: bottom tab bar — FIXED to the physical bottom of the screen
+          so it never moves when the keyboard opens. The sidebar content area
+          has pb-[4.5rem] on mobile to clear this bar.
+          Hidden only while a channel feed is full-screen (ChannelFeed / ChannelInfo
+          already returns their own full-screen view directly on mobile). */}
       {!channelScreenOpen && (
-      <div className={`${isKeyboardOpen ? "hidden" : "flex"} lg:hidden items-stretch flex-shrink-0 px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-1.5 z-10`}>
-        <div className="relative flex flex-1 bg-base-200/90 backdrop-blur-md rounded-2xl border border-base-300/80 p-1 shadow-sm">
-          {/* Animated active pill slides behind the selected tab */}
-          <span
-            className={`absolute top-1 bottom-1 w-[calc((100%-0.5rem)/4)] rounded-xl bg-base-100 shadow-sm border border-base-300/70 transition-transform duration-300 ease-out ${
-              activeTab === "chats"
-                ? "translate-x-0"
-                : activeTab === "updates"
-                ? "translate-x-[100%]"
-                : activeTab === "channels"
-                ? "translate-x-[200%]"
-                : "translate-x-[300%]"
-            }`}
-            style={{ left: "0.25rem" }}
-          />
-          {([
-            { id: "chats", label: "Chats", Icon: MessageSquare },
-            { id: "updates", label: "Updates", Icon: RefreshCw },
-            { id: "channels", label: "Channels", Icon: Megaphone },
-            { id: "calls", label: "Calls", Icon: Phone },
-          ]).map((t) => {
-            const isActive = activeTab === t.id;
-            const Icon = t.Icon;
-            return (
-              <button
-                key={t.id}
-                onClick={() => useUpdatesStore.getState().setActiveTab(t.id)}
-                className={`relative flex-1 flex flex-col items-center justify-center gap-[7px] py-1.5 rounded-xl transition-colors select-none ${
-                  isActive ? "text-primary" : "text-base-content/55 hover:text-base-content"
-                }`}
-              >
-                <Icon size={22} strokeWidth={isActive ? 2.4 : 2} className={isActive ? "drop-shadow-sm" : ""} />
-                <span className={`${isActive ? "text-[11px]" : "text-[10.5px]"} font-semibold leading-none`}>{t.label}</span>
-              </button>
-            );
-          })}
+      <div
+        className="lg:hidden"
+        style={{
+          position: "fixed",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          zIndex: 50,
+          paddingBottom: "env(safe-area-inset-bottom, 0px)",
+        }}
+      >
+        <div className="px-3 pt-1.5 pb-2 bg-base-100/80 backdrop-blur-md border-t border-base-300/60">
+          <div className="relative flex flex-1 bg-base-200/90 backdrop-blur-md rounded-2xl border border-base-300/80 p-1 shadow-sm">
+            {/* Animated active pill slides behind the selected tab */}
+            <span
+              className={`absolute top-1 bottom-1 w-[calc((100%-0.5rem)/4)] rounded-xl bg-base-100 shadow-sm border border-base-300/70 transition-transform duration-300 ease-out ${
+                activeTab === "chats"
+                  ? "translate-x-0"
+                  : activeTab === "updates"
+                  ? "translate-x-[100%]"
+                  : activeTab === "channels"
+                  ? "translate-x-[200%]"
+                  : "translate-x-[300%]"
+              }`}
+              style={{ left: "0.25rem" }}
+            />
+            {([
+              { id: "chats", label: "Chats", Icon: MessageSquare },
+              { id: "updates", label: "Updates", Icon: RefreshCw },
+              { id: "channels", label: "Channels", Icon: Megaphone },
+              { id: "calls", label: "Calls", Icon: Phone },
+            ]).map((t) => {
+              const isActive = activeTab === t.id;
+              const Icon = t.Icon;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => useUpdatesStore.getState().setActiveTab(t.id)}
+                  className={`relative flex-1 flex flex-col items-center justify-center gap-[7px] py-1.5 rounded-xl transition-colors select-none ${
+                    isActive ? "text-primary" : "text-base-content/55 hover:text-base-content"
+                  }`}
+                >
+                  <Icon size={22} strokeWidth={isActive ? 2.4 : 2} className={isActive ? "drop-shadow-sm" : ""} />
+                  <span className={`${isActive ? "text-[11px]" : "text-[10.5px]"} font-semibold leading-none`}>{t.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
       )}
