@@ -33,6 +33,7 @@ public class MainActivity extends BridgeActivity {
         // Must be registered before super.onCreate: the bridge is built there
         // and only picks up plugins known at that point.
         registerPlugin(SecureScreenPlugin.class);
+        registerPlugin(SpeechRecognitionPlugin.class);
 
         super.onCreate(savedInstanceState);
 

@@ -22,6 +22,7 @@ import ImageEditorModal from "./ImageEditorModal";
 import CreatePollModal from "./CreatePollModal";
 import SchedulePicker from "./SchedulePicker";
 import { transcribeSpeech } from "../lib/sarvamApi";
+import { nativeSpeechAvailable, startNativeDictation } from "../lib/speechRecognition";
 
 // About five lines; past that the field scrolls instead of pushing the chat up.
 const MAX_INPUT_HEIGHT = 112;
@@ -109,6 +110,7 @@ const MessageInput = () => {
   const dictationLongPressRef = useRef(null);
   const dictationActiveRef = useRef(false);
   const dictationLiveRef = useRef(null); // SpeechRecognition instance
+  const dictationNativeRef = useRef(null); // native session controller { stop, remove }
   const dictationStartedAtRef = useRef(0);
   const dictationReleasedAtRef = useRef(0);
   const dictationBaseTextRef = useRef(""); // composer text when dictation began
@@ -865,12 +867,73 @@ const MessageInput = () => {
 
   // ── Voice dictation (long-press the mic) ──────────────────────────────────
   //
-  // Preferred path: the Web Speech API, which hands words back live — every
-  // result rebuilds the composer text from the recogniser's full transcript so
-  // what you said enters the input as you are still saying it (finals stay,
-  // half-spoken words flash in and settle). If the WebView has no Speech
-  // Recognition, it falls back to a MediaRecorder clip that is transcribed
-  // once on release through /api/ai/speech-to-text (Sarvam saaras:v3).
+  // Three recognizers, tried in order:
+  //   1. Native (APK): the local SpeechRecognitionPlugin streams words off the
+  //      device speech engine as they are said — partials appear in the
+  //      composer live, the final transcript settles on release.
+  //   2. Web Speech API (browsers): interim results stream the same way.
+  //   3. MediaRecorder → /api/ai/speech-to-text (Sarvam saaras:v3): last-resort
+  //      for environments with no streaming recognizer at all.
+  const composeFromDictation = (finals, interim) => {
+    setText([dictationBaseTextRef.current, finals, interim].filter(Boolean).join(" "));
+  };
+
+  const tryStartNativeDictation = async () => {
+    dictationBaseTextRef.current = text;
+    dictationVoiceRef.current = "";
+    dictationInterimRef.current = "";
+    try {
+      if (!(await nativeSpeechAvailable())) return false;
+      const ctl = await startNativeDictation({
+        language: "en-IN",
+        onPartial: (partial) => {
+          dictationInterimRef.current = partial;
+          composeFromDictation(dictationVoiceRef.current, partial);
+        },
+        onResult: (finalText) => {
+          dictationVoiceRef.current = finalText;
+          dictationInterimRef.current = "";
+          composeFromDictation(finalText, "");
+        },
+        onError: (data) => {
+          const code = data?.error;
+          // Permission issues deserve a nudge; "nothing said" or a busy engine
+          // just end silently so the composer isn't left confusing the user.
+          if (code === "insufficient-permissions" || code === "audio") {
+            toast.error("Microphone access was blocked");
+          }
+        },
+        onEnd: () => {
+          // Session over (release, or the engine gave up): keep whatever was
+          // recognized — including the last partial if no final ever arrived.
+          composeFromDictation(dictationVoiceRef.current, dictationInterimRef.current);
+          dictationInterimRef.current = "";
+          const c = dictationNativeRef.current;
+          dictationNativeRef.current = null;
+          c?.remove?.();
+          setIsDictating(false);
+          dictationActiveRef.current = false;
+          sendTypingStatus(false);
+        },
+      });
+      dictationNativeRef.current = ctl;
+      dictationStartedAtRef.current = Date.now();
+      setIsDictating(true);
+      dictationActiveRef.current = true;
+      sendTypingStatus("recording");
+      haptic("tap");
+      return true;
+    } catch (err) {
+      console.warn("[dictation] native recognizer unavailable:", err);
+      const c = dictationNativeRef.current;
+      dictationNativeRef.current = null;
+      try { c?.remove?.(); } catch { /* already torn down */ }
+      setIsDictating(false);
+      dictationActiveRef.current = false;
+      return false;
+    }
+  };
+
   const startLiveDictation = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return false;
@@ -950,6 +1013,7 @@ const MessageInput = () => {
   };
 
   const startDictation = async () => {
+    if (await tryStartNativeDictation()) return;
     if (startLiveDictation()) return;
 
     try {
@@ -984,6 +1048,12 @@ const MessageInput = () => {
   };
 
   const stopDictation = () => {
+    if (dictationNativeRef.current) {
+      // stopListening() reports the final result, then "end" fires: it commits
+      // the text and tears the session down.
+      dictationNativeRef.current?.stop?.();
+      return;
+    }
     if (dictationLiveRef.current) {
       stopLiveDictation();
       return;

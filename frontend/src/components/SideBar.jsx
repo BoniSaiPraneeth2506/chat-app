@@ -358,6 +358,7 @@
 import { useEffect, useLayoutEffect, useState, useRef } from "react";
 import { useChatStore } from "../store/useChatStore";
 import useAuthStore from "../store/useAuthStore";
+import { useKeyboardOpen } from "../hooks/useKeyboardOpen";
 import { useGroupStore } from "../store/useGroupStore";
 import SidebarSkeleton from "./skeletons/SidebarSkeleton";
 import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus, Lock, 
@@ -448,6 +449,11 @@ const SideBar = () => {
   const channelScreenOpen = useChannelStore(
     (s) => s.isChannelFeedOpen || s.isChannelInfoOpen
   );
+
+  // Never let the bottom tab bar float above the keyboard. When typing (home
+  // search, status composer…) the bar slides away for the keyboard's duration,
+  // like real chat apps; the content column takes its place.
+  const { isKeyboardOpen } = useKeyboardOpen();
 
   const { onlineUsers, authUser } = useAuthStore();
 
@@ -1460,9 +1466,10 @@ const SideBar = () => {
       {/* Mobile: bottom tab bar (hidden on desktop) — a clean segmented bar
           with an animated active pill, so it reads modern on small screens.
           Hidden while a channel feed / channel-info is open, so the channel
-          feels full-screen like a direct chat. */}
+          feels full-screen like a direct chat. It also steps aside while the
+          keyboard is up, so it never rides above the keys. */}
       {!channelScreenOpen && (
-      <div className="flex lg:hidden items-stretch flex-shrink-0 px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-1.5 z-10">
+      <div className={`${isKeyboardOpen ? "hidden" : "flex"} lg:hidden items-stretch flex-shrink-0 px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-1.5 z-10`}>
         <div className="relative flex flex-1 bg-base-200/90 backdrop-blur-md rounded-2xl border border-base-300/80 p-1 shadow-sm">
           {/* Animated active pill slides behind the selected tab */}
           <span

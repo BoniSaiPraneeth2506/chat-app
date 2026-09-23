@@ -794,8 +794,11 @@ const ChatContainer = () => {
   const scrollToMessage = (messageId) => {
     const element = document.getElementById(`msg-${messageId}`);
     if (element) {
+      // A jump into history is exactly "reading the past": clear the near-bottom
+      // flag so a message landing meanwhile never drags the view back down.
+      isNearBottomRef.current = false;
       element.scrollIntoView({ behavior: "smooth", block: "center" });
-      
+
       element.classList.add("msg-jump");
       setTimeout(() => {
         element.classList.remove("msg-jump");
@@ -1239,9 +1242,12 @@ const ChatContainer = () => {
   }, [messages, selectedUser?._id, selectedGroup, authUser?._id]);
 
   // An edit leaves the list the same length, so the normal
-  // new-message autoscroll never fires. Follow the store's explicit request.
+  // new-message autoscroll never fires. Follow the store's explicit request —
+  // but only when the reader is already at the newest message; someone reading
+  // history stays where they are. (Own sends are covered by the layout effect.)
   useEffect(() => {
     if (!scrollToBottomSignal) return;
+    if (!isNearBottomRef.current) return;
     messageEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [scrollToBottomSignal]);
 
@@ -1493,6 +1499,9 @@ const ChatContainer = () => {
       const target = document.getElementById(`msg-${pendingScrollId}`);
       if (target) {
         target.scrollIntoView({ behavior: "auto", block: "center" });
+        // Reading a window from the past — any message arriving after this jump
+        // must leave the view exactly where it is (Jump-to-latest pill returns).
+        isNearBottomRef.current = false;
         target.classList.add("msg-jump");
         setTimeout(() => target.classList.remove("msg-jump"), 1500);
       }
