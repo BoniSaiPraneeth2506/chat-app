@@ -242,7 +242,8 @@ export const useChannelStore = create((set, get) => ({
       const res = await axiosInstance.get(`/channels/${channelId}/posts`, { params: { page, limit: 20 } });
       const incoming = res.data?.posts || [];
       set((state) => ({
-        posts: append ? [...state.posts, ...incoming] : incoming,
+        // Posts are chat-ordered (oldest → newest): older pages go to the top.
+        posts: append ? [...incoming, ...state.posts] : incoming,
         hasMore: res.data?.hasMore || false,
         isPostsLoading: false,
       }));
@@ -272,7 +273,14 @@ export const useChannelStore = create((set, get) => ({
     const res = await axiosInstance.post(`/channels/${channelId}/posts`, payload);
     const newPost = res.data;
     if (get().activeChannelId === channelId) {
-      set({ posts: [newPost, ...get().posts] });
+      // Append at the bottom (chat-style). Dedupe: the author's own socket
+      // "channel:postCreated" event can arrive before/after this response and
+      // would otherwise render the post twice.
+      set((state) => ({
+        posts: state.posts.some((p) => p._id === newPost._id)
+          ? state.posts
+          : [...state.posts, newPost],
+      }));
       // Keep the joined list sorted so the just-posted channel bumps to the top.
       set({ channels: [...get().channels] });
     }
@@ -287,9 +295,9 @@ export const useChannelStore = create((set, get) => ({
   pinPost: async (channelId, postId, pinned) => {
     await axiosInstance.post(`/channels/${channelId}/posts/${postId}/pin`, { pinned });
     set({
-      posts: get().posts
-        .map((p) => (p._id === postId ? { ...p, pinned } : p))
-        .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)),
+      // Keep chat chronology — a pinned post only toggles its flag instead of
+      // jumping out of the feed and breaking the oldest → newest order.
+      posts: get().posts.map((p) => (p._id === postId ? { ...p, pinned } : p)),
     });
   },
 
@@ -343,7 +351,8 @@ export const useChannelStore = create((set, get) => ({
       const pid = post?.channel?._id || post?.channel;
       if (activeChannelId && pid && String(pid) === String(activeChannelId)) {
         if (!posts.some((p) => p._id === post._id)) {
-          set({ posts: [post, ...posts] });
+          // Chat-style: append the newest post at the bottom, above the input.
+          set({ posts: [...posts, post] });
         }
       }
       // A channel somebody posts to bumps to the top of the joined list.

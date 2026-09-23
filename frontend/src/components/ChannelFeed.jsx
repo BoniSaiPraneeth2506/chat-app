@@ -46,6 +46,8 @@ const ChannelFeed = () => {
   const [activeReactionPostId, setActiveReactionPostId] = useState(null);
   const fileRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const feedRef = useRef(null);
+  const feedScrolledToBottomRef = useRef(true);
 
   const channel = selectedChannel;
   const channelId = channel?._id;
@@ -69,6 +71,25 @@ const ChannelFeed = () => {
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelId, recentPosts.length]);
+
+  // Chat-style feed: open scrolled to the newest post (bottom) and keep
+  // following new posts while the reader is already at the bottom — never yank
+  // someone who is scrolled up reading older broadcasts.
+  useEffect(() => {
+    feedScrolledToBottomRef.current = false;
+  }, [channelId]);
+
+  useEffect(() => {
+    const el = feedRef.current;
+    if (!el || recentPosts.length === 0) return;
+    if (!feedScrolledToBottomRef.current) {
+      feedScrolledToBottomRef.current = true;
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
   }, [channelId, recentPosts.length]);
 
   if (!channel) {
@@ -386,6 +407,7 @@ const ChannelFeed = () => {
 
       {/* Posts Feed Area (rendered as Chat Broadcast Bubbles) */}
       <div 
+        ref={feedRef}
         className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-4"
         style={wallpaperStyle}
       >
@@ -421,10 +443,10 @@ const ChannelFeed = () => {
               <div
                 id={`channel-post-${post._id}`}
                 key={post._id}
-                className="mx-auto max-w-2xl w-full"
+                className="mx-auto max-w-2xl w-full border-b border-base-300/40 pb-4 last:border-b-0"
               >
                 {/* Broadcast Message Bubble */}
-                <div className="rounded-3xl bg-base-100/95 backdrop-blur-md border border-base-300/70 p-4 shadow-sm hover:border-base-300 transition-all duration-200 space-y-3">
+                <div className="space-y-3">
                   {/* Top Bar of Bubble: Channel/Author identity + Pin indicator + Time */}
                   <div className="flex items-center justify-between gap-2 border-b border-base-300/40 pb-2.5">
                     <div className="flex items-center gap-2 min-w-0">
@@ -462,7 +484,7 @@ const ChannelFeed = () => {
 
                   {/* Media Content */}
                   {post.media?.key && (
-                    <div className="rounded-2xl overflow-hidden bg-base-200 border border-base-300/60 relative">
+                    <div className="relative">
                       {post.media?.url ? (
                         post.media.type === "video" ? (
                           <video

@@ -1203,10 +1203,13 @@ const SideBar = () => {
     >
       {/* Fixed bottom tab bar spacer — on mobile the tab bar is fixed to the
           physical bottom of the screen, so we need to push content up by the
-          tab bar height. On desktop the tab rail is vertical so no spacer needed. */}
+          tab bar height. On desktop the tab rail is vertical so no spacer needed.
+          While a channel feed/info is full-screen the tab bar itself is hidden,
+          so the spacer must go too — otherwise a blank strip sits below the
+          channel composer instead of it resting flush at the screen bottom. */}
       {/* Desktop vertical rail + content row. The rail sits on the left edge
           like WhatsApp; on mobile the tab bar is fixed at the physical bottom. */}
-      <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden pb-[4.5rem] lg:pb-0">
+      <div className={`flex-1 flex min-h-0 min-w-0 overflow-hidden ${channelScreenOpen ? "pb-0" : "pb-[4.5rem] lg:pb-0"}`}>
         {/* Desktop: vertical tab rail on the left edge of the sidebar */}
         <div className="hidden lg:flex flex-col items-center flex-shrink-0 w-14 py-2 z-10 border-r border-base-300 bg-base-100">
           {([

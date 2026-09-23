@@ -755,9 +755,11 @@ export const getChannelPosts = async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
     const skip = (page - 1) * limit;
 
+    // Chat-style ordering: oldest first so the newest post sits right above
+    // the composer, like messages in a normal chat. Pinned posts stay on top.
     const posts = await ChannelPost.find({ channel: channelId })
       .populate("author", "fullName profilePic")
-      .sort({ pinned: -1, createdAt: -1 })
+      .sort({ pinned: -1, createdAt: 1 })
       .skip(skip)
       .limit(limit)
       .lean();

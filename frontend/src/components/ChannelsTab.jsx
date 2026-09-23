@@ -88,7 +88,7 @@ const ChannelsTab = () => {
             openChannel(channel._id);
           }
         }}
-        className="mx-2 my-1 px-3 py-2.5 rounded-2xl flex items-center gap-3 bg-base-100 hover:bg-base-200/60 border border-base-300/40 hover:border-base-300 transition-all duration-200 group cursor-pointer select-none active:scale-[0.99]"
+        className="px-3 py-3 flex items-center gap-3 bg-transparent hover:bg-base-200/50 transition-colors duration-150 group cursor-pointer select-none border-b border-base-300/40"
       >
         {/* Channel Avatar with subtle status border */}
         <div className="relative flex-shrink-0">
