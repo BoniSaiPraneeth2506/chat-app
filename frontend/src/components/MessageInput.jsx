@@ -98,13 +98,22 @@ const MessageInput = () => {
   const [hdQuality] = useState(
     () => localStorage.getItem("chat-hd-quality") === "1"
   );
-  // Long-press voice dictation (tap = voice note, hold = speak-to-text)
+  // Long-press voice dictation (tap = voice note, hold = speak-to-text).
+  // Where the Web Speech API exists (Chrome / Android Chrome), words stream
+  // straight into the composer as they are said; otherwise a MediaRecorder
+  // clip is transcribed once on release, exactly as before.
   const [isDictating, setIsDictating] = useState(false);
   const dictationRecorderRef = useRef(null);
   const dictationStreamRef = useRef(null);
   const dictationChunksRef = useRef([]);
   const dictationLongPressRef = useRef(null);
   const dictationActiveRef = useRef(false);
+  const dictationLiveRef = useRef(null); // SpeechRecognition instance
+  const dictationStartedAtRef = useRef(0);
+  const dictationReleasedAtRef = useRef(0);
+  const dictationBaseTextRef = useRef(""); // composer text when dictation began
+  const dictationVoiceRef = useRef(""); // recognised words (final results)
+  const dictationInterimRef = useRef(""); // words still being recognised
   // Poll composer
   const [showPollModal, setShowPollModal] = useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
@@ -856,15 +865,102 @@ const MessageInput = () => {
 
   // ── Voice dictation (long-press the mic) ──────────────────────────────────
   //
-  // A separate MediaRecorder from the voice-note path: while the mic is held,
-  // whatever is said is captured; on release the clip is transcribed through
-  // /api/ai/speech-to-text (Sarvam saaras:v3) and appended into the composer.
-  // The stream is torn down immediately so the mic indicator never lingers.
+  // Preferred path: the Web Speech API, which hands words back live — every
+  // result rebuilds the composer text from the recogniser's full transcript so
+  // what you said enters the input as you are still saying it (finals stay,
+  // half-spoken words flash in and settle). If the WebView has no Speech
+  // Recognition, it falls back to a MediaRecorder clip that is transcribed
+  // once on release through /api/ai/speech-to-text (Sarvam saaras:v3).
+  const startLiveDictation = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return false;
+    try {
+      const rec = new SR();
+      rec.lang = "en-IN";
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.maxAlternatives = 1;
+
+      dictationBaseTextRef.current = text;
+      dictationVoiceRef.current = "";
+      dictationInterimRef.current = "";
+
+      rec.onresult = (e) => {
+        // Rebuild the whole recognised text every event — no accumulation, so
+        // a word that goes interim→final can only ever appear once.
+        let finals = "";
+        let interim = "";
+        for (let i = 0; i < e.results.length; i++) {
+          const alt = e.results[i]?.[0];
+          const chunk = (alt?.transcript || "").trim();
+          if (!chunk) continue;
+          if (e.results[i].isFinal) finals += (finals ? " " : "") + chunk;
+          else interim += (interim ? " " : "") + chunk;
+        }
+        dictationVoiceRef.current = finals;
+        dictationInterimRef.current = interim;
+        setText([dictationBaseTextRef.current, finals, interim].filter(Boolean).join(" "));
+      };
+
+      rec.onerror = (e) => {
+        const code = e?.error;
+        if (code === "not-allowed" || code === "service-not-allowed") {
+          toast.error("Microphone access was blocked");
+        }
+        // no-speech / aborted / audio-capture end silently — onend finalises.
+      };
+
+      rec.onend = () => {
+        // The recogniser may end without a final event for the last words; keep
+        // whatever was heard either way, then release the UI.
+        setText([dictationBaseTextRef.current, dictationVoiceRef.current, dictationInterimRef.current].filter(Boolean).join(" "));
+        dictationInterimRef.current = "";
+        if (dictationLiveRef.current === rec) dictationLiveRef.current = null;
+        setIsDictating(false);
+        dictationActiveRef.current = false;
+        sendTypingStatus(false);
+      };
+
+      rec.start();
+      dictationLiveRef.current = rec;
+      dictationStartedAtRef.current = Date.now();
+      setIsDictating(true);
+      dictationActiveRef.current = true;
+      haptic("tap");
+      return true;
+    } catch (err) {
+      console.error("Live dictation failed to start:", err);
+      dictationLiveRef.current = null;
+      setIsDictating(false);
+      dictationActiveRef.current = false;
+      return false;
+    }
+  };
+
+  const stopLiveDictation = () => {
+    const rec = dictationLiveRef.current;
+    if (!rec) return;
+    try {
+      rec.stop(); // onend commits the final text and releases the UI
+    } catch {
+      dictationLiveRef.current = null;
+      setIsDictating(false);
+      dictationActiveRef.current = false;
+    }
+  };
+
   const startDictation = async () => {
+    if (startLiveDictation()) return;
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       dictationChunksRef.current = [];
-      const mediaRecorder = new MediaRecorder(stream);
+      const mime =
+        typeof MediaRecorder.isTypeSupported === "function"
+          && MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm";
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: mime });
       dictationRecorderRef.current = mediaRecorder;
       dictationStreamRef.current = stream;
       mediaRecorder.ondataavailable = (event) => {
@@ -874,7 +970,7 @@ const MessageInput = () => {
         stream.getTracks().forEach((t) => t.stop());
         dictationStreamRef.current = null;
         dictationRecorderRef.current = null;
-        finishDictation();
+        finishDictation(mime);
       };
       mediaRecorder.start();
       setIsDictating(true);
@@ -888,16 +984,20 @@ const MessageInput = () => {
   };
 
   const stopDictation = () => {
+    if (dictationLiveRef.current) {
+      stopLiveDictation();
+      return;
+    }
     const rec = dictationRecorderRef.current;
     if (rec && rec.state !== "inactive") rec.stop();
-    else finishDictation();
+    else finishDictation("audio/webm");
   };
 
-  const finishDictation = async () => {
+  const finishDictation = async (mime) => {
     setIsDictating(false);
     dictationActiveRef.current = false;
     sendTypingStatus(false);
-    const blob = new Blob(dictationChunksRef.current, { type: "audio/webm" });
+    const blob = new Blob(dictationChunksRef.current, { type: mime });
     dictationChunksRef.current = [];
     if (blob.size === 0) return;
     try {
@@ -907,7 +1007,7 @@ const MessageInput = () => {
         reader.onerror = reject;
         reader.readAsDataURL(blob);
       });
-      const { text: spoken } = await transcribeSpeech(base64Audio);
+      const { text: spoken } = await transcribeSpeech(base64Audio, mime);
       if (spoken && spoken.trim()) {
         setText((prev) => (prev.trim() ? `${prev.replace(/\s+$/, "")} ${spoken.trim()}` : spoken.trim()));
       }
@@ -933,6 +1033,16 @@ const MessageInput = () => {
     if (dictationLongPressRef.current) {
       clearTimeout(dictationLongPressRef.current);
       dictationLongPressRef.current = null;
+    }
+  };
+
+  // Releasing the press commits whatever was recognised. Remembers the moment
+  // so the synthetic click that follows a long-press never sends or re-triggers.
+  const releaseDictation = () => {
+    dictationHoldEnd();
+    if (dictationActiveRef.current) {
+      stopDictation();
+      dictationReleasedAtRef.current = Date.now();
     }
   };
 
@@ -1533,17 +1643,27 @@ const MessageInput = () => {
                 dictationHoldStart(e);
               }
             }}
-            onMouseUp={() => { dictationHoldEnd(); if (dictationActiveRef.current) stopDictation(); }}
+            onMouseUp={releaseDictation}
             onMouseLeave={dictationHoldEnd}
             onTouchStart={() => {
               if (!text.trim() && imagePreviews.length === 0 && !stagedFile && !isSendingAnimation) {
                 dictationHoldStart();
               }
             }}
-            onTouchEnd={() => { dictationHoldEnd(); if (dictationActiveRef.current) stopDictation(); }}
+            onTouchEnd={releaseDictation}
             onClick={(e) => {
               if (dictationActiveRef.current) {
                 stopDictation();
+                return;
+              }
+              // The click a long-press emits on release must not send the text
+              // it just dictated, or start a voice note over it.
+              if (Date.now() - dictationReleasedAtRef.current < 600) {
+                e.preventDefault();
+                return;
+              }
+              if (dictationStartedAtRef.current && Date.now() - dictationStartedAtRef.current < 800) {
+                e.preventDefault();
                 return;
               }
               if (!text.trim() && imagePreviews.length === 0 && !stagedFile && !isSendingAnimation) {

@@ -1514,8 +1514,16 @@ const ChatContainer = () => {
         messageEndRef.current.scrollIntoView({ behavior: "auto" });
       }
     } else if (latestMessageId !== lastMessageIdRef.current) {
-      if (messageEndRef.current) {
-        messageEndRef.current.scrollIntoView({ behavior: "smooth" });
+      // A newer message arrived. Only chase it when the reader is already near
+      // the newest message (or sent it themselves) — someone scrolling history
+      // stays exactly where they are, like every real chat app, and reaches the
+      // gap with the Jump-to-latest pill instead.
+      const sender = latestMessage?.senderId?._id || latestMessage?.senderId;
+      const fromMe = Boolean(sender && sender === authUser?._id);
+      if (isNearBottomRef.current || fromMe) {
+        if (messageEndRef.current) {
+          messageEndRef.current.scrollIntoView({ behavior: "smooth" });
+        }
       }
     }
 
