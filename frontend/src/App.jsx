@@ -78,6 +78,7 @@ import CreateGroupModal from './components/CreateGroupModal'
 import GroupDetailsModal from './components/GroupDetailsModal'
 import GroupWelcomeSheet from './components/GroupWelcomeSheet'
 import LockedChatsModal from './components/LockedChatsModal'
+import AppLockGate from './components/AppLockGate'
 import { useChatLockStore } from './store/useChatLockStore'
 import AboutPage from './pages/AboutPage'
 import GroupCallModal from './components/GroupCallModal'
@@ -810,6 +811,12 @@ const App = () => {
       {/* Rendered at the app root so the gesture works from anywhere and the
           sheet is never clipped by a panel. It returns null unless opened. */}
       <LockedChatsModal />
+
+      {/* App lock launch gate. Sits above the locked-chats sheet (z-[300]) so it
+          covers the whole app the moment the lock is on and this launch has not
+          unlocked yet. Returns null in the common case (lock off, or already
+          unlocked this launch), so it costs nothing unless actually gating. */}
+      <AppLockGate />
 
       {/* Welcome/rules, shown once per member per group. Rendered here rather
           than inside the chat so it survives the chat remounting, and only when
