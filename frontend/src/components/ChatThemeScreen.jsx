@@ -11,7 +11,12 @@ const THEMES = [
   { id: "sunset", name: "Sunset" },
 ];
 
-const isCustomWallpaper = (w) => Boolean(w && typeof w === "string" && w.startsWith("data:"));
+const isCustomWallpaper = (w) =>
+  Boolean(
+    w &&
+      typeof w === "string" &&
+      (w.startsWith("data:") || w.startsWith("http://") || w.startsWith("https://"))
+  );
 
 const ChatThemePreview = ({ style }) => (
   <div
