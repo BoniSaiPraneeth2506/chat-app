@@ -36,7 +36,7 @@ const TABS = [
   { id: "audio", label: "Audio", Icon: Mic },
 ];
 
-const MediaGallerySheet = ({ userId, contactName, onClose, onOpenImage, initialTab = "media" }) => {
+const MediaGallerySheet = ({ userId, contactName, onClose, onOpenImage, onOpenVideo, initialTab = "media" }) => {
   const [tab, setTab] = useState(initialTab);
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
@@ -81,6 +81,24 @@ const MediaGallerySheet = ({ userId, contactName, onClose, onOpenImage, initialT
       window.open(url, "_blank", "noopener");
     } catch {
       setError("This file is no longer available");
+      setTimeout(() => setError(""), 2500);
+    } finally {
+      setBusyKey("");
+    }
+  };
+
+  // Sign the video and hand it to the app's lightbox, so tapping a tile here
+  // behaves like tapping media in the chat (full-screen player) instead of
+  // bouncing to a new tab.
+  const openVideo = async (item) => {
+    if (busyKey) return;
+    setBusyKey(item._id);
+    try {
+      const url = await fetchAttachmentUrl(item.messageId, item.key);
+      if (!url) throw new Error("no url");
+      onOpenVideo?.(url);
+    } catch {
+      setError("This video is no longer available");
       setTimeout(() => setError(""), 2500);
     } finally {
       setBusyKey("");
@@ -176,7 +194,7 @@ const MediaGallerySheet = ({ userId, contactName, onClose, onOpenImage, initialT
                   <button
                     key={item._id}
                     type="button"
-                    onClick={() => openDocument(item)}
+                    onClick={() => openVideo(item)}
                     title="Play video"
                     className="relative overflow-hidden transition-transform rounded-lg aspect-square bg-black active:scale-95 group"
                   >
@@ -189,12 +207,20 @@ const MediaGallerySheet = ({ userId, contactName, onClose, onOpenImage, initialT
                       />
                     ) : (
                       <span className="w-full h-full grid place-items-center bg-base-200">
-                        <Play size={16} className="text-base-content/50" />
+                        {busyKey === item._id ? (
+                          <Loader size={16} className="animate-spin text-base-content/50" />
+                        ) : (
+                          <Play size={16} className="text-base-content/50" />
+                        )}
                       </span>
                     )}
                     <span className="absolute inset-0 grid place-items-center">
                       <span className="grid place-items-center size-8 rounded-full bg-black/55 backdrop-blur-sm text-white">
-                        <Play size={15} className="ml-0.5" />
+                        {busyKey === item._id ? (
+                          <Loader size={15} className="animate-spin" />
+                        ) : (
+                          <Play size={15} className="ml-0.5" />
+                        )}
                       </span>
                     </span>
                   </button>

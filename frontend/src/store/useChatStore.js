@@ -395,8 +395,16 @@ export const useChatStore = create((set, get) => ({
   // inferred from the message, because the lightbox is also used for avatars
   // and ordinary photos, which should stay screenshot-able.
   lightboxSecure: false,
-  setLightboxImage: (lightboxImage, { secure = false } = {}) =>
-    set({ lightboxImage, lightboxSecure: Boolean(lightboxImage) && secure }),
+  // Whether the lightbox content is a video rather than a photo. The lightbox
+  // is opened for chat photos, avatars, gallery tiles and — now — gallery
+  // videos, so it needs to know which player to render.
+  lightboxVideo: false,
+  setLightboxImage: (lightboxImage, { secure = false, video = false } = {}) =>
+    set({
+      lightboxImage,
+      lightboxSecure: Boolean(lightboxImage) && secure,
+      lightboxVideo: Boolean(lightboxImage) && video,
+    }),
 
   drafts: {},
   setDraft: (userId, text) => set((state) => ({

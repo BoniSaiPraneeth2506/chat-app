@@ -544,6 +544,9 @@ const ChatContainer = () => {
   const activeLoading = selectedGroup ? isGroupMessagesLoading : isMessagesLoading;
   const activeWallpaper = authUser?.chatWallpapers?.[selectedUser?._id] || selectedUser?.chatWallpapers?.[authUser?._id] || wallpaper;
   const messageEndRef = useRef(null);
+  // Anchor for the chat panel-scoped overlays (Chat Theme / Bubble Theme /
+  // wallpaper dimness) so they never cover the desktop sidebar.
+  const overlayRef = useRef(null);
   const scrollableRef = useRef(null);
   const prevMessagesLengthRef = useRef(0);
   const lastMessageIdRef = useRef(null);
@@ -1542,10 +1545,10 @@ const ChatContainer = () => {
   }, [activeMessages, pendingScrollId]);
 
   return (
-    <div className="flex-1 flex h-full max-h-full overflow-hidden relative">
+    <div ref={overlayRef} className="flex-1 flex h-full max-h-full overflow-hidden relative">
       {/* Left Column: Chat View */}
       <div className="flex-1 flex flex-col h-full max-h-full overflow-hidden bg-base-100">
-        <ChatHeader />
+        <ChatHeader overlayRef={overlayRef} />
 
         {/* Pinned Message Sticky Banner */}
         {pinnedMessage && !pinnedMessage.isDeletedForEveryone && (
@@ -2383,6 +2386,7 @@ const ChatContainer = () => {
             setIsGalleryOpen(false);
           }}
           onOpenImage={(url) => setLightboxImage(url)}
+          onOpenVideo={(url) => setLightboxImage(url, { video: true })}
         />
       )}
 

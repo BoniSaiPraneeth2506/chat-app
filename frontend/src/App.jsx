@@ -213,6 +213,7 @@ const App = () => {
     unreadCounts,
     lightboxImage,
     lightboxSecure,
+    lightboxVideo,
     setLightboxImage,
     selectedUser,
     setSelectedUser,
@@ -723,11 +724,13 @@ const App = () => {
         </div>
       )}
 
-      {/* Expanded Lightbox Modal to see the full profile picture */}
+      {/* Media lightbox — opens chat photos, avatars and gallery tiles above
+          every overlay below it (the media gallery sheet itself lives at
+          z-[200], so this must sit higher). */}
       {lightboxImage && (
         <div 
           onClick={() => setLightboxImage(null)}
-          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in duration-200 select-none"
+          className="fixed inset-0 z-[220] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in duration-200 select-none"
         >
           {/* Close button top right */}
           <button 
@@ -744,12 +747,23 @@ const App = () => {
             {/* No forced aspect ratio. This started life as a profile-picture
                 viewer, where square was fine, but it now opens chat photos too —
                 and aspect-square letterboxed every portrait and landscape shot
-                into a square instead of using the screen. */}
-            <img
-              src={lightboxImage}
-              alt="Expanded"
-              className="block max-w-full max-h-[85vh] w-auto h-auto object-contain"
-            />
+                into a square instead of using the screen. Video opens here the
+                same way, with the native player on top of the photo viewer. */}
+            {lightboxVideo ? (
+              <video
+                src={lightboxImage}
+                controls
+                autoPlay
+                playsInline
+                className="block max-w-full max-h-[85vh] w-auto h-auto rounded-xl bg-black"
+              />
+            ) : (
+              <img
+                src={lightboxImage}
+                alt="Expanded"
+                className="block max-w-full max-h-[85vh] w-auto h-auto object-contain"
+              />
+            )}
           </div>
         </div>
       )}

@@ -75,7 +75,7 @@
 // };
 // export default ChatHeader;
 
-import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, Image, CheckSquare, Users, Info, Mic, MicOff, Maximize2, CornerUpLeft, Pin, Trash2, Forward, Pencil, Tag, Download, Copy, Sparkles, BellOff, Bell } from "lucide-react";
+import { X, ArrowLeft, Bookmark, Clock, Search, Phone, Video, UserX, UserCheck, MoreVertical, Palette, CheckSquare, Users, Info, Mic, MicOff, Maximize2, CornerUpLeft, Pin, Trash2, Forward, Pencil, Tag, Download, Copy, Sparkles, BellOff, Bell, ChevronRight } from "lucide-react";
 import { useNicknames, displayNameOf, hasNickname } from "../lib/contacts";
 import { saveTextFile } from "../lib/download";
 import { copyText, messagesToClipboardText } from "../lib/clipboard";
@@ -84,14 +84,23 @@ import { isChatMuted, muteConversation, unmuteConversation } from "../lib/mute";
 import { getConvAutoTranslate, setConvAutoTranslate } from "../lib/translatePrefs";
 import { AI_LANGUAGES, languageName } from "../lib/sarvamApi";
 import { scheduleReminder } from "../lib/reminders";
+import {
+  getSavedMessages,
+  toggleSaveMessage,
+  removeSavedMessage,
+} from "../lib/savedMessages";
 import MessageInfoSheet from "./MessageInfoSheet";
 import AiActionMenu from "./ai/AiActionMenu";
+import ChatThemeScreen from "./ChatThemeScreen";
+import BubbleThemeScreen from "./BubbleThemeScreen";
+import SavedMessagesScreen from "./SavedMessagesScreen";
 import axiosInstance from "../lib/axios";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
 import { useGroupStore } from "../store/useGroupStore";
-import { useThemeStore, BUBBLE_STYLES } from "../store/useThemeStore";
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useThemeStore } from "../store/useThemeStore";
+import { Fragment, useState, useRef, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
 
 const formatLastSeen = (lastSeenTime) => {
@@ -118,7 +127,7 @@ const formatLastSeen = (lastSeenTime) => {
   return `${pad(date.getDate())}/${pad(date.getMonth() + 1)} at ${timeStr}`;
 };
 
-const ChatHeader = () => {
+const ChatHeader = ({ overlayRef }) => {
   const {
     selectedUser,
     setSelectedUser,
@@ -158,6 +167,15 @@ const ChatHeader = () => {
   const { bubbleOverrides, setBubbleOverride } = useThemeStore();
   const bubbleConvKey = selectedGroup?._id || selectedUser?._id || "";
   const selectedBubblePreset = bubbleOverrides[bubbleConvKey] || "auto";
+  const [savedScreenOpen, setSavedScreenOpen] = useState(false);
+  const [savedTick, setSavedTick] = useState(0);
+  // Saved messages for this conversation (re-read when savedTick changes).
+  const savedMessages = useMemo(
+    () => getSavedMessages(bubbleConvKey),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bubbleConvKey, savedTick]
+  );
+  const savedIds = useMemo(() => new Set(savedMessages.map((m) => m.messageId)), [savedMessages]);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const { callState, isScreenSharing, toggleLocalMute, toggleScreenShare, isMuted } = useChatStore();
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
@@ -167,6 +185,8 @@ const ChatHeader = () => {
   const [pendingWallpaper, setPendingWallpaper] = useState(null);
   const [dimLevel, setDimLevel] = useState(35);
   const [infoMessageId, setInfoMessageId] = useState(null);
+  const [themeScreenOpen, setThemeScreenOpen] = useState(false);
+  const [bubbleScreenOpen, setBubbleScreenOpen] = useState(false);
 
   // The overflow tray must stay open while the AI sub-menu (language list) is
   // shown. DaisyUI's default focus-based dropdown closes the instant you click
@@ -217,6 +237,11 @@ const ChatHeader = () => {
   const isOnline = onlineUsers.includes(selectedUser?._id);
   const mutedConvId = selectedGroup ? selectedGroup._id : selectedUser?._id;
   const chatIsMuted = isChatMuted(mutedConvId);
+  // Per-chat wallpaper currently stored on the server for this conversation
+  // (matches ChatContainer's resolution: either side of the pair wins).
+  const activeChatWall =
+    authUser?.chatWallpapers?.[selectedUser?._id] ||
+    selectedUser?.chatWallpapers?.[authUser?._id];
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const autoTranslatePref = useMemo(
     () => getConvAutoTranslate(mutedConvId || ""),
@@ -272,6 +297,23 @@ const ChatHeader = () => {
     if (ok) toast.success(copyableCount > 1 ? `${copyableCount} messages copied` : "Copied");
     else toast.error("Couldn't copy");
     exitSelection();
+  };
+
+  // Gallery upload for the Chat Theme screen — reads the picture to a data URL
+  // and hands it to the existing dimness assistant (same flow as before).
+  const handleGalleryFile = (file) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image size must be less than 5MB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setPendingWallpaper(reader.result);
+      setDimLevel(35);
+    };
+    reader.readAsDataURL(file);
   };
 
   if (isSelectionMode) {
@@ -454,6 +496,23 @@ const ChatHeader = () => {
                     </button>
                   </li>
                 )}
+                <li>
+                  <button
+                    onClick={() => {
+                      haptic("tap");
+                      toggleSaveMessage(bubbleConvKey, soleSelected, authUser?._id);
+                      setSavedTick((t) => t + 1);
+                      setMoreMenuOpen(false);
+                      exitSelection();
+                    }}
+                    className={`hover:bg-base-200 py-2 text-left font-medium flex items-center gap-2 ${
+                      savedIds.has(soleSelected._id) ? "text-amber-600" : ""
+                    }`}
+                  >
+                    <Bookmark size={14} />
+                    {savedIds.has(soleSelected._id) ? "Saved (tap to unsave)" : "Save message"}
+                  </button>
+                </li>
                 <li>
                   <details className="text-xs">
                     <summary className="hover:bg-base-200 py-2 text-left font-medium flex items-center gap-2 cursor-pointer">
@@ -751,129 +810,26 @@ const ChatHeader = () => {
                 tabIndex={0}
                 className="dropdown-content z-50 menu p-2 shadow-2xl bg-base-100 border border-base-300 rounded-2xl w-56 text-xs text-base-content mt-1 space-y-1"
               >
-                <li className="menu-title text-[10px] uppercase tracking-wider font-bold px-2 py-1 select-none flex items-center gap-1">
-                  <Palette size={12} />
-                  Chat Theme
-                </li>
+{/* Select Messages */}
                 <li>
-                  <label className="flex items-center justify-between py-2 px-3 rounded-xl text-primary text-xs font-semibold cursor-pointer transition-colors mb-1">
-                    <div className="flex items-center gap-2">
-                      <Image size={14} />
-                      <span>Upload from Gallery</span>
-                    </div>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          if (file.size > 5 * 1024 * 1024) {
-                            toast.error("Image size must be less than 5MB");
-                            return;
-                          }
-                          const reader = new FileReader();
-                          reader.onloadend = () => {
-                            setPendingWallpaper(reader.result);
-                            setDimLevel(35);
-                            document.activeElement.blur();
-                          };
-                          reader.readAsDataURL(file);
-                        }
-                      }}
-                    />
-                  </label>
+                  <button
+                    onClick={() => {
+                      setSelectionMode(!isSelectionMode);
+                      document.activeElement.blur();
+                    }}
+                    className="flex items-center gap-2.5 py-2 px-3 rounded-lg text-xs hover:bg-base-200 transition-colors w-full text-left text-base-content"
+                  >
+                    <CheckSquare size={15} className="shrink-0" />
+                    <span className="flex-1">{isSelectionMode ? "Cancel Selection" : "Select Messages"}</span>
+                  </button>
                 </li>
-                {[
-                  { id: "default", name: "Default", color: "bg-base-300" },
-                  { id: "sage", name: "Sage", color: "bg-[#e5ddd5]" },
-                  { id: "sky", name: "Sky", color: "bg-[#d4e6f1]" },
-                  { id: "lavender", name: "Lavender", color: "bg-[#ebdef0]" },
-                  { id: "sunset", name: "Sunset", color: "bg-gradient-to-br from-amber-200 to-rose-200" },
-                ].map((wp) => (
-                  <li key={wp.id}>
-                    <button
-                      onClick={() => {
-                        setConversationWallpaper(wp.id);
-                        document.activeElement.blur();
-                      }}
-                      className="flex items-center justify-between py-1.5 px-3 rounded-lg hover:bg-base-200 text-xs transition-colors"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`size-3 rounded-full ${wp.color} border`} />
-                        <span>{wp.name}</span>
-                      </div>
-                      {((authUser?.chatWallpapers?.[selectedUser?._id] || selectedUser?.chatWallpapers?.[authUser?._id]) === wp.id) && (
-                        <span className="text-primary font-bold text-xs">✓</span>
-                      )}
-                    </button>
-                  </li>
-                ))}
-
-                <li className="menu-title text-[10px] uppercase tracking-wider font-bold px-2 py-1 select-none flex items-center gap-1 mt-1">
-                  <Sparkles size={12} />
-                  Bubble Style
-                </li>
-                <li className="px-2 pb-1">
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {BUBBLE_STYLES.map((style) => {
-                      const active = selectedBubblePreset === style.id;
-                      return (
-                        <button
-                          key={style.id}
-                          onClick={() => {
-                            haptic("tap");
-                            setBubbleOverride(bubbleConvKey, style.id);
-                            document.activeElement.blur();
-                          }}
-                          title={style.label}
-                          aria-label={style.label}
-                          className={`h-8 rounded-lg flex items-center justify-center text-[9px] font-bold transition-transform ${
-                            active ? "ring-2 ring-primary scale-105" : "hover:scale-105"
-                          }`}
-                          style={{
-                            background:
-                              style.id === "auto"
-                                ? "linear-gradient(165deg, var(--color-base-300), var(--color-base-200))"
-                                : `linear-gradient(165deg, ${style.primary}, ${style.accent})`,
-                            color: style.id === "auto" ? "var(--color-base-content)" : "#e8eefc",
-                          }}
-                        >
-                          {style.id === "auto" ? "A" : style.label.split(" ")[0]}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-1.5 text-center text-[10px] text-base-content/50 select-none">
-                    {BUBBLE_STYLES.find((s) => s.id === selectedBubblePreset)?.label || "Default"}
-                    {" "}outgoing bubbles
-                  </div>
-                </li>
-
-                <div className="divider my-1"></div>
-                {(
-                  <li>
-                    <button
-                      onClick={() => {
-                        setSelectionMode(!isSelectionMode);
-                        document.activeElement.blur();
-                      }}
-                      className="flex items-center gap-2 py-1.5 px-3 rounded-lg text-xs hover:bg-base-200 transition-colors text-base-content"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                      </svg>
-                      <span>{isSelectionMode ? "Cancel Selection" : "Select Messages"}</span>
-                    </button>
-                  </li>
-                )}
 
                 {!isSelf && (
                   <li>
                     <details className="text-xs">
-                      <summary className="flex items-center gap-2 py-1.5 px-3 rounded-lg hover:bg-base-200 transition-colors cursor-pointer">
-                        {chatIsMuted ? <BellOff size={14} /> : <Bell size={14} />}
-                        <span>{chatIsMuted ? "Muted (change)" : "Mute Notifications"}</span>
+                      <summary className="flex items-center gap-2.5 py-2 px-3 rounded-lg hover:bg-base-200 transition-colors cursor-pointer">
+                        {chatIsMuted ? <BellOff size={15} className="shrink-0" /> : <Bell size={15} className="shrink-0" />}
+                        <span className="flex-1">{chatIsMuted ? "Notifications Muted" : "Mute Notifications"}</span>
                       </summary>
                       <ul>
                         <li>
@@ -923,43 +879,101 @@ const ChatHeader = () => {
                 )}
 
                 {!isSelf && !selectedGroup && (
-                  <>
-                    <li>
-                      <button
-                        onClick={async () => {
-                          document.activeElement.blur();
-                          try {
-                            const res = await axiosInstance.get(`/messages/export/${selectedUser._id}`);
-                            const name = (contactName || "chat").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-                            const result = await saveTextFile(
-                              `chatty-${name}-${new Date().toISOString().slice(0, 10)}.json`,
-                              JSON.stringify(res.data, null, 2)
-                            );
-                            if (result.savedTo) toast.success(`Saved to ${result.savedTo}`);
-                            else if (result.downloaded) toast.success("Chat exported");
-                          } catch (err) {
-                            const msg = String(err?.message || "");
-                            if (!/cancel|abort/i.test(msg)) {
-                              toast.error(err.response?.data?.message || "Could not export this chat");
-                            }
+                  <li>
+                    <button
+                      onClick={async () => {
+                        document.activeElement.blur();
+                        try {
+                          const res = await axiosInstance.get(`/messages/export/${selectedUser._id}`);
+                          const name = (contactName || "chat").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+                          const result = await saveTextFile(
+                            `chatty-${name}-${new Date().toISOString().slice(0, 10)}.json`,
+                            JSON.stringify(res.data, null, 2)
+                          );
+                          if (result.savedTo) toast.success(`Saved to ${result.savedTo}`);
+                          else if (result.downloaded) toast.success("Chat exported");
+                        } catch (err) {
+                          const msg = String(err?.message || "");
+                          if (!/cancel|abort/i.test(msg)) {
+                            toast.error(err.response?.data?.message || "Could not export this chat");
                           }
-                        }}
-                        className="flex items-center gap-2 py-1.5 px-3 rounded-lg text-xs hover:bg-base-200 transition-colors w-full text-left"
-                      >
-                        <Download size={14} />
-                        <span>Export chat</span>
-                      </button>
-                    </li>
+                        }
+                      }}
+                      className="flex items-center gap-2.5 py-2 px-3 rounded-lg text-xs hover:bg-base-200 transition-colors w-full text-left"
+                    >
+                      <Download size={15} className="shrink-0" />
+                      <span className="flex-1">Export Chat</span>
+                    </button>
+                  </li>
+                )}
+
+                {/* Chat Theme → full-screen picker (DMs only; matches the
+                    per-conversation wallpaper sync on the server) */}
+                {!selectedGroup && (
+                  <li>
+                    <button
+                      onClick={() => {
+                        document.activeElement.blur();
+                        setThemeScreenOpen(true);
+                      }}
+                      className="flex items-center gap-2.5 py-2 px-3 rounded-lg text-xs hover:bg-base-200 transition-colors w-full text-left"
+                    >
+                      <Palette size={15} className="shrink-0" />
+                      <span className="flex-1">Chat Theme</span>
+                      <ChevronRight size={14} className="opacity-40" />
+                    </button>
+                  </li>
+                )}
+
+                {/* Bubble Theme → full-screen picker */}
+                <li>
+                  <button
+                    onClick={() => {
+                      document.activeElement.blur();
+                      setBubbleScreenOpen(true);
+                    }}
+                    className="flex items-center gap-2.5 py-2 px-3 rounded-lg text-xs hover:bg-base-200 transition-colors w-full text-left"
+                  >
+                    <Sparkles size={15} className="shrink-0" />
+                    <span className="flex-1">Bubble Theme</span>
+                    <ChevronRight size={14} className="opacity-40" />
+                  </button>
+                </li>
+
+                {/* Saved Messages → full-screen picker */}
+                <li>
+                  <button
+                    onClick={() => {
+                      document.activeElement.blur();
+                      setSavedScreenOpen(true);
+                    }}
+                    className="flex items-center gap-2.5 py-2 px-3 rounded-lg text-xs hover:bg-base-200 transition-colors w-full text-left"
+                  >
+                    <Bookmark size={15} className="shrink-0" />
+                    <span className="flex-1">Saved Messages</span>
+                    {savedMessages.length > 0 && (
+                      <span className="text-[10px] font-bold text-primary bg-primary/10 rounded-full px-1.5 py-0.5">
+                        {savedMessages.length}
+                      </span>
+                    )}
+                    <ChevronRight size={14} className="opacity-40" />
+                  </button>
+                </li>
+
+                <li className="my-0.5 border-t border-base-300 mx-1"></li>
+
+                {!isSelf && !selectedGroup && (
+                  <>
                     <li>
                       <button
                         onClick={() => {
                           setNicknameDraft(nicknames[selectedUser._id] || "");
                           document.activeElement.blur();
                         }}
-                        className="flex items-center gap-2 py-1.5 px-3 rounded-lg text-xs hover:bg-base-200 transition-colors w-full text-left"
+                        className="flex items-center gap-2.5 py-2 px-3 rounded-lg text-xs hover:bg-base-200 transition-colors w-full text-left"
                       >
-                        <Tag size={14} />
-                        <span>
+                        <Tag size={15} className="shrink-0" />
+                        <span className="flex-1">
                           {hasNickname(selectedUser, nicknames) ? "Edit nickname" : "Add nickname"}
                         </span>
                       </button>
@@ -974,7 +988,7 @@ const ChatHeader = () => {
                           }
                           document.activeElement.blur();
                         }}
-                        className={`flex items-center gap-2 py-1.5 px-3 rounded-lg text-xs transition-colors ${
+                        className={`flex items-center gap-2.5 py-2 px-3 rounded-lg text-xs transition-colors w-full text-left ${
                           authUser?.blockedUsers?.includes(selectedUser?._id)
                             ? "text-red-500 font-semibold hover:bg-red-50"
                             : "text-red-500 hover:bg-red-500/10"
@@ -982,13 +996,13 @@ const ChatHeader = () => {
                       >
                         {authUser?.blockedUsers?.includes(selectedUser?._id) ? (
                           <>
-                            <UserCheck size={14} />
-                            <span>Unblock User</span>
+                            <UserCheck size={15} className="shrink-0" />
+                            <span className="flex-1">Unblock User</span>
                           </>
                         ) : (
                           <>
-                            <UserX size={14} />
-                            <span>Block User</span>
+                            <UserX size={15} className="shrink-0" />
+                            <span className="flex-1">Block User</span>
                           </>
                         )}
                       </button>
@@ -1106,81 +1120,131 @@ const ChatHeader = () => {
         </div>
       )}
 
-      {/* Dimness Adjustment Modal */}
-      {pendingWallpaper && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 select-none animate-in fade-in duration-200">
-          <div className="bg-base-100 border border-base-300 rounded-3xl p-6 max-w-sm w-full shadow-2xl flex flex-col items-center gap-5 text-left">
-            <div className="w-full text-center">
-              <h3 className="font-bold text-lg text-base-content">
-                Adjust Wallpaper Dimness
-              </h3>
-              <p className="text-xs mt-0.5">
-                Set background brightness for optimal message contrast
-              </p>
-            </div>
-
-            {/* Live Preview Box */}
-            <div 
-              className="w-full h-44 rounded-2xl overflow-hidden border border-base-300 relative flex flex-col justify-end p-3 shadow-inner transition-all"
-              style={{
-                backgroundImage: `linear-gradient(rgba(0, 0, 0, ${dimLevel / 100}), rgba(0, 0, 0, ${dimLevel / 100})), url('${pendingWallpaper}')`,
-                backgroundSize: "cover",
-                backgroundPosition: "center"
-              }}
-            >
-              {/* Sample Message Bubbles for Live Preview */}
-              <div className="space-y-2 w-full select-none">
-                <div className="text-base-content px-3 py-1.5 rounded-2xl text-[11px] w-fit max-w-[80%] shadow-sm">
-                  Hey! How does this look?
-                </div>
-                <div className="bg-primary text-primary-content px-3 py-1.5 rounded-2xl text-[11px] w-fit max-w-[80%] ml-auto shadow-sm">
-                  Looks great! Messages are super clear.
-                </div>
-              </div>
-            </div>
-
-            {/* Dimness Slider Controls */}
-            <div className="w-full space-y-2">
-              <div className="flex justify-between items-center text-xs font-semibold">
-                <span>Wallpaper Dim Level</span>
-                <span className="text-primary font-bold">{dimLevel}%</span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="80"
-                value={dimLevel}
-                onChange={(e) => setDimLevel(Number(e.target.value))}
-                className="range range-primary range-xs w-full cursor-pointer"
-              />
-              <div className="flex justify-between text-[10px] font-medium">
-                <span>Original (0%)</span>
-                <span>Dark (80%)</span>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex gap-3 w-full mt-1">
-              <button
-                onClick={() => setPendingWallpaper(null)}
-                className="btn btn-ghost flex-1 text-xs rounded-xl"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  const finalWallpaper = `${pendingWallpaper}#dim=${dimLevel}`;
-                  setConversationWallpaper(finalWallpaper);
-                  setPendingWallpaper(null);
+      {/* Chat Theme full-screen picker (rendered first so the dimness
+          assistant and modals below stay on top of it) */}
+      {/* Panel-scoped overlays: rendered through a portal into the chat panel
+          root (ChatContainer) so on desktop they cover only the chat column
+          and never the sidebar. On mobile the panel fills the screen, so these
+          still look full-screen there. */}
+      {overlayRef?.current &&
+        createPortal(
+          <Fragment>
+            {/* Chat Theme full-screen picker */}
+            {themeScreenOpen && (
+              <ChatThemeScreen
+                onClose={() => setThemeScreenOpen(false)}
+                activeWall={activeChatWall}
+                onPickTheme={(id) => {
+                  haptic("tap");
+                  setConversationWallpaper(id);
                 }}
-                className="btn btn-primary flex-1 text-xs rounded-xl shadow-md text-primary-content"
-              >
-                Set Wallpaper
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+                onPickGalleryFile={handleGalleryFile}
+              />
+            )}
+
+            {/* Bubble Theme full-screen picker */}
+            {bubbleScreenOpen && (
+              <BubbleThemeScreen
+                onClose={() => setBubbleScreenOpen(false)}
+                current={selectedBubblePreset}
+                onSelect={(id) => {
+                  haptic("tap");
+                  setBubbleOverride(bubbleConvKey, id);
+                }}
+              />
+            )}
+
+            {/* Saved Messages full-screen picker */}
+            {savedScreenOpen && (
+              <SavedMessagesScreen
+                onClose={() => setSavedScreenOpen(false)}
+                savedMessages={savedMessages}
+                onUnsave={(messageId) => {
+                  haptic("tap");
+                  removeSavedMessage(bubbleConvKey, messageId);
+                  setSavedTick((t) => t + 1);
+                }}
+              />
+            )}
+
+            {/* Dimness Adjustment Modal */}
+            {pendingWallpaper && (
+              <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 select-none animate-in fade-in duration-200">
+                <div className="bg-base-100 border border-base-300 rounded-3xl p-6 max-w-sm w-full shadow-2xl flex flex-col items-center gap-5 text-left">
+                  <div className="w-full text-center">
+                    <h3 className="font-bold text-lg text-base-content">
+                      Adjust Wallpaper Dimness
+                    </h3>
+                    <p className="text-xs mt-0.5">
+                      Set background brightness for optimal message contrast
+                    </p>
+                  </div>
+
+                  {/* Live Preview Box */}
+                  <div
+                    className="w-full h-44 rounded-2xl overflow-hidden border border-base-300 relative flex flex-col justify-end p-3 shadow-inner transition-all"
+                    style={{
+                      backgroundImage: `linear-gradient(rgba(0, 0, 0, ${dimLevel / 100}), rgba(0, 0, 0, ${dimLevel / 100})), url('${pendingWallpaper}')`,
+                      backgroundSize: "cover",
+                      backgroundPosition: "center"
+                    }}
+                  >
+                    {/* Sample Message Bubbles for Live Preview */}
+                    <div className="space-y-2 w-full select-none">
+                      <div className="text-base-content px-3 py-1.5 rounded-2xl text-[11px] w-fit max-w-[80%] shadow-sm">
+                        Hey! How does this look?
+                      </div>
+                      <div className="bg-primary text-primary-content px-3 py-1.5 rounded-2xl text-[11px] w-fit max-w-[80%] ml-auto shadow-sm">
+                        Looks great! Messages are super clear.
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Dimness Slider Controls */}
+                  <div className="w-full space-y-2">
+                    <div className="flex justify-between items-center text-xs font-semibold">
+                      <span>Wallpaper Dim Level</span>
+                      <span className="text-primary font-bold">{dimLevel}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="80"
+                      value={dimLevel}
+                      onChange={(e) => setDimLevel(Number(e.target.value))}
+                      className="range range-primary range-xs w-full cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[10px] font-medium">
+                      <span>Original (0%)</span>
+                      <span>Dark (80%)</span>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-3 w-full mt-1">
+                    <button
+                      onClick={() => setPendingWallpaper(null)}
+                      className="btn btn-ghost flex-1 text-xs rounded-xl"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        const finalWallpaper = `${pendingWallpaper}#dim=${dimLevel}`;
+                        setConversationWallpaper(finalWallpaper);
+                        setPendingWallpaper(null);
+                      }}
+                      className="btn btn-primary flex-1 text-xs rounded-xl shadow-md text-primary-content"
+                    >
+                      Set Wallpaper
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </Fragment>,
+          overlayRef.current
+        )}
     </div>
   );
 };
