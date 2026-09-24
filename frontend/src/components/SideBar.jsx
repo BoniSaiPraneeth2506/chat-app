@@ -365,7 +365,8 @@ MessageSquare, RefreshCw, Phone, Megaphone, MessageSquareText, Image, Video, Fil
 import { useNicknames, displayNameOf } from "../lib/contacts";
 import { formatMessageTime } from "../lib/utils";
 import toast from "react-hot-toast";
-import { haptic } from "../lib/haptics";
+  import { haptic } from "../lib/haptics";
+  import { useKeyboardOpen } from "../hooks/useKeyboardOpen";
 import { useChatLockStore } from "../store/useChatLockStore";
 import LockPasswordPrompt from "./LockPasswordPrompt";
 import UpdatesTab from "./UpdatesTab";
@@ -448,6 +449,12 @@ const SideBar = () => {
   const channelScreenOpen = useChannelStore(
     (s) => s.isChannelFeedOpen || s.isChannelInfoOpen
   );
+
+  // On Android the layout viewport shrinks when the keyboard opens, so a
+  // `position: fixed; bottom: 0` bar would ride UP to sit above the keyboard.
+  // Hide the mobile tab bar while typing (search/composer) instead, and let
+  // the list own the space above the keyboard like a real messaging app.
+  const { isKeyboardOpen } = useKeyboardOpen();
 
   const { onlineUsers, authUser } = useAuthStore();
 
@@ -1209,7 +1216,7 @@ const SideBar = () => {
           channel composer instead of it resting flush at the screen bottom. */}
       {/* Desktop vertical rail + content row. The rail sits on the left edge
           like WhatsApp; on mobile the tab bar is fixed at the physical bottom. */}
-      <div className={`flex-1 flex min-h-0 min-w-0 overflow-hidden ${channelScreenOpen ? "pb-0" : "pb-[4.5rem] lg:pb-0"}`}>
+      <div className={`flex-1 flex min-h-0 min-w-0 overflow-hidden ${channelScreenOpen || isKeyboardOpen ? "pb-0" : "pb-[4.5rem] lg:pb-0"}`}>
         {/* Desktop: vertical tab rail on the left edge of the sidebar */}
         <div className="hidden lg:flex flex-col items-center flex-shrink-0 w-14 py-2 z-10 border-r border-base-300 bg-base-100">
           {([
@@ -1460,12 +1467,14 @@ const SideBar = () => {
         </div>
       </div>
 
-      {/* Mobile: bottom tab bar — FIXED to the physical bottom of the screen
-          so it never moves when the keyboard opens. The sidebar content area
-          has pb-[4.5rem] on mobile to clear this bar.
-          Hidden only while a channel feed is full-screen (ChannelFeed / ChannelInfo
-          already returns their own full-screen view directly on mobile). */}
-      {!channelScreenOpen && (
+      {/* Mobile: bottom tab bar — FIXED to the physical bottom of the screen.
+          On Android the keyboard shrinks the layout viewport, so a fixed
+          bottom:0 bar would be pushed UP to hover over the keyboard. While the
+          keyboard is open (isKeyboardOpen) or a channel feed is full-screen we
+          hide this bar so it can never float above the keyboard; the sidebar
+          content area reserves pb-[4.5rem] on mobile to clear this bar only
+          when it is actually shown. */}
+      {!channelScreenOpen && !isKeyboardOpen && (
       <div
         className="lg:hidden"
         style={{
