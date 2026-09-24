@@ -253,9 +253,18 @@ const LoginPage = ({ isAddingAccount = false }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [view, setView] = useState("login");
-  const [formData, setFormData] = useState({
-    email: "",
-    password: "",
+  // Prefill from the last successful login (saved in useAuthStore), so the
+  // form remembers the credentials after a logout — like a password manager,
+  // the fields stay editable. Skipped when adding another account, since
+  // that flow is for a different identity.
+  const [formData, setFormData] = useState(() => {
+    if (isAddingAccount) return { email: "", password: "" };
+    try {
+      const saved = JSON.parse(localStorage.getItem("lastLoginCredentials"));
+      return { email: saved?.email || "", password: saved?.password || "" };
+    } catch {
+      return { email: "", password: "" };
+    }
   });
   const [resetForm, setResetForm] = useState({
     otp: "",

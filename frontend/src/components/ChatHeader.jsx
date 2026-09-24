@@ -808,7 +808,7 @@ const ChatHeader = ({ overlayRef }) => {
               </div>
               <ul
                 tabIndex={0}
-                className="dropdown-content z-50 menu p-2 shadow-2xl bg-base-100 border border-base-300 rounded-2xl w-56 text-xs text-base-content mt-1 space-y-1"
+                className="dropdown-content z-50 menu p-2 shadow-2xl bg-base-100 border border-base-300 rounded-2xl w-56 text-xs text-base-content mt-5 space-y-1"
               >
 {/* Select Messages */}
                 <li>

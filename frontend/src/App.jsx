@@ -481,29 +481,6 @@ const App = () => {
     resumeLockedList();
   }, [returnToLocked, selectedUser, selectedGroup, resumeLockedList]);
 
-  // The app's fixed-height home screen follows the on-screen keyboard. In the
-  // APK the WebView resizes with the keyboard; on mobile browsers the layout
-  // viewport does not shrink, so visualViewport is the only reliable visible
-  // height. Publishing it as a CSS variable lets layouts opt in via
-  // `calc(var(--app-vh) - …)` instead of hard-coded 100vh.
-  useEffect(() => {
-    const vv = window.visualViewport;
-    const update = () => {
-      const h = vv ? Math.round(vv.height) : window.innerHeight;
-      document.documentElement.style.setProperty("--app-vh", `${h}px`);
-    };
-    update();
-    if (!vv) return;
-    vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
-    window.addEventListener("resize", update);
-    return () => {
-      vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
-      window.removeEventListener("resize", update);
-    };
-  }, []);
-
   if (isCheckingAuth && !authUser) {
     return (
       <div className="flex items-center justify-center h-screen" 

@@ -32,6 +32,21 @@ const persistAuthSnapshot = (user) => {
   }
 };
 
+// The email/password from the last successful sign-in, kept so the login
+// form can prefill both fields after a logout (like a password manager —
+// the prefill stays editable). Deliberately not cleared on logout, since
+// that is exactly when the prefill is wanted. Replaced on every login.
+const CREDENTIALS_KEY = "lastLoginCredentials";
+const rememberCredentials = (email, password) => {
+  try {
+    if (email || password)
+      localStorage.setItem(CREDENTIALS_KEY, JSON.stringify({ email: email || "", password: password || "" }));
+    else localStorage.removeItem(CREDENTIALS_KEY);
+  } catch {
+    // Storage unavailable — remembering creds is a nice-to-have, never fatal.
+  }
+};
+
 // Axios's own message for a network failure is the literal string "Network
 // Error" — never show that verbatim; every auth action below can plausibly
 // be attempted while offline (e.g. opening the app and trying to log in
@@ -362,14 +377,15 @@ const useAuthStore=create((set,get)=>({
            // previous account's chats must not survive into this one.
            const switchedIdentity = Boolean(get().authUser) && get().authUser._id !== res.data._id;
            if (switchedIdentity) await resetPerAccountState();
-           set({authUser:res.data});
+set({authUser:res.data});
            persistAuthSnapshot(res.data);
            rememberAccount(res.data, res.data.token);
+           rememberCredentials(data.email, data.password);
            toast.success("Logged in successfully")
            get().connectSocket()
            if (switchedIdentity) await hydrateForCurrentUser();
-        }catch(err){
-          toast.error(friendlyAuthError(err, "Something went wrong"));
+         }catch(err){
+           toast.error(friendlyAuthError(err, "Something went wrong"));
         }finally{
             set({isLoggingIn:false})
         }
