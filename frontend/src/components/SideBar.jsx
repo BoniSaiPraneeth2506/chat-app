@@ -360,7 +360,7 @@ import { useChatStore } from "../store/useChatStore";
 import useAuthStore from "../store/useAuthStore";
 import { useGroupStore } from "../store/useGroupStore";
 import SidebarSkeleton from "./skeletons/SidebarSkeleton";
-import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus, Lock, 
+import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus, Lock,
 MessageSquare, RefreshCw, Phone, Megaphone, MessageSquareText, Image, Video, FileText, Link2, Mic } from "lucide-react";
 import { useNicknames, displayNameOf } from "../lib/contacts";
 import { formatMessageTime } from "../lib/utils";
@@ -379,6 +379,16 @@ import { isBiometryAvailable, verifyBiometry, hasStoredLockSecret, readLockSecre
 // Mirrors MAX_PINNED_CHATS in backend/controllers/message.controller.js.
 const MAX_PINNED_CHATS = 2;
 
+// The four home sections, shared by the mobile bottom dock and the desktop
+// rail. Order is also the pill's slide distance, so the width divisor in
+// index.css (.tab-dock-pill divides by 4) has to agree with this length.
+const HOME_TABS = [
+  { id: "chats", label: "Chats", Icon: MessageSquare },
+  { id: "updates", label: "Updates", Icon: RefreshCw },
+  { id: "channels", label: "Channels", Icon: Megaphone },
+  { id: "calls", label: "Calls", Icon: Phone },
+];
+
 // How far a row must travel before releasing it archives, and how far it can be
 // dragged at all. The cap keeps the row from sliding clear of its own width.
 const SWIPE_ARCHIVE_THRESHOLD = 88;
@@ -396,6 +406,15 @@ const DoubleCheck = ({ className }) => (
     <path d="M6 8.5L9.5 12L16.5 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
   </svg>
 );
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Tab glyphs.
+
+   These are lucide's own outline icons, and they are meant to stay that way.
+   A solid-filled variant was tried here and read as heavier than the rest of
+   the app: an active tab is the theme's primary on both the icon and its
+   label, with the white pill behind it doing the "raised" work.
+   ────────────────────────────────────────────────────────────────────────── */
 
 /** The sidebar line for a message whose content is a file. */
 const previewForAttachment = (attachment) => {
@@ -455,6 +474,20 @@ const SideBar = () => {
   // Hide the mobile tab bar while typing (search/composer) instead, and let
   // the list own the space above the keyboard like a real messaging app.
   const { isKeyboardOpen } = useKeyboardOpen();
+
+  // Where the sliding pill has to sit: one dock-width per tab, so the pill
+  // lands under the active button whatever the tab order.
+  const activeTabIndex = Math.max(
+    0,
+    HOME_TABS.findIndex((t) => t.id === activeTab)
+  );
+
+  // Re-selecting the tab you are already on is a no-op, so it should not buzz.
+  const selectTab = (id) => {
+    if (id === activeTab) return;
+    useUpdatesStore.getState().setActiveTab(id);
+    haptic("tap");
+  };
 
   const { onlineUsers, authUser } = useAuthStore();
 
@@ -1210,28 +1243,24 @@ const SideBar = () => {
     >
       {/* Fixed bottom tab bar spacer — on mobile the tab bar is fixed to the
           physical bottom of the screen, so we need to push content up by the
-          tab bar height. On desktop the tab rail is vertical so no spacer needed.
+          tab bar height (the floating dock is ~74px, see .tab-dock in index.css).
+          On desktop the tab rail is vertical so no spacer needed.
           While a channel feed/info is full-screen the tab bar itself is hidden,
           so the spacer must go too — otherwise a blank strip sits below the
           channel composer instead of it resting flush at the screen bottom. */}
       {/* Desktop vertical rail + content row. The rail sits on the left edge
           like WhatsApp; on mobile the tab bar is fixed at the physical bottom. */}
-      <div className={`flex-1 flex min-h-0 min-w-0 overflow-hidden ${channelScreenOpen || isKeyboardOpen ? "pb-0" : "pb-[4.5rem] lg:pb-0"}`}>
+      <div className={`flex-1 flex min-h-0 min-w-0 overflow-hidden ${channelScreenOpen || isKeyboardOpen ? "pb-0" : "pb-[4.75rem] lg:pb-0"}`}>
         {/* Desktop: vertical tab rail on the left edge of the sidebar */}
         <div className="hidden lg:flex flex-col items-center flex-shrink-0 w-14 py-2 z-10 border-r border-base-300 bg-base-100">
-          {([
-            { id: "chats", Icon: MessageSquare },
-            { id: "updates", Icon: RefreshCw },
-            { id: "channels", Icon: Megaphone },
-            { id: "calls", Icon: Phone },
-          ]).map((t) => {
+          {HOME_TABS.map((t) => {
             const isActive = activeTab === t.id;
             const Icon = t.Icon;
             return (
               <button
                 key={t.id}
-                onClick={() => useUpdatesStore.getState().setActiveTab(t.id)}
-                title={t.id === "chats" ? "Chats" : t.id === "updates" ? "Updates" : t.id === "channels" ? "Channels" : "Calls"}
+                onClick={() => selectTab(t.id)}
+                title={t.label}
                 className={`flex items-center justify-center w-11 h-11 rounded-xl transition-colors select-none mx-1 ${
                   isActive
                     ? "text-primary bg-base-200"
@@ -1467,13 +1496,15 @@ const SideBar = () => {
         </div>
       </div>
 
-      {/* Mobile: bottom tab bar — FIXED to the physical bottom of the screen.
-          On Android the keyboard shrinks the layout viewport, so a fixed
-          bottom:0 bar would be pushed UP to hover over the keyboard. While the
-          keyboard is open (isKeyboardOpen) or a channel feed is full-screen we
-          hide this bar so it can never float above the keyboard; the sidebar
-          content area reserves pb-[4.5rem] on mobile to clear this bar only
-          when it is actually shown. */}
+      {/* Mobile: bottom tab bar — a floating dock FIXED to the physical bottom
+          of the screen. On Android the keyboard shrinks the layout viewport, so
+          a fixed bottom:0 bar would be pushed UP to hover over the keyboard.
+          While the keyboard is open (isKeyboardOpen) or a channel feed is
+          full-screen we hide this bar so it can never float above the keyboard;
+          the sidebar content area reserves pb-[4.75rem] on mobile to clear this
+          bar only when it is actually shown. Styling lives in the .tab-* block
+          in index.css; the same colors as before, rebuilt as a glass dock with
+          a brand-tinted pill. */}
       {!channelScreenOpen && !isKeyboardOpen && (
       <div
         className="lg:hidden"
@@ -1486,44 +1517,29 @@ const SideBar = () => {
           paddingBottom: "env(safe-area-inset-bottom, 0px)",
         }}
       >
-        <div className="px-3 pt-1.5 pb-2 bg-base-100/80 backdrop-blur-md border-t border-base-300/60">
-          <div className="relative flex flex-1 bg-base-200/90 backdrop-blur-md rounded-2xl border border-base-300/80 p-1 shadow-sm">
-            {/* Animated active pill slides behind the selected tab */}
-            <span
-              className={`absolute top-1 bottom-1 w-[calc((100%-0.5rem)/4)] rounded-xl bg-base-100 shadow-sm border border-base-300/70 transition-transform duration-300 ease-out ${
-                activeTab === "chats"
-                  ? "translate-x-0"
-                  : activeTab === "updates"
-                  ? "translate-x-[100%]"
-                  : activeTab === "channels"
-                  ? "translate-x-[200%]"
-                  : "translate-x-[300%]"
-              }`}
-              style={{ left: "0.25rem" }}
-            />
-            {([
-              { id: "chats", label: "Chats", Icon: MessageSquare },
-              { id: "updates", label: "Updates", Icon: RefreshCw },
-              { id: "channels", label: "Channels", Icon: Megaphone },
-              { id: "calls", label: "Calls", Icon: Phone },
-            ]).map((t) => {
-              const isActive = activeTab === t.id;
-              const Icon = t.Icon;
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => useUpdatesStore.getState().setActiveTab(t.id)}
-                  className={`relative flex-1 flex flex-col items-center justify-center gap-[7px] py-1.5 rounded-xl transition-colors select-none ${
-                    isActive ? "text-primary" : "text-base-content/55 hover:text-base-content"
-                  }`}
-                >
-                  <Icon size={22} strokeWidth={isActive ? 2.4 : 2} className={isActive ? "drop-shadow-sm" : ""} />
-                  <span className={`${isActive ? "text-[11px]" : "text-[10.5px]"} font-semibold leading-none`}>{t.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <nav role="tablist" aria-label="Sections" className="tab-dock">
+          {/* Active pill slides behind the selected tab; --tab-x is its offset */}
+          <span className="tab-dock-pill" style={{ "--tab-x": `${activeTabIndex * 100}%` }} aria-hidden="true" />
+          {HOME_TABS.map((t) => {
+            const isActive = activeTab === t.id;
+            const Icon = t.Icon;
+            return (
+              <button
+                key={t.id}
+                role="tab"
+                type="button"
+                aria-selected={isActive}
+                onClick={() => selectTab(t.id)}
+                className={`tab-btn ${isActive ? "tab-btn-tab-active" : ""}`}
+              >
+                <span className="tab-disc">
+                  <Icon size={21} strokeWidth={isActive ? 2.4 : 2} />
+                </span>
+                <span className="tab-label">{t.label}</span>
+              </button>
+            );
+          })}
+        </nav>
       </div>
       )}
 
