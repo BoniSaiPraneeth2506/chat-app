@@ -9,6 +9,8 @@ import CreateChannelModal from "./CreateChannelModal";
 import ExploreChannels from "./ExploreChannels";
 import ChannelInfo from "./ChannelInfo";
 import toast from "react-hot-toast";
+import { RowSkeleton } from "./skeletons/Skeleton";
+import { useSkeletonGate } from "../hooks/useSkeletonGate";
 
 const previewOf = (post) => {
   if (!post) return null;
@@ -46,6 +48,13 @@ const ChannelsTab = () => {
     subscribeToChannelEvents();
     return () => unsubscribeFromChannelEvents();
   }, [fetchMyChannels, fetchExplore, subscribeToChannelEvents, unsubscribeFromChannelEvents]);
+
+  // isLoadingChannels starts false and only flips once fetchMyChannels() runs
+  // from the effect above, so keying a skeleton on it alone flashed the
+  // "Stay Updated in Real-Time" empty state for a frame on every visit.
+  const channelsPending = useSkeletonGate(isLoadingChannels);
+  const showChannelsSkeleton =
+    channelsPending || (isLoadingChannels && channels.length === 0);
 
   // Recommended channels that the user is not following yet
   const joinedIds = new Set((channels || []).map((c) => String(c._id)));
@@ -230,10 +239,11 @@ const ChannelsTab = () => {
           </button>
         </div>
 
-        {isLoadingChannels && channels.length === 0 ? (
-          <div className="px-4 py-12 flex flex-col items-center justify-center gap-2">
-            <span className="loading loading-spinner loading-md text-primary" />
-            <span className="text-xs text-base-content/40">Loading channels…</span>
+        {showChannelsSkeleton ? (
+          <div>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <RowSkeleton key={i} shape="rounded-2xl" pad="px-3" />
+            ))}
           </div>
         ) : channels.length === 0 ? (
           /* Premium Empty State */

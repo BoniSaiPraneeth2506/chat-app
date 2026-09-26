@@ -4,6 +4,8 @@ import { useChannelStore } from "../store/useChannelStore";
 import useAuthStore from "../store/useAuthStore";
 import { Users, Star, Pin } from "lucide-react";
 import { formatMessageTime } from "../lib/utils";
+import { RowSkeleton } from "./skeletons/Skeleton";
+import { useSkeletonGate } from "../hooks/useSkeletonGate";
 
 const previewForAttachment = (attachment) => {
   if (!attachment) return "📎 Attachment";
@@ -23,6 +25,12 @@ const UpdatesTab = () => {
     mentionedGroups,
   } = useGroupStore();
   const authUser = useAuthStore((s) => s.authUser);
+
+  // isGroupsLoading starts false and only flips once getGroups() runs from an
+  // effect, so keying a skeleton on it alone flashed "No groups joined yet" for
+  // a frame before the groups arrived.
+  const groupsPending = useSkeletonGate(isGroupsLoading);
+  const showGroupsSkeleton = groupsPending || (isGroupsLoading && groups.length === 0);
 
   const asIds = (arr) => new Set((arr || []).map((x) => String(x?._id || x)));
   const favoriteGroupIds = asIds(authUser?.favoriteGroups);
@@ -44,9 +52,11 @@ const UpdatesTab = () => {
         <h3 className="text-sm font-semibold text-base-content">Groups</h3>
       </div>
 
-      {isGroupsLoading ? (
-        <div className="px-4 py-8 flex justify-center">
-          <span className="loading loading-spinner loading-md text-primary" />
+      {showGroupsSkeleton ? (
+        <div>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <RowSkeleton key={i} />
+          ))}
         </div>
       ) : groups.length === 0 ? (
         <div className="px-4 py-8 text-center">

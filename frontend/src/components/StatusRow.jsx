@@ -1,12 +1,42 @@
 import { useEffect, useRef } from "react";
 import { useStatusStore } from "../store/useStatusStore";
 import useAuthStore from "../store/useAuthStore";
-import { Plus } from "lucide-react";
+import { Plus, Play } from "lucide-react";
 import { haptic } from "../lib/haptics";
+import { StatusCardsSkeleton } from "./skeletons/Skeleton";
+import { useSkeletonGate } from "../hooks/useSkeletonGate";
+
+/**
+ * The latest status in a group, i.e. the one the card previews.
+ *
+ * The list endpoint sorts `createdAt` ascending and the `status:new` socket
+ * event appends, so the newest is always last.
+ */
+const latestOf = (group) => group?.statuses?.[group.statuses.length - 1] || null;
+
+/**
+ * What to paint as the card's background.
+ *
+ * Image statuses carry a pre-signed URL from the list response, so they can be
+ * shown directly. Videos have no poster in the schema, so they fall back to a
+ * dimmed copy of the author's own avatar — a real frame rather than a grey
+ * box — with a play badge on top. Anything with no usable frame gets a themed
+ * wash, and its caption is written over it.
+ */
+const cardPreview = (status, avatar) => {
+  if (status?.media?.type === "image" && status.media.url) {
+    return { src: status.media.url, kind: "photo" };
+  }
+  if (status?.media?.type === "video" && avatar) {
+    return { src: avatar, kind: "video" };
+  }
+  return { src: null, kind: "none" };
+};
 
 const StatusRow = () => {
   const {
     statusGroups,
+    isLoadingStatuses,
     fetchStatuses,
     subscribeToStatusEvents,
     unsubscribeFromStatusEvents,
@@ -21,6 +51,11 @@ const StatusRow = () => {
     subscribeToStatusEvents();
     return () => unsubscribeFromStatusEvents();
   }, [fetchStatuses, subscribeToStatusEvents, unsubscribeFromStatusEvents]);
+
+  // Skeleton until the first fetch settles — the flag alone starts out false,
+  // which would flash an empty strip for a frame. Declared above the authUser
+  // early return so it is not a conditional hook.
+  const pending = useSkeletonGate(isLoadingStatuses);
 
   if (!authUser) return null;
 
@@ -48,76 +83,106 @@ const StatusRow = () => {
       )
     : false;
 
+  const renderCard = ({
+    key,
+    name,
+    avatar,
+    latest,
+    unseen,
+    onClick,
+    showAdd,
+  }) => {
+    const preview = cardPreview(latest, avatar);
+    // A status is media plus an optional caption — there is no text-only type in
+    // the schema. So when there is no frame to show, the caption is the only
+    // preview there is, and it stands in for one.
+    const fallbackCaption = preview.kind === "none" ? latest?.caption : "";
+
+    return (
+      <button
+        key={key}
+        onClick={onClick}
+        className="status-card"
+        aria-label={name}
+      >
+        {preview.src ? (
+          <img
+            src={preview.src}
+            alt=""
+            className={`status-card-media${
+              preview.kind === "video" ? " status-card-media-dim" : ""
+            }`}
+            loading="lazy"
+            decoding="async"
+          />
+        ) : (
+          <span className="status-card-media status-card-media-wash" aria-hidden="true" />
+        )}
+
+        {preview.kind === "video" && (
+          <span className="status-card-play" aria-hidden="true">
+            <Play size={11} fill="currentColor" strokeWidth={0} />
+          </span>
+        )}
+
+        {/* Legibility scrim, then the name on top of it. */}
+        <span className="status-card-scrim" aria-hidden="true" />
+        {fallbackCaption && (
+          <span className="status-card-caption">{fallbackCaption}</span>
+        )}
+        <span className="status-card-name">{name}</span>
+
+        {/* Small avatar, ringed blue while unseen and grey once seen — the same
+            group.hasUnseen the circular row used. Nothing here marks a status
+            viewed; that still only happens when a card is tapped. */}
+        <span
+          className={`status-card-avatar ${unseen ? "is-unseen" : "is-seen"}`}
+        >
+          <span className="status-card-avatar-inner">
+            <img src={avatar || "/avatar.png"} alt="" />
+          </span>
+          {showAdd && (
+            <span className="status-card-add">
+              <Plus size={11} strokeWidth={3.2} />
+            </span>
+          )}
+        </span>
+      </button>
+    );
+  };
+
   return (
     <div className="w-full border-b border-base-200">
-      <div
-        ref={scrollRef}
-        className="flex gap-3 px-4 py-3 overflow-x-auto no-scrollbar"
-      >
-        {/* My Status */}
-        <button
-          onClick={handleOwnStatusClick}
-          className="flex flex-col items-center gap-1 flex-shrink-0"
-        >
-          <div className="relative">
-            <div
-              className={`rounded-full p-[2.5px] ${
-                hasOwnStatus && !ownAllViewed
-                  ? "bg-primary"
-                  : hasOwnStatus
-                  ? "bg-base-300"
-                  : "bg-base-300"
-              }`}
-            >
-              <div className="rounded-full bg-base-100 p-[2px]">
-                <img
-                  src={authUser.profilePic || "/avatar.png"}
-                  alt="My Status"
-                  className="rounded-full size-12 object-cover"
-                />
-              </div>
-            </div>
-            {!hasOwnStatus && (
-              <div className="absolute -bottom-0.5 -right-0.5 size-5 rounded-full bg-primary flex items-center justify-center border-2 border-base-100">
-                <Plus size={10} className="text-white" strokeWidth={3} />
-              </div>
-            )}
-          </div>
-          <span className="text-[10px] t-dim max-w-[56px] truncate text-center">
-            My Status
-          </span>
-        </button>
+      <div ref={scrollRef} className="status-strip no-scrollbar">
+        {pending ? (
+          <StatusCardsSkeleton count={4} />
+        ) : (
+          <>
+            {/* My Status — always first. */}
+            {renderCard({
+              key: "my-status",
+              name: "My Status",
+              avatar: authUser.profilePic,
+              latest: latestOf(ownGroup),
+              unseen: Boolean(hasOwnStatus) && !ownAllViewed,
+              onClick: handleOwnStatusClick,
+              showAdd: !hasOwnStatus,
+            })}
 
-        {/* Other users' statuses */}
-        {otherGroups.map((group) => {
-          const hasUnseen = group.hasUnseen;
-          return (
-            <button
-              key={group.user?._id}
-              onClick={() => handleOtherStatusClick(group)}
-              className="flex flex-col items-center gap-1 flex-shrink-0 group/status"
-            >
-              <div
-                className={`rounded-full transition-all ${
-                  hasUnseen
-                    ? "p-[2.5px] bg-primary shadow-sm shadow-primary/20"
-                    : "p-[2px] bg-base-content/25 opacity-80"
-                }`}
-              >
-                <div className="rounded-full bg-base-100 p-[2px]">
-                  <img
-                    src={group.user?.profilePic || "/avatar.png"}
-                    alt={group.user?.fullName}
-                    className="rounded-full size-12 object-cover transition-transform group-hover/status:scale-105"
-                  />
-                </div>
-              </div>
-              <span className={`text-[10px] max-w-[56px] truncate text-center ${hasUnseen ? "font-semibold text-base-content" : "t-dim"}`}>
-                {group.user?.fullName?.split(" ")[0] || "User"}
-              </span>
-            </button>
-          );
-        })}
+            {/* Other users' statuses */}
+            {otherGroups.map((group) =>
+              renderCard({
+                key: group.user?._id,
+                name: group.user?.fullName?.split(" ")[0] || "User",
+                avatar: group.user?.profilePic,
+                latest: latestOf(group),
+                unseen: group.hasUnseen,
+                onClick: () => handleOtherStatusClick(group),
+                showAdd: false,
+              })
+            )}
+          </>
+        )}
       </div>
     </div>
   );
