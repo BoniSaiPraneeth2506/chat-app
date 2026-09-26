@@ -35,9 +35,11 @@ const readRaw = () => {
       pinHash: String(obj?.pinHash || ""),
       hint: String(obj?.hint || ""),
       bioStored: Boolean(obj?.bioStored),
+      question: String(obj?.question || ""),
+      answerHash: String(obj?.answerHash || ""),
     };
   } catch {
-    return { on: false, pinHash: "", hint: "", bioStored: false };
+    return { on: false, pinHash: "", hint: "", bioStored: false, question: "", answerHash: "" };
   }
 };
 
@@ -46,6 +48,8 @@ const DEFAULTS = {
   pinHash: "",
   hint: "",
   bioStored: false,
+  question: "",
+  answerHash: "",
   // session only
   isUnlocked: false,
   isBusy: false,
@@ -67,18 +71,29 @@ export const useAppLockStore = create((set, get) => ({
   ...DEFAULTS,
   ...readRaw(),
 
-  enable: ({ pin, hint }) => {
+  enable: ({ pin, hint, question, answer }) => {
     if (!pin || pin.length < 4) {
       set({ error: "PIN must be at least 4 digits" });
       return false;
     }
-    const next = persist({ on: true, pinHash: hashPin(pin), hint: String(hint || "") });
+    if (!String(question || "").trim() || !String(answer || "").trim()) {
+      set({ error: "Security question and answer are required" });
+      return false;
+    }
+    const normalized = String(answer).trim().toLowerCase();
+    const next = persist({
+      on: true,
+      pinHash: hashPin(pin),
+      hint: String(hint || ""),
+      question: String(question).trim(),
+      answerHash: hashPin(normalized),
+    });
     set({ ...next, isUnlocked: true, error: "", pinAttempts: 0 });
     return true;
   },
 
   disable: () => {
-    const next = persist({ on: false, pinHash: "", hint: "", bioStored: false });
+    const next = persist({ on: false, pinHash: "", hint: "", bioStored: false, question: "", answerHash: "" });
     set({ ...next, isUnlocked: false, error: "", pinAttempts: 0 });
     return true;
   },
@@ -109,6 +124,30 @@ export const useAppLockStore = create((set, get) => ({
       return true;
     }
     set({ isBusy: false, error: "Stored fingerprint no longer matches" });
+    return false;
+  },
+
+  // PIN unlock used by the launch gate.
+  unlock: (pin) => {
+    const state = get();
+    if (hashPin(pin) === state.pinHash) {
+      set({ isUnlocked: true, error: "", isBusy: false, pinAttempts: 0 });
+      return true;
+    }
+    set({ isBusy: false, error: "Wrong PIN", pinAttempts: state.pinAttempts + 1 });
+    return false;
+  },
+
+  // Recovery: the security answer releases the lock, so a forgotten PIN cannot
+  // lock the app forever.
+  recoverWithAnswer: async (answer) => {
+    const state = get();
+    const normalized = String(answer || "").trim().toLowerCase();
+    if (state.answerHash && hashPin(normalized) === state.answerHash) {
+      set({ isUnlocked: true, error: "", isBusy: false, pinAttempts: 0 });
+      return true;
+    }
+    set({ isBusy: false, error: "Wrong answer", pinAttempts: state.pinAttempts + 1 });
     return false;
   },
 

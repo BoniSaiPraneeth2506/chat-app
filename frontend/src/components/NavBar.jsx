@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import toast from "react-hot-toast";
 import useAuthStore from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
@@ -42,10 +42,28 @@ const Navbar = () => {
     (s) => s.isChannelFeedOpen || s.isChannelInfoOpen
   );
 
+  // The three status screens (scheduled, archived, privacy) open from the
+  // Updates three-dot menu as their own pages. They hide the whole global
+  // header rather than just the mobile version, because they are a focused
+  // owner-only area — nothing there needs the wordmark or the profile menu.
+  // Settings (list and sub-screens) does the same: the list page carries its
+  // own heading and every sub-screen a back arrow, so the fixed top bar would
+  // only duplicate them.
+  const location = useLocation();
+  const headerHidden =
+    ["/status/scheduled", "/status/archived", "/status/privacy"].includes(location.pathname) ||
+    location.pathname.startsWith("/settings");
+
   return (
     <header
       className={`fixed top-0 z-40 w-full bg-base-100 backdrop-blur-lg bg-base-100/80
-        ${selectedUser || selectedGroup || channelOpen ? "hidden lg:block" : "block"}
+        ${
+          headerHidden
+            ? "hidden"
+            : selectedUser || selectedGroup || channelOpen
+              ? "hidden lg:block"
+              : "block"
+        }
       `}
     >
       <div className="container h-16 px-4 mx-auto">

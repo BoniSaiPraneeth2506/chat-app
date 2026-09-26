@@ -42,6 +42,25 @@ export const ATTACHMENT_RULES = {
     types: ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"],
     label: "Image",
   },
+  // Voice statuses and music attachments. Chat voice notes stay on the base64
+  // path — they are short and belong to one conversation — but a status is
+  // public to a group of people and may run to the full length a status allows,
+  // so it goes through the bucket like any other large file.
+  audio: {
+    get maxBytes() {
+      return envMb(["B2_MAX_AUDIO_MB", "R2_MAX_AUDIO_MB"], 15);
+    },
+    types: [
+      "audio/mpeg",
+      "audio/mp4",
+      "audio/aac",
+      "audio/ogg",
+      "audio/webm",
+      "audio/wav",
+      "audio/x-m4a",
+    ],
+    label: "Audio",
+  },
   document: {
     get maxBytes() {
       return envMb(["B2_MAX_DOC_MB", "R2_MAX_DOC_MB"], 25);

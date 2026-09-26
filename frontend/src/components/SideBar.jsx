@@ -754,6 +754,11 @@ const SideBar = () => {
     }
   };
 
+  // Chats (DMs + groups) with something unread, for the Unread filter capsule.
+  const unreadChatCount =
+    Object.values(unreadCounts || {}).filter((n) => Number(n) > 0).length +
+    Object.values(unreadGroupCounts || {}).filter((n) => Number(n) > 0).length;
+
   const filteredUsers = Array.isArray(users)
     ? users.filter((user) => {
         if (!user || !user.fullName) return false;
@@ -1340,7 +1345,22 @@ const SideBar = () => {
                 }
               `}
             >
-              {tab.label}
+              {tab.id === "unread" ? (
+                <span className="flex items-center gap-1.5">
+                  Unread
+                  {unreadChatCount > 0 && (
+                    <span
+                      className={`grid place-items-center min-w-4 h-4 px-1 rounded-full text-[9px] font-bold tabular-nums ${
+                        filterMode === "unread" ? "bg-primary-content/20 text-primary-content" : "bg-primary text-primary-content"
+                      }`}
+                    >
+                      {unreadChatCount > 99 ? "99+" : unreadChatCount}
+                    </span>
+                  )}
+                </span>
+              ) : (
+                tab.label
+              )}
             </button>
           ))}
         </div>

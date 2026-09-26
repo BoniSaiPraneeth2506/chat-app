@@ -9,13 +9,13 @@ const LockedChatsPage = () => {
   const count = (authUser?.lockedChats?.length || 0) + (authUser?.lockedGroups?.length || 0);
 
   return (
-    <div className="container min-h-screen max-w-3xl px-4 pt-20 pb-12 mx-auto"
+    <div className="container min-h-screen max-w-3xl px-4 pt-8 pb-12 mx-auto"
          style={{ backgroundColor: "var(--color-base-100)", color: "var(--color-neutral)" }}>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate("/settings")}
+            onClick={() => navigate(-1)}
             className="p-2 rounded-full transition-colors hover:bg-base-200"
             title="Back to settings"
           >

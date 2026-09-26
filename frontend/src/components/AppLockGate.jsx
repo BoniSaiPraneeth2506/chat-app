@@ -7,9 +7,8 @@ import useAppLockStore, { appLockEnabled } from "../store/useAppLockStore";
 import {
   isBiometryAvailable,
   verifyBiometry,
-  hasStoredLockSecret,
-  readLockSecret,
-  clearLockSecret,
+  hasStoredAppLockSecret,
+  readAppLockSecret,
 } from "../lib/biometrics";
 import LockPasswordPrompt from "./LockPasswordPrompt";
 import { haptic } from "../lib/haptics";
@@ -40,12 +39,11 @@ export default function AppLockGate() {
   const [showPin, setShowPin] = useState(false);
   const [bioState, setBioState] = useState({ available: false });
   const [bioBusy, setBioBusy] = useState(false);
-  const [view, setView] = useState("locked"); // locked | recover
   const [recovering, setRecovering] = useState(false);
   const inputRef = useRef(null);
 
   const enabled = appLockEnabled();
-  const bioCan = bioState.available && Boolean(authUser?._id) && hasStoredLockSecret(authUser?._id);
+  const bioCan = bioState.available && Boolean(authUser?._id) && hasStoredAppLockSecret(authUser?._id);
 
   useEffect(() => {
     if (!enabled) return;
@@ -69,7 +67,7 @@ export default function AppLockGate() {
     setBioBusy(true);
     try {
       const ok = await verifyBiometry("Unlock the app");
-      if (ok) finishUnlock(lock.unlockWithSecret(readLockSecret(authUser?._id)));
+      if (ok) finishUnlock(lock.unlockWithSecret(readAppLockSecret(authUser?._id)));
     } catch {
       /* fingerprint cancelled/failed - fall back to PIN */
     } finally {

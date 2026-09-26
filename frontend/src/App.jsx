@@ -85,10 +85,15 @@ import AboutPage from './pages/AboutPage'
 import GroupCallModal from './components/GroupCallModal'
 import CallModal from './components/CallModal'
 import StatusViewer from './components/StatusViewer'
-import CreateStatusSheet from './components/CreateStatusSheet'
+import AddStatusSheet from './components/status/AddStatusSheet'
 import StatusViewersSheet from './components/StatusViewersSheet'
+import ScheduledStatusesPage from './pages/ScheduledStatusesPage'
+import ArchivedStatusesPage from './pages/ArchivedStatusesPage'
+import StatusPrivacyPage from './pages/StatusPrivacyPage'
 import { useGroupStore } from './store/useGroupStore'
 import useLiveLocationStore from './store/useLiveLocationStore'
+import { useUpdatesStore } from './store/useUpdatesStore'
+import { useChannelStore } from './store/useChannelStore'
 import { App as CapacitorApp } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
@@ -273,8 +278,20 @@ const App = () => {
         navigate(-1);
       } else if (hasActiveChat) {
         window.history.back();
+      } else if (useChannelStore.getState().isChannelFeedOpen || useChannelStore.getState().isChannelInfoOpen) {
+        // Channel feed/info is full-screen on mobile, so back closes it first
+        // (it sits above the tab bar, which is hidden while it is open).
+        useChannelStore.getState().closeChannel();
       } else {
-        CapacitorApp.exitApp();
+        // A non-chats home tab is not the app's root: back should return to the
+        // Chats tab first, only exiting from there. Otherwise the back gesture
+        // closes the app while the user still has Updates/Channels/Calls open.
+        const activeTab = useUpdatesStore.getState().activeTab;
+        if (activeTab && activeTab !== "chats") {
+          useUpdatesStore.getState().setActiveTab("chats");
+        } else {
+          CapacitorApp.exitApp();
+        }
       }
     });
     return () => { listenerPromise.then((h) => h.remove()); };
@@ -521,6 +538,9 @@ const App = () => {
         <Route path='/about' element={<AboutPage />} />
         <Route path='/join/:code' element={authUser ? <JoinGroupPage /> : <Navigate to='/login' />} />
         <Route path='/chat-with/:userId' element={authUser ? <ChatRedirectHandler /> : <PendingChatRedirect />} />
+        <Route path='/status/scheduled' element={authUser ? <ScheduledStatusesPage /> : <Navigate to='/login' />} />
+        <Route path='/status/archived' element={authUser ? <ArchivedStatusesPage /> : <Navigate to='/login' />} />
+        <Route path='/status/privacy' element={authUser ? <StatusPrivacyPage /> : <Navigate to='/login' />} />
         <Route path='*' element={<Navigate to='/' />} />
       </Routes>
       <Toaster />
@@ -846,7 +866,7 @@ const App = () => {
       <GroupCallModal />
       <OfflineBanner />
       <StatusViewer />
-      <CreateStatusSheet />
+      <AddStatusSheet />
       <StatusViewersSheet />
     </div>
   );

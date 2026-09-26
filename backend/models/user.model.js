@@ -25,6 +25,14 @@ const sessionSchema=new mongoose.Schema({
         type:String,
         default:"Desktop"
     },
+    // Stable identity for this session's device (browser|os|device), so a
+    // repeated login on the same machine reuses one device entry instead of
+    // stacking near-identical rows. Legacy entries lack it and are matched by
+    // their stored browser/os/device instead. Blank only for unknown users.
+    deviceKey:{
+        type:String,
+        default:""
+    },
     createdAt:{
         type:Date,
         default:Date.now
@@ -254,6 +262,30 @@ const userSchema=new mongoose.Schema({
         ref:"User",
         default:[]
     }],
+    // The owner's own audience definition for status privacy. This list is never
+    // sent to another user: a viewer who could read it would learn exactly who
+    // is on it, which is the whole thing a close-friends list is for.
+    closeFriends:[{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"User",
+        default:[]
+    }],
+    // Status defaults and archive preference. Kept here rather than in a
+    // settings collection so the status read path can fetch them alongside the
+    // user it already has.
+    statusSettings:{
+        defaultPrivacy:{
+            type:String,
+            enum:["everyone","contacts","closeFriends","only","except"],
+            default:"contacts"
+        },
+        // When on, an expired status is kept instead of swept. Archived rows stay
+        // owner-only; the setting changes what is kept, never who may see it.
+        keepArchived:{
+            type:Boolean,
+            default:false
+        }
+    },
     chatWallpapers:{
         type:Map,
         of:String,

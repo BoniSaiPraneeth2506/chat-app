@@ -21,6 +21,7 @@ import cors from 'cors'
 import { app, server } from './lib/socket.js';
 import { startScheduler, startMediaPurge } from './jobs/scheduler.js';
 import { startStatusCleanup } from './jobs/statusCleanup.js';
+import { startStatusPublisher } from './jobs/statusPublisher.js';
 import { startEmailDigest } from './jobs/emailDigest.js';
 import { getAllowedOrigins, isOriginAllowed } from './lib/origins.js';
 
@@ -191,8 +192,10 @@ server.listen(PORT, () => {
   startScheduler();
   // Reclaim Cloudinary storage from expired disappearing messages
   startMediaPurge();
-  // Delete expired statuses and their B2 media
+  // Delete expired statuses and their B2 media (archived ones are kept)
   startStatusCleanup();
+  // Publish statuses whose scheduled time has arrived
+  startStatusPublisher();
   // Weekly summary and inactivity nudge, allowlisted to named addresses
   startEmailDigest();
 });

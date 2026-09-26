@@ -44,11 +44,16 @@ export const getClientIp = (req) => {
 
 export const buildSession = (req, sid) => {
   const userAgent = req.headers["user-agent"] || "";
+  const parsed = parseUserAgent(userAgent);
   return {
     sid,
     ip: getClientIp(req),
     userAgent,
-    ...parseUserAgent(userAgent),
+    ...parsed,
+    // Same browser/OS on the same machine is one device, so re-logins reuse
+    // the existing entry rather than stacking. IP deliberately excluded: a
+    // phone drifting onto WiFi is not a new device.
+    deviceKey: `${parsed.browser}|${parsed.os}|${parsed.device}`,
     createdAt: new Date(),
     lastActive: new Date(),
   };

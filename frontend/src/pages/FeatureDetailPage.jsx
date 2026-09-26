@@ -9,7 +9,7 @@ const FeatureDetailPage = () => {
 
   if (!feature) {
     return (
-      <div className="container min-h-screen max-w-2xl px-4 pt-20 pb-12 mx-auto text-center"
+      <div className="container min-h-screen max-w-2xl px-4 pt-8 pb-12 mx-auto text-center"
            style={{ backgroundColor: "var(--color-base-100)", color: "var(--color-neutral)" }}>
         <button
           onClick={() => navigate("/settings/features")}
@@ -25,7 +25,7 @@ const FeatureDetailPage = () => {
   const Icon = feature.icon;
 
   return (
-    <div className="container min-h-screen max-w-2xl px-4 pt-20 pb-12 mx-auto"
+    <div className="container min-h-screen max-w-2xl px-4 pt-8 pb-12 mx-auto"
          style={{ backgroundColor: "var(--color-base-100)", color: "var(--color-neutral)" }}>
       <div className="space-y-6">
         {/* Header */}

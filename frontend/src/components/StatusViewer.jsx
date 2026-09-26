@@ -1,12 +1,24 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useStatusStore } from "../store/useStatusStore";
 import useAuthStore from "../store/useAuthStore";
-import { X, Eye, ChevronLeft, ChevronRight, Trash2, Pause, Play, Send, Heart, Smile, ArrowLeft } from "lucide-react";
+import { X, Eye, ChevronLeft, ChevronRight, Trash2, Play, Send, Heart, ArrowLeft, BarChart3, EyeOff } from "lucide-react";
 import { haptic } from "../lib/haptics";
+import { formatTimeAgo, resolveStatusType } from "../lib/statusFormat";
+import StatusBody from "./status/StatusBody";
 import toast from "react-hot-toast";
 
 const STATUS_IMAGE_DURATION_MS = 10000;
-const QUICK_EMOJIS = ["😍", "😂", "😮", "😢", "🙏", "🔥", "👏", "❤️"];
+
+// The reaction set a viewer can pick from. Fixed and short: a longer list is
+// slower to hit one-handed, and anything longer belongs in a reply.
+const REACTIONS = [
+  { emoji: "❤️", label: "Love" },
+  { emoji: "😂", label: "Laugh" },
+  { emoji: "😮", label: "Wow" },
+  { emoji: "😢", label: "Sad" },
+  { emoji: "🔥", label: "Fire" },
+  { emoji: "👍", label: "Like" },
+];
 
 // In-memory media-URL cache so reopening a status doesn't refetch the URL
 // every time — statuses are immutable once posted, so this stays valid.
@@ -32,18 +44,6 @@ const preloadMediaBlob = (url) => {
   }
 };
 
-function formatTimeAgo(dateStr) {
-  if (!dateStr) return "";
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
 const StatusViewer = () => {
   const isOpen = useStatusStore((s) => s.isOpen);
   const viewingStatusGroup = useStatusStore((s) => s.viewingStatusGroup);
@@ -57,19 +57,39 @@ const StatusViewer = () => {
   const openViewersSheet = useStatusStore((s) => s.openViewersSheet);
   const deleteStatus = useStatusStore((s) => s.deleteStatus);
   const reactToStatus = useStatusStore((s) => s.reactToStatus);
+  const toggleLike = useStatusStore((s) => s.toggleLike);
+  const votePoll = useStatusStore((s) => s.votePoll);
+  const answerQuestion = useStatusStore((s) => s.answerQuestion);
+  const fetchStatusAnswers = useStatusStore((s) => s.fetchStatusAnswers);
 
   const authUser = useAuthStore((s) => s.authUser);
   const socket = useAuthStore((s) => s.socket);
 
   const currentStatus = viewingStatusGroup?.statuses?.[viewingIndex];
   const isOwn = viewingStatusGroup?.isOwn;
-  const isVideo = currentStatus?.media?.type === "video";
+  // Resolved so a status from before `type` existed — which has a `media` slot
+  // and nothing else — is still treated as the photo it is rather than falling
+  // through every type check and rendering an empty frame.
+  const statusType = resolveStatusType(currentStatus);
 
+  // Only image and video statuses have a single primary clip to fetch. A text
+  // status or a poll has no bytes, and asking for a signed URL for it would be a
+  // request that can only ever come back empty.
+  const isMediaType = statusType === "image" || statusType === "video";
+  const isVideo = statusType === "video";
+
+  const myId = authUser?._id?.toString();
+
+  // A like is its own stored thing now, not a heart reaction wearing a hat.
   const isLikedByMe = Boolean(
-    currentStatus?.viewers?.some(
-      (v) =>
-        (v.user?._id || v.user)?.toString() === authUser?._id?.toString() &&
-        (v.reaction === "❤️" || v.reaction === "😍" || v.reaction === "like")
+    (currentStatus?.likes || []).some((l) => String(l?._id || l) === myId)
+  );
+  const myReaction = currentStatus?.viewers?.find(
+    (v) => (v.user?._id || v.user)?.toString() === myId
+  )?.reaction;
+  const answeredByMe = Boolean(
+    (currentStatus?.question?.answers || []).some(
+      (a) => (a.user?._id || a.user)?.toString() === myId
     )
   );
 
@@ -81,6 +101,11 @@ const StatusViewer = () => {
   const [replyText, setReplyText] = useState("");
   const [isTypingReply, setIsTypingReply] = useState(false);
   const [flyingEmoji, setFlyingEmoji] = useState(null);
+  const [showReactions, setShowReactions] = useState(false);
+  const [audioPlaying, setAudioPlaying] = useState(null);
+  const [voting, setVoting] = useState(false);
+  const [answering, setAnswering] = useState(false);
+  const [viewerCount, setViewerCount] = useState(null);
 
   const videoRef = useRef(null);
   const timerRef = useRef(null);
@@ -119,7 +144,7 @@ const StatusViewer = () => {
       try {
         return await fetchStatusMediaUrl(statusId);
       } catch {
-        return "";
+        return null;
       }
     },
     [fetchStatusMediaUrl]
@@ -134,6 +159,17 @@ const StatusViewer = () => {
 
   const loadMedia = useCallback(async () => {
     if (!currentStatus?._id) return;
+
+    if (!isMediaType) {
+      // Nothing to fetch. Cleared rather than left over, so a poll following a
+      // photo does not briefly render the previous photo behind it.
+      setMediaUrl("");
+      setViewingMediaUrl("");
+      setLoading(false);
+      setProgress(0);
+      return;
+    }
+
     if (currentStatus.media?.url) {
       statusMediaCache.set(currentStatus._id, currentStatus.media.url);
       setMediaUrl(currentStatus.media.url);
@@ -155,7 +191,8 @@ const StatusViewer = () => {
     setLoading(true);
     setProgress(0);
     try {
-      const url = await fetchMediaUrlSafe(currentStatus._id);
+      const refreshed = await fetchMediaUrlSafe(currentStatus._id);
+      const url = refreshed?.media?.url || "";
       if (url) statusMediaCache.set(currentStatus._id, url);
       setMediaUrl(url);
       setViewingMediaUrl(url);
@@ -164,7 +201,13 @@ const StatusViewer = () => {
     } finally {
       setLoading(false);
     }
-  }, [currentStatus, fetchMediaUrlSafe, setViewingMediaUrl]);
+  }, [currentStatus, isMediaType, fetchMediaUrlSafe, setViewingMediaUrl]);
+
+  // Always points at the latest `loadMedia`, for the per-status effect below.
+  const loadMediaRef = useRef(loadMedia);
+  useEffect(() => {
+    loadMediaRef.current = loadMedia;
+  }, [loadMedia]);
 
   const handleVideoProgress = useCallback(() => {
     const video = videoRef.current;
@@ -216,53 +259,96 @@ const StatusViewer = () => {
     }
   }, [currentStatus?._id, deleteStatus, closeViewer]);
 
-  const handleToggleLike = async () => {
+  // ── interactions ────────────────────────────────────────────────────────────
+
+  const flashEmoji = (emoji) => {
+    setFlyingEmoji(emoji);
+    setTimeout(() => setFlyingEmoji(null), 1200);
+  };
+
+  const handleToggleLike = useCallback(async () => {
     if (!currentStatus?._id) return;
     haptic("tap");
     const willLike = !isLikedByMe;
-    if (willLike) {
-      setFlyingEmoji("❤️");
-      setTimeout(() => setFlyingEmoji(null), 1200);
-    }
+    if (willLike) flashEmoji("❤️");
     try {
-      await reactToStatus(currentStatus._id, {
-        reaction: willLike ? "❤️" : "",
-        isLikeToggle: true,
-      });
-      toast.success(willLike ? "Liked status ❤️" : "Unliked status");
-    } catch (err) {
+      await toggleLike(currentStatus._id);
+      toast.success(willLike ? "Liked status" : "Removed like");
+    } catch {
       toast.error("Failed to update like");
     }
-  };
+  }, [currentStatus?._id, isLikedByMe, toggleLike]);
 
-  const handleSendReaction = async (emoji) => {
-    if (!currentStatus?._id) return;
-    haptic("success");
-    setFlyingEmoji(emoji);
-    setTimeout(() => setFlyingEmoji(null), 1200);
-    try {
-      await reactToStatus(currentStatus._id, { reaction: emoji, isLikeToggle: false });
-      toast.success(`Sent ${emoji} to chat`);
-    } catch (err) {
-      toast.error("Failed to send reaction");
-    }
-  };
+  const handleSendReaction = useCallback(
+    async (emoji) => {
+      if (!currentStatus?._id) return;
+      haptic("success");
+      setShowReactions(false);
+      flashEmoji(emoji);
+      // Re-picking the same reaction clears it, so a viewer can take it back
+      // without hunting for a "remove" control.
+      const clearing = myReaction === emoji;
+      try {
+        await reactToStatus(currentStatus._id, { reaction: clearing ? "" : emoji });
+      } catch {
+        toast.error("Failed to react");
+      }
+    },
+    [currentStatus?._id, myReaction, reactToStatus]
+  );
 
-  const handleSendReply = async (e) => {
-    if (e) e.preventDefault();
-    if (!replyText.trim() || !currentStatus?._id) return;
-    const textToSend = replyText.trim();
-    setReplyText("");
-    setIsTypingReply(false);
-    setIsPaused(false);
-    haptic("success");
-    try {
-      await reactToStatus(currentStatus._id, { text: textToSend, isLikeToggle: false });
-      toast.success("Reply sent to chat");
-    } catch (err) {
-      toast.error("Failed to send reply");
-    }
-  };
+  const handleSendReply = useCallback(
+    async (e) => {
+      if (e) e.preventDefault();
+      if (!replyText.trim() || !currentStatus?._id) return;
+      const textToSend = replyText.trim();
+      setReplyText("");
+      setIsTypingReply(false);
+      setIsPaused(false);
+      haptic("success");
+      try {
+        await reactToStatus(currentStatus._id, { text: textToSend });
+        toast.success("Reply sent");
+      } catch {
+        toast.error("Failed to send reply");
+        setReplyText(textToSend);
+      }
+    },
+    [replyText, currentStatus?._id, reactToStatus]
+  );
+
+  const handleVote = useCallback(
+    async (optionIndex) => {
+      if (!currentStatus?._id || voting) return;
+      haptic("tap");
+      setVoting(true);
+      try {
+        await votePoll(currentStatus._id, optionIndex);
+      } catch (err) {
+        toast.error(err?.message || "Could not record your vote");
+      } finally {
+        setVoting(false);
+      }
+    },
+    [currentStatus?._id, voting, votePoll]
+  );
+
+  const handleAnswer = useCallback(
+    async (text) => {
+      if (!currentStatus?._id || answering) return;
+      haptic("tap");
+      setAnswering(true);
+      try {
+        await answerQuestion(currentStatus._id, text);
+        if (isOwn) await fetchStatusAnswers(currentStatus._id).catch(() => {});
+      } catch (err) {
+        toast.error(err?.message || "Could not send your answer");
+      } finally {
+        setAnswering(false);
+      }
+    },
+    [currentStatus?._id, answering, answerQuestion, fetchStatusAnswers, isOwn]
+  );
 
   const handleInteraction = useCallback(() => {
     setShowControls(true);
@@ -272,7 +358,15 @@ const StatusViewer = () => {
 
   useEffect(() => {
     if (!isOpen || !currentStatus?._id) return;
-    loadMedia();
+    // Called through a ref rather than depended on directly. `loadMedia` closes
+    // over the whole current status, so its identity changes every time a socket
+    // event touches this status — another viewer opening it, a vote landing. As a
+    // dependency that would tear this effect down and rebuild it on each of
+    // those, re-emitting status:viewing/stopViewing and re-marking the status
+    // viewed many times a minute. The ref always calls the current function while
+    // the effect stays keyed on the status id, which is the only thing that should
+    // restart it.
+    loadMediaRef.current();
     if (!isOwn) {
       markAsViewed(currentStatus._id);
     }
@@ -285,29 +379,49 @@ const StatusViewer = () => {
       }
       clearTimers();
       setProgress(0);
+      // Audio belongs to the status it was started on. Moving on stops it rather
+      // than leaving a voice clip playing under the next one.
+      setAudioPlaying(null);
+      setShowReactions(false);
     };
-  }, [isOpen, currentStatus?._id, viewingIndex]);
+  }, [isOpen, currentStatus?._id, viewingIndex, isOwn, socket, markAsViewed, clearTimers]);
 
   // Prefetch every other status in the current group's media URL in parallel
   // the moment the viewer opens, so forwarding through a group never blocks on
   // a freshly fetched signed URL. Also warm the next status's actual blob so
   // the browser has it cached before we swipe to it.
   useEffect(() => {
-    const group = viewingStatusGroup;
-    if (!isOpen || !group?.statuses?.length) return;
+    if (!isOpen) return;
+    // Read the group from the store at run time instead of closing over the
+    // rendered one. The object identity of `viewingStatusGroup` changes on every
+    // socket event — a viewer opening a status, someone voting — so depending on
+    // it would re-run this whole prefetch sweep on every one of them, while
+    // depending only on its id would leave this effect reading a group that had
+    // since gained a status. Reading it here gets both: keyed on the id, and
+    // never stale.
+    const group = useStatusStore.getState().viewingStatusGroup;
+    if (!group?.statuses?.length) return;
     const all = group.statuses;
     all.forEach((s) => {
       if (s.media?.url) statusMediaCache.set(s._id, s.media.url);
     });
-    const missing = all.filter((s) => !statusMediaCache.has(s._id));
+    // Only types that actually carry one primary clip. Asking about a poll is a
+    // request that can only return nothing.
+    const missing = all.filter(
+      (s) =>
+        (s.type === "image" || s.type === "video") && !statusMediaCache.has(s._id)
+    );
     if (missing.length > 0) {
       Promise.allSettled(
-        missing.map((s) => fetchMediaUrlSafe(s._id).then((url) => {
-          if (url) {
-            statusMediaCache.set(s._id, url);
-            preloadMediaBlob(url);
-          }
-        }))
+        missing.map((s) =>
+          fetchMediaUrlSafe(s._id).then((refreshed) => {
+            const url = refreshed?.media?.url || "";
+            if (url) {
+              statusMediaCache.set(s._id, url);
+              preloadMediaBlob(url);
+            }
+          })
+        )
       );
     }
     const next = all[viewingIndex + 1];
@@ -317,7 +431,7 @@ const StatusViewer = () => {
     }
     const currentUrl = mediaUrl || currentStatus?.media?.url;
     if (currentUrl) preloadMediaBlob(currentUrl);
-  }, [isOpen, viewingStatusGroup?._id, viewingIndex, currentStatus?._id, fetchMediaUrlSafe, mediaUrl]);
+  }, [isOpen, viewingStatusGroup?._id, viewingIndex, currentStatus?._id, currentStatus?.media?.url, fetchMediaUrlSafe, mediaUrl]);
 
   useEffect(() => {
     if (!socket) return;
@@ -347,8 +461,19 @@ const StatusViewer = () => {
     return () => socket.off("status:deleted", handleDeleted);
   }, [socket, closeViewer]);
 
+  /**
+   * The timed advance, for everything that is not a video.
+   *
+   * Keyed on `isMediaType` rather than on a URL, because a poll, a question and a
+   * countdown have no media at all — under the old media-only condition they
+   * would sit on screen until the viewer tapped past them, which is the one
+   * behaviour a story viewer must not have.
+   */
+  const timedAdvance =
+    isOpen && !loading && !isVideo && !isPaused && !isTypingReply && !audioPlaying && Boolean(currentStatus);
+
   useEffect(() => {
-    if (!isOpen || loading || !mediaUrl || isVideo || isPaused || isTypingReply) return;
+    if (!timedAdvance) return;
     clearTimers();
     startTimeRef.current = Date.now();
     const total = STATUS_IMAGE_DURATION_MS;
@@ -364,7 +489,7 @@ const StatusViewer = () => {
     };
     timerRef.current = requestAnimationFrame(tick);
     return () => clearTimers();
-  }, [isOpen, loading, mediaUrl, isVideo, viewingIndex, isPaused, isTypingReply, nextStatus, clearTimers]);
+  }, [timedAdvance, viewingIndex, currentStatus?._id, nextStatus, clearTimers]);
 
   useEffect(() => {
     if (showControls) {
@@ -395,6 +520,11 @@ const StatusViewer = () => {
 
   const statusCount = viewingStatusGroup.statuses.length;
   const caption = currentStatus.caption || "";
+  // A poll or a question is its own reply bar, so the generic one would be two
+  // competing inputs for the same thumb.
+  const hasOwnReplyBar = statusType === "poll" || statusType === "question";
+  const likeCount = (currentStatus.likes || []).length;
+  const visibleViewerCount = viewerCount ?? currentStatus.viewers?.length ?? 0;
 
   return (
     <div
@@ -454,6 +584,7 @@ const StatusViewer = () => {
             </span>
             <span className="text-[10px] text-white/70 block">
               {formatTimeAgo(currentStatus.createdAt)}
+              {likeCount > 0 && ` · ${likeCount} like${likeCount === 1 ? "" : "s"}`}
             </span>
           </div>
 
@@ -485,41 +616,42 @@ const StatusViewer = () => {
         </div>
       </div>
 
-      {/* Main Media Display Area */}
+      {/* Main Display Area — one of the typed renderers, or a photo/video. */}
       <div className="flex-1 flex items-center justify-center relative overflow-hidden">
-        {loading && !mediaUrl ? (
+        {loading ? (
           <div className="flex flex-col items-center gap-3">
             <span className="loading loading-spinner loading-lg text-white" />
             <span className="text-sm text-white/60">Loading...</span>
           </div>
-        ) : mediaUrl ? (
-          isVideo ? (
-            <video
-              ref={videoRef}
-              src={mediaUrl}
-              className="w-full h-full object-contain pointer-events-auto"
-              autoPlay
-              playsInline
-              onTimeUpdate={handleVideoProgress}
-              onEnded={handleVideoEnded}
-              onClick={(e) => {
+        ) : (
+          <StatusBody
+            status={currentStatus}
+            mediaUrl={mediaUrl}
+            isOwn={isOwn}
+            myId={myId}
+            onVote={handleVote}
+            onAnswer={handleAnswer}
+            voting={voting}
+            answering={answering}
+            hasAnswered={answeredByMe}
+            audioPlaying={audioPlaying}
+            onQuestionTyping={setIsTypingReply}
+            onToggleAudio={setAudioPlaying}
+            onToggleVideo={{
+              videoRef,
+              onTimeUpdate: handleVideoProgress,
+              onEnded: handleVideoEnded,
+              onClick: (e) => {
                 e.stopPropagation();
                 togglePause();
-              }}
-            />
-          ) : (
-            <img
-              src={mediaUrl}
-              alt="Status"
-              className="w-full h-full object-contain"
-            />
-          )
-        ) : (
-          <div className="text-white/60 text-sm">Failed to load media</div>
+              },
+            }}
+          />
         )}
 
-        {/* Tap zones for navigation */}
-        {!loading && (
+        {/* Tap zones for navigation. Skipped over a poll or a question, where
+            the options themselves are the thing to tap. */}
+        {!loading && !hasOwnReplyBar && (
           <>
             <div
               onClick={(e) => {
@@ -592,10 +724,9 @@ const StatusViewer = () => {
         </div>
       )}
 
-      {/* ── Bottom Bar: My Status (Left Eye Symbol) vs Other User (Reply + Quick Reactions) ── */}
       {isOwn ? (
-        /* My Status: Eye symbol at bottom-left */
-        <div className="absolute bottom-4 left-4 z-30 pointer-events-auto">
+        /* My Status: viewer count, and the two things an owner can do with it. */
+        <div className="absolute bottom-4 left-4 z-30 pointer-events-auto flex items-center gap-2">
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -605,34 +736,69 @@ const StatusViewer = () => {
             title="View status viewers"
           >
             <Eye size={16} className="text-white" />
-            <span>{currentStatus.viewers?.length || 0}</span>
+            <span>{visibleViewerCount}</span>
           </button>
+
+          {/* A question's answers exist for exactly one person, and that is the
+              person watching. Shown on the status so it is not a separate trip
+              through a settings screen to find out who answered. */}
+          {statusType === "question" && (currentStatus.question?.answers?.length || 0) > 0 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewerCount(currentStatus.question.answers.length);
+                openViewersSheet(currentStatus._id);
+              }}
+              className="flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 backdrop-blur-md text-white text-xs font-semibold hover:bg-black/80 active:scale-95 transition-all border border-white/20 shadow-xl"
+              title="View answers"
+            >
+              <BarChart3 size={16} className="text-white" />
+              <span>{currentStatus.question.answers.length}</span>
+            </button>
+          )}
         </div>
       ) : (
-        /* Other User: Bottom Reply Input + Quick Emoji Reactions */
+        /* Other User: reply + like, plus a reaction tray on tap. */
         <div
           onClick={(e) => e.stopPropagation()}
           className="absolute bottom-3 inset-x-0 z-30 px-3 flex flex-col items-center gap-2"
         >
-          {/* Quick Reaction Emojis Strip */}
-          <div className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-white/15 shadow-xl">
-            {QUICK_EMOJIS.map((emoji) => (
+          {showReactions && (
+            <div className="flex items-center gap-1 px-2.5 py-2 rounded-full bg-black/70 backdrop-blur-md border border-white/15 shadow-xl animate-in slide-in-from-bottom duration-200">
+              {REACTIONS.map((r) => (
+                <button
+                  key={r.emoji}
+                  onClick={() => handleSendReaction(r.emoji)}
+                  className={`text-2xl p-1.5 rounded-full transition-transform hover:scale-125 active:scale-95 ${
+                    myReaction === r.emoji ? "bg-white/20 scale-110" : ""
+                  }`}
+                  title={r.label}
+                >
+                  {r.emoji}
+                </button>
+              ))}
               <button
-                key={emoji}
-                onClick={() => handleSendReaction(emoji)}
-                className="text-xl p-1 hover:scale-125 active:scale-95 transition-transform"
-                title={`React with ${emoji}`}
+                onClick={() => setShowReactions(false)}
+                className="p-1.5 rounded-full text-white/50 hover:text-white"
+                aria-label="Close reactions"
               >
-                {emoji}
+                <EyeOff size={15} />
               </button>
-            ))}
-          </div>
+            </div>
+          )}
 
-          {/* Reply Text Bar */}
-          <form
-            onSubmit={handleSendReply}
-            className="w-full max-w-md flex items-center gap-2"
-          >
+          <form onSubmit={handleSendReply} className="w-full max-w-md flex items-center gap-2">
+            {!hasOwnReplyBar && (
+              <button
+                type="button"
+                onClick={() => setShowReactions((s) => !s)}
+                className="size-10 rounded-full bg-black/60 backdrop-blur-md border border-white/20 text-white/80 hover:text-white active:scale-95 transition-all shadow-lg flex-shrink-0 grid place-items-center"
+                title="React"
+              >
+                <span className="text-lg leading-none">😊</span>
+              </button>
+            )}
+
             <div className="relative flex-1">
               <input
                 ref={replyInputRef}
@@ -649,7 +815,7 @@ const StatusViewer = () => {
                   }
                 }}
                 onChange={(e) => setReplyText(e.target.value)}
-                placeholder="Reply..."
+                placeholder={hasOwnReplyBar ? "Reply in chat..." : "Reply..."}
                 className="w-full h-10 pl-4 pr-10 rounded-full bg-black/60 backdrop-blur-md text-white placeholder:text-white/60 text-sm border border-white/20 focus:outline-none focus:border-primary shadow-lg"
               />
               {replyText.trim() && (
@@ -671,7 +837,7 @@ const StatusViewer = () => {
                   ? "border-red-500/60 text-red-500 hover:scale-110 active:scale-95 shadow-red-500/25"
                   : "border-white/20 text-white/70 hover:text-red-400 hover:scale-110 active:scale-95"
               }`}
-              title={isLikedByMe ? "Liked" : "Like status"}
+              title={isLikedByMe ? "Unlike" : "Like status"}
             >
               <Heart
                 size={19}
@@ -681,6 +847,12 @@ const StatusViewer = () => {
               />
             </button>
           </form>
+
+          {myReaction && (
+            <p className="text-[11px] text-white/60">
+              You reacted {myReaction} · tap it again to take it back
+            </p>
+          )}
         </div>
       )}
     </div>

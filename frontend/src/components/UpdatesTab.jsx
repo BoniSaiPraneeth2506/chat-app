@@ -2,10 +2,13 @@ import StatusRow from "./StatusRow";
 import { useGroupStore } from "../store/useGroupStore";
 import { useChannelStore } from "../store/useChannelStore";
 import useAuthStore from "../store/useAuthStore";
-import { Users, Star, Pin } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Users, Star, Pin, MoreVertical, Clock, Archive, ShieldCheck } from "lucide-react";
 import { formatMessageTime } from "../lib/utils";
 import { RowSkeleton } from "./skeletons/Skeleton";
 import { useSkeletonGate } from "../hooks/useSkeletonGate";
+import { haptic } from "../lib/haptics";
 
 const previewForAttachment = (attachment) => {
   if (!attachment) return "📎 Attachment";
@@ -25,6 +28,19 @@ const UpdatesTab = () => {
     mentionedGroups,
   } = useGroupStore();
   const authUser = useAuthStore((s) => s.authUser);
+  const navigate = useNavigate();
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef(null);
+
+  // The three-dot menu closes on outside tap, like the one in a chat header.
+  useEffect(() => {
+    if (!moreMenuOpen) return;
+    const onDown = (e) => {
+      if (!moreMenuRef.current?.contains(e.target)) setMoreMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [moreMenuOpen]);
 
   // isGroupsLoading starts false and only flips once getGroups() runs from an
   // effect, so keying a skeleton on it alone flashed "No groups joined yet" for
@@ -38,11 +54,70 @@ const UpdatesTab = () => {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-y-auto">
-      <div className="px-4 py-3 flex-shrink-0">
-        <h2 className="text-base font-semibold text-base-content">Updates</h2>
-        <p className="text-xs text-base-content/50 mt-0.5">
-          Statuses and groups
-        </p>
+      <div className="px-4 py-3 flex items-center justify-between flex-shrink-0">
+        <div>
+          <h2 className="text-base font-semibold text-base-content">Updates</h2>
+          <p className="text-xs text-base-content/50 mt-0.5">Statuses and groups</p>
+        </div>
+        <div
+          ref={moreMenuRef}
+          className={`dropdown dropdown-bottom dropdown-end ${moreMenuOpen ? "dropdown-open" : ""}`}
+        >
+          <div
+            role="button"
+            tabIndex={0}
+            className="p-2 hover:bg-base-300 rounded-full transition-colors hover:text-primary cursor-pointer"
+            title="More"
+            aria-label="More status options"
+            onClick={() => setMoreMenuOpen((o) => !o)}
+          >
+            <MoreVertical size={18} />
+          </div>
+          <ul
+            tabIndex={0}
+            className="dropdown-content z-50 menu p-1.5 shadow-xl bg-base-100 rounded-box w-52 text-xs text-base-content mt-1"
+          >
+            <li>
+              <button
+                onClick={() => {
+                  haptic("tap");
+                  setMoreMenuOpen(false);
+                  navigate("/status/scheduled");
+                }}
+                className="hover:bg-base-200 py-2 text-left font-medium flex items-center gap-2"
+              >
+                <Clock size={14} />
+                Scheduled statuses
+              </button>
+            </li>
+            <li>
+              <button
+                onClick={() => {
+                  haptic("tap");
+                  setMoreMenuOpen(false);
+                  navigate("/status/archived");
+                }}
+                className="hover:bg-base-200 py-2 text-left font-medium flex items-center gap-2"
+              >
+                <Archive size={14} />
+                Archived statuses
+              </button>
+            </li>
+            <li>
+              <button
+                onClick={() => {
+                  haptic("tap");
+                  setMoreMenuOpen(false);
+                  navigate("/status/privacy");
+                }}
+                className="hover:bg-base-200 py-2 text-left font-medium flex items-center gap-2"
+              >
+                <ShieldCheck size={14} />
+                Status privacy
+              </button>
+            </li>
+          </ul>
+        </div>
       </div>
 
       <StatusRow />

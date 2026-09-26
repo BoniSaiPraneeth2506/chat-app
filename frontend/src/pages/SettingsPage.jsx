@@ -12,6 +12,8 @@ import {
   HardDrive,
   FileDown,
   Type,
+  Settings as SettingsIcon,
+  ArrowLeft,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useThemeStore, TEXT_SIZES } from '../store/useThemeStore';
@@ -146,9 +148,25 @@ const SettingsPage = () => {
       : wallpaper.charAt(0).toUpperCase() + wallpaper.slice(1);
 
   return (
-    <div className="container min-h-screen max-w-2xl px-3 pt-20 pb-12 mx-auto" 
+    <div className="container min-h-screen max-w-2xl px-3 pt-8 pb-12 mx-auto" 
          style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral)' }}>
       <div className="space-y-7">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(-1)}
+            className="p-2 rounded-full transition-colors hover:bg-base-200"
+            title="Back"
+            aria-label="Back"
+          >
+            <ArrowLeft size={18} />
+          </button>
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center justify-center rounded-xl size-10 bg-primary/10 text-primary">
+              <SettingsIcon size={20} />
+            </div>
+            <h1 className="text-xl font-bold">Settings</h1>
+          </div>
+        </div>
         <SettSection title="Appearance">
           <SettRow
             icon={Palette}

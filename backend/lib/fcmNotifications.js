@@ -300,4 +300,39 @@ export async function pushGroupNotification({ group, sender, senderName, message
   );
 }
 
-export default { sendPushNotification, pushDmNotification, pushGroupNotification };
+/**
+ * A status @-mentioned somebody.
+ *
+ * The caller has already decided this person was allowed to see the status —
+ * a mention never overrides someone's privacy choice — so this only carries
+ * the notification. `conversationId` is the status id, which is what a tap
+ * opens, and it is a distinct channel from chat so muting a conversation does
+ * not silence a mention.
+ */
+export async function pushStatusMention({ recipientUserId, sender, status }) {
+  if (!recipientUserId) return;
+  try {
+    const recipient = await User.findById(recipientUserId);
+    if (!recipient) return;
+
+    await sendPushNotification({
+      recipient,
+      senderName: sender?.fullName || "ChatApp",
+      type: "mention",
+      conversationId: String(status?._id || ""),
+      senderId: String(sender?._id || ""),
+      messageContent: {
+        text: `@mentioned you: ${preview(status?.text?.content || status?.caption || "New status")}`,
+      },
+    });
+  } catch (err) {
+    console.error("[push] pushStatusMention error:", err.message);
+  }
+}
+
+export default {
+  sendPushNotification,
+  pushDmNotification,
+  pushGroupNotification,
+  pushStatusMention,
+};

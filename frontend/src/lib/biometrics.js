@@ -18,6 +18,7 @@ import { BiometricAuth } from "@aparajita/capacitor-biometric-auth";
 // parts.
 
 const keyFor = (userId) => `chatLockBio:${userId}`;
+const appLockKeyFor = (userId) => `appLockBio:${userId}`;
 
 export const isBiometryAvailable = async () => {
   if (Capacitor.getPlatform() !== "android") return { available: false, reason: "not a device" };
@@ -91,6 +92,42 @@ export const clearLockSecret = (userId) => {
   if (!userId) return;
   try {
     localStorage.removeItem(keyFor(userId));
+  } catch {
+    // Nothing to do.
+  }
+};
+
+export const hasStoredAppLockSecret = (userId) => {
+  if (!userId) return false;
+  try {
+    return Boolean(localStorage.getItem(appLockKeyFor(userId)));
+  } catch {
+    return false;
+  }
+};
+
+export const storeAppLockSecret = (userId, pin) => {
+  if (!userId || !pin) return;
+  try {
+    localStorage.setItem(appLockKeyFor(userId), pin);
+  } catch {
+    // Storage unavailable. Fingerprint unlock stays off; the PIN still works.
+  }
+};
+
+export const readAppLockSecret = (userId) => {
+  if (!userId) return "";
+  try {
+    return localStorage.getItem(appLockKeyFor(userId)) || "";
+  } catch {
+    return "";
+  }
+};
+
+export const clearAppLockSecret = (userId) => {
+  if (!userId) return;
+  try {
+    localStorage.removeItem(appLockKeyFor(userId));
   } catch {
     // Nothing to do.
   }

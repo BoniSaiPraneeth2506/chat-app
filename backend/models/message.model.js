@@ -287,6 +287,31 @@ const messageSchema = new Schema(
     poll: {
       type: pollSchema,
       default: undefined,
+    },
+    // A reply written from inside the status viewer.
+    //
+    // It is an ordinary message — same collection, same socket event, same
+    // unread path — carrying a pointer back to the status it answers. The
+    // snapshot is deliberately a copy rather than a lookup: once a status is
+    // swept, the reply still has to render as "Status expired" instead of
+    // dangling at a row that no longer exists.
+    //
+    // The kind is stored as `statusType` rather than `type`: this sits in a
+    // `type: { ... }` block, and an inner `type` key would be read as the
+    // schema's own type option.
+    statusRef: {
+      type: {
+        _id: false,
+        statusId: { type: mongoose.Schema.Types.ObjectId, ref: "Status", default: null },
+        statusType: { type: String, default: "image" },
+        caption: { type: String, default: "", maxlength: 300 },
+        // Object key, never a URL: the bucket is private and a stored signed URL
+        // would expire while the message is still readable.
+        mediaKey: { type: String, default: "" },
+        mediaContentType: { type: String, default: "" },
+        mediaType: { type: String, default: "" },
+      },
+      default: undefined,
     }
   },
   { timestamps: true }
@@ -314,6 +339,9 @@ messageSchema.index({ groupId: 1, createdAt: -1 });
 // benefit. The media-purge sweep needs no entry here: deleteAt already carries a
 // TTL index from its field definition, which serves that query too.
 messageSchema.index({ scheduledStatus: 1, scheduledAt: 1 }, { sparse: true });
+
+// Status replies are read per status, for the owner's reply list.
+messageSchema.index({ "statusRef.statusId": 1, createdAt: 1 }, { sparse: true });
 
 const Message=mongoose.model("Message",messageSchema)
 

@@ -22,6 +22,7 @@ import { getWallpaperStyle } from "../pages/SettingsPage";
 import EmojiPicker from "./EmojiPicker";
 import MessageEffects, { shouldBurst } from "./MessageEffects";
 import JumpToLatest from "./JumpToLatest";
+import StatusReplyCard from "./status/StatusReplyCard";
 import { BUBBLE_STYLES } from "../store/useThemeStore";
 
 
@@ -1804,6 +1805,10 @@ const ChatContainer = () => {
                       </p>
                     </div>
                   )}
+
+                  {/* Status reply quoted preview (a reply written from the status
+                      viewer) — WhatsApp-style card, reply text below. */}
+                  {message.statusRef && <StatusReplyCard statusRef={message.statusRef} />}
 
                   {/* ── Mobile: emoji bar — long press (inline near message) ── */}
                   {mobileEmojiId === message._id && selectedMessageIds.length < 2 && (

@@ -13,7 +13,7 @@ import axiosInstance from "./axios";
 /** Which bucket-backed kind this file belongs to, or null if it is not allowed. */
 export const kindFor = (file, limits) => {
   if (!file || !limits?.enabled) return null;
-  for (const kind of ["video", "image", "document"]) {
+  for (const kind of ["video", "image", "document", "audio"]) {
     if (limits[kind]?.types?.includes(file.type)) return kind;
   }
   return null;

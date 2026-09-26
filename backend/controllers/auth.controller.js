@@ -33,6 +33,43 @@ const readTokenClaims = (req) => {
 /** Records a new device session on the user and returns a JWT bound to it. */
 const startSession = async (user, req, res) => {
     const session = buildSession(req, crypto.randomUUID());
+
+    // One device entry per browser/OS/device. Logging in again on the same
+    // machine refreshes the existing session (same sid, so its token stays
+    // valid) instead of pushing a lookalike row every time — otherwise the
+    // Linked devices list fills up with the same "Chrome on Windows 10/11"
+    // repeated for each login. Legacy rows without deviceKey match on their
+    // stored browser/os/device.
+    const identityOf = (s) =>
+        s.deviceKey || (s.browser && s.os && s.device ? `${s.browser}|${s.os}|${s.device}` : "");
+    const existing = (user.sessions || []).find((s) => identityOf(s) === session.deviceKey);
+
+    if (existing) {
+        await User.updateOne(
+            { _id: user._id, "sessions.sid": existing.sid },
+            {
+                $set: {
+                    "sessions.$.ip": session.ip,
+                    "sessions.$.userAgent": session.userAgent,
+                    "sessions.$.browser": session.browser,
+                    "sessions.$.os": session.os,
+                    "sessions.$.device": session.device,
+                    "sessions.$.deviceKey": session.deviceKey,
+                    "sessions.$.lastActive": new Date(),
+                },
+            }
+        );
+        // Collapse real duplicates left over from the no-dedupe era.
+        const dupes = (user.sessions || []).filter((s) => s.sid !== existing.sid && identityOf(s) === session.deviceKey);
+        if (dupes.length > 0) {
+            await User.updateOne(
+                { _id: user._id },
+                { $pull: { sessions: { sid: { $in: dupes.map((d) => d.sid) } } } }
+            );
+        }
+        return generateToken(user._id, res, existing.sid);
+    }
+
     await User.updateOne({ _id: user._id }, { $push: { sessions: session } });
     return generateToken(user._id, res, session.sid);
 };
