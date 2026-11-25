@@ -3,8 +3,16 @@ import Group from "../models/group.model.js";
 import Message from "../models/message.model.js";
 import User from "../models/user.model.js";
 import cloudinary from "../lib/cloudinary.js";
-import { io, getReceiverSocketId } from "../lib/socket.js";
+import { io, getReceiverSocketId, emitGroupMessageExceptThread, roomForThread } from "../lib/socket.js";
 import { hideAnonymousAuthor } from "../lib/anonymity.js";
+import {
+  applyMessageSenderVisibility,
+  applyMessageContactVisibility,
+  redactGroupMemberVisibility,
+  sanitizeModeration,
+  checkGroupTextModeration,
+  canBypassModeration,
+} from "../lib/privacy.js";
 import { isGiphyMediaUrl } from "../lib/giphy.js";
 import { pushGroupNotification } from "../lib/fcmNotifications.js";
 import {
@@ -19,9 +27,33 @@ import {
 // the previous projection stopped at bio, so there was nothing to show.
 // onlinePrivacy comes along because the client decides from it whether an
 // activity line may be displayed at all, the same way the DM header does.
-const MEMBER_FIELDS = "fullName email profilePic bannerPic bio link socialLinks lastSeen onlinePrivacy";
+const MEMBER_FIELDS = "fullName email profilePic bannerPic bio link socialLinks lastSeen onlinePrivacy onlineVisibility photoVisibility";
 
 const MAX_MEMBER_NOTE_LENGTH = 500;
+
+const redactedGroupForViewer = async (group, viewerId) => {
+  const plain = group?.toObject ? group.toObject() : JSON.parse(JSON.stringify(group || null));
+  if (plain) await redactGroupMemberVisibility(plain, viewerId);
+  return plain;
+};
+
+const withThreadReplyCount = async (messages, groupId, viewerId) => {
+  const visible = messages.map((m) => hideAnonymousAuthor(m, viewerId));
+  if (visible.length === 0) return visible;
+  const rootIds = visible.map((m) => m._id);
+  const rows = await Message.aggregate([
+    {
+      $match: {
+        groupId: new mongoose.Types.ObjectId(String(groupId)),
+        threadRootId: { $in: rootIds },
+        deletedFor: { $ne: viewerId },
+      },
+    },
+    { $group: { _id: "$threadRootId", count: { $sum: 1 } } },
+  ]);
+  const counts = new Map(rows.map((row) => [String(row._id), row.count]));
+  return visible.map((m) => ({ ...m, threadReplyCount: counts.get(String(m._id)) || 0 }));
+};
 
 import crypto from "crypto";
 import { canDo, canManagePermissions, sanitizePermissions } from "../lib/groupPermissions.js";
@@ -113,9 +145,8 @@ export const createGroup = async (req, res) => {
 
     const populatedGroup = await Group.findById(newGroup._id).populate(
       "members.user",
-      "fullName email profilePic bio lastSeen"
+      "fullName email profilePic bio lastSeen onlineVisibility photoVisibility"
     );
-
     // Notify all members via sockets to update UI (use socketId lookup)
     populatedGroup.members.forEach((m) => {
       try {
@@ -129,7 +160,7 @@ export const createGroup = async (req, res) => {
       }
     });
 
-    res.status(201).json(populatedGroup);
+    res.status(201).json(await redactedGroupForViewer(populatedGroup, creatorId));
   } catch (error) {
     console.error("Error creating group:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -151,6 +182,8 @@ export const getUserGroups = async (req, res) => {
       .sort({ updatedAt: -1 })
       .lean();
 
+    await Promise.all(groups.map((g) => redactGroupMemberVisibility(g, userId)));
+
     // Each group's newest message travels with the listing.
     //
     // The sidebar needs one preview line per group, and it used to get them by
@@ -168,6 +201,7 @@ export const getUserGroups = async (req, res) => {
         {
           $match: {
             groupId: { $in: groupIds },
+            threadRootId: null,
             deletedFor: { $ne: userId },
             $or: [
               { deleteAt: null },
@@ -190,7 +224,10 @@ export const getUserGroups = async (req, res) => {
         .lean();
 
       previewByGroup = new Map(
-        previews.map((m) => [String(m.groupId), hideAnonymousAuthor(m, userId)])
+        (await applyMessageSenderVisibility(previews, userId)).map((m) => [
+          String(m.groupId),
+          hideAnonymousAuthor(m, userId),
+        ])
       );
     }
 
@@ -213,6 +250,7 @@ export const getGroupDetails = async (req, res) => {
       return res.status(404).json({ message: "Group not found" });
     }
 
+    await redactGroupMemberVisibility(group, req.user._id);
     res.status(200).json(group);
   } catch (error) {
     console.error("Error fetching group details:", error);
@@ -288,7 +326,7 @@ export const markGroupWelcomeSeen = async (req, res) => {
 export const updateGroup = async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { name, description, groupPic, isReadOnly, permissions, welcomeMessage, rules, allowAnonymousQuestions } = req.body;
+    const { name, description, groupPic, isReadOnly, permissions, moderation, welcomeMessage, rules, allowAnonymousQuestions } = req.body;
     const userId = req.user._id;
 
     const group = await Group.findById(groupId);
@@ -339,6 +377,13 @@ export const updateGroup = async (req, res) => {
       if (next.sendMessages) group.isReadOnly = next.sendMessages === "admins";
     }
 
+    if (moderation !== undefined) {
+      if (!canManagePermissions(group, userId)) {
+        return res.status(403).json({ message: "Only admins can change group filters" });
+      }
+      group.moderation = sanitizeModeration(moderation, group.moderation || {});
+    }
+
     if (groupPic && groupPic.startsWith("data:image")) {
       const uploadResponse = await cloudinary.uploader.upload(groupPic);
       group.groupPic = uploadResponse.secure_url;
@@ -348,11 +393,10 @@ export const updateGroup = async (req, res) => {
 
     const updatedGroup = await Group.findById(groupId).populate(
       "members.user",
-      "fullName email profilePic bio lastSeen"
+      "fullName email profilePic bio lastSeen onlineVisibility photoVisibility"
     );
-
     io.to(`group_${groupId}`).emit("groupUpdated", updatedGroup);
-    res.status(200).json(updatedGroup);
+    res.status(200).json(await redactedGroupForViewer(updatedGroup, userId));
   } catch (error) {
     console.error("Error updating group:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -391,10 +435,16 @@ export const addGroupMembers = async (req, res) => {
 
     const updatedGroup = await Group.findById(groupId).populate(
       "members.user",
-      "fullName email profilePic bio lastSeen"
+      "fullName email profilePic bio lastSeen onlineVisibility photoVisibility"
     );
-
-    io.to(`group_${groupId}`).emit("groupUpdated", updatedGroup);
+    const roomSockets = await io.in(`group_${groupId}`).fetchSockets();
+    for (const roomSocket of roomSockets) {
+      const viewerId = roomSocket.userId?.toString();
+      const viewerGroup = JSON.parse(JSON.stringify(updatedGroup));
+      if (viewerId) await redactGroupMemberVisibility(viewerGroup, viewerId);
+      io.to(roomSocket.id).emit("groupUpdated", viewerGroup);
+    }
+    await redactGroupMemberVisibility(updatedGroup, userId);
 
     // Automatically greet each newcomer in the chat itself.
     await Promise.all(
@@ -430,13 +480,12 @@ export const removeGroupMember = async (req, res) => {
 
     const updatedGroup = await Group.findById(groupId).populate(
       "members.user",
-      "fullName email profilePic bio lastSeen"
+      "fullName email profilePic bio lastSeen onlineVisibility photoVisibility"
     );
-
     io.to(`group_${groupId}`).emit("groupUpdated", updatedGroup);
     io.to(memberId.toString()).emit("removedFromGroup", { groupId });
 
-    res.status(200).json(updatedGroup);
+    res.status(200).json(await redactedGroupForViewer(updatedGroup, userId));
   } catch (error) {
     console.error("Error removing group member:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -472,11 +521,10 @@ export const updateMemberRole = async (req, res) => {
 
     const updatedGroup = await Group.findById(groupId).populate(
       "members.user",
-      "fullName email profilePic bio lastSeen"
+      "fullName email profilePic bio lastSeen onlineVisibility photoVisibility"
     );
-
     io.to(`group_${groupId}`).emit("groupUpdated", updatedGroup);
-    res.status(200).json(updatedGroup);
+    res.status(200).json(await redactedGroupForViewer(updatedGroup, userId));
   } catch (error) {
     console.error("Error updating member role:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -506,7 +554,11 @@ export const getGroupMessages = async (req, res) => {
     const query = {
       groupId,
       deletedFor: { $ne: userId },
-      $or: [{ deleteAt: null }, { deleteAt: { $exists: false } }, { deleteAt: { $gt: new Date() } }],
+      $or: [
+        { threadRootId: null },
+        { threadRootId: { $exists: false } },
+      ],
+      $and: [{ $or: [{ deleteAt: null }, { deleteAt: { $exists: false } }, { deleteAt: { $gt: new Date() } }] }],
     };
 
     const base = () =>
@@ -523,13 +575,130 @@ export const getGroupMessages = async (req, res) => {
     // `?limit=1` "latest message" preview show the group's first message.
     if (limit > 0) {
       const page = await base().sort({ createdAt: -1 }).skip(skip).limit(limit);
-      return res.status(200).json(page.reverse().map((m) => hideAnonymousAuthor(m, userId)));
+      return res.status(200).json(
+        await withThreadReplyCount(await applyMessageSenderVisibility(page.reverse(), userId), groupId, userId)
+      );
     }
 
     const messages = await base().sort({ createdAt: 1 });
-    res.status(200).json(messages.map((m) => hideAnonymousAuthor(m, userId)));
+    res.status(200).json(
+      await withThreadReplyCount(await applyMessageSenderVisibility(messages, userId), groupId, userId)
+    );
   } catch (error) {
     console.error("Error fetching group messages:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+const liveThreadFilter = (userId) => ({
+  deletedFor: { $ne: userId },
+  $or: [{ deleteAt: null }, { deleteAt: { $exists: false } }, { deleteAt: { $gt: new Date() } }],
+});
+
+export const getThreadMessages = async (req, res) => {
+  try {
+    const { groupId, rootId } = req.params;
+    const userId = req.user._id;
+    const group = await Group.findById(groupId).select("members.user");
+    if (!group) return res.status(404).json({ message: "Group not found" });
+    if (!group.members.some((m) => m.user?.toString() === userId.toString())) {
+      return res.status(403).json({ message: "Not a member of this group" });
+    }
+    const root = await Message.findOne({ _id: rootId, groupId }).select("_id");
+    if (!root) return res.status(404).json({ message: "Thread root not found" });
+
+    const messages = await Message.find({ groupId, threadRootId: rootId, ...liveThreadFilter(userId) })
+      .populate("senderId", "fullName email profilePic")
+      .populate("replyTo")
+      .populate("poll.options.votes", "fullName profilePic")
+      .sort({ createdAt: 1 });
+
+    res.status(200).json(
+      await applyMessageContactVisibility(
+        (await applyMessageSenderVisibility(messages, userId)).map((m) => hideAnonymousAuthor(m, userId)),
+        userId
+      )
+    );
+  } catch (error) {
+    console.error("Error fetching thread messages:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const postThreadReply = async (req, res) => {
+  try {
+    const { groupId, rootId } = req.params;
+    const senderId = req.user._id;
+    const { text, replyTo, clientId } = req.body || {};
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ message: "Group not found" });
+    if (!getUserRole(group, senderId)) {
+      return res.status(403).json({ message: "You are not a member of this group" });
+    }
+    if (!canDo(group, senderId, "sendMessages")) {
+      return res.status(403).json({ message: "Only admins and moderators can send messages in this group" });
+    }
+
+    const root = await Message.findOne({ _id: rootId, groupId });
+    if (!root) return res.status(404).json({ message: "Thread root not found" });
+    if (root.threadRootId) {
+      return res.status(400).json({ message: "Replies must target the thread root" });
+    }
+
+    if (!canBypassModeration(group, senderId)) {
+      const verdict = checkGroupTextModeration(group, text);
+      if (!verdict.allowed) return res.status(400).json({ message: verdict.reason });
+    }
+
+    let parentId = root._id;
+    if (replyTo && String(replyTo) !== String(rootId)) {
+      const parent = await Message.findOne({
+        _id: replyTo,
+        groupId,
+        threadRootId: rootId,
+      }).select("_id");
+      if (!parent) return res.status(400).json({ message: "Invalid thread parent" });
+      parentId = parent._id;
+    }
+
+    const reply = new Message({
+      senderId,
+      groupId,
+      text: typeof text === "string" ? text.slice(0, 10000) : "",
+      replyTo: parentId,
+      threadRootId: root._id,
+      threadParentId: parentId,
+    });
+    await reply.save();
+
+    const populated = await Message.findById(reply._id)
+      .populate("senderId", "fullName email profilePic")
+      .populate("replyTo");
+
+    const payload = { ...hideAnonymousAuthor(populated, senderId), clientId: clientId || null };
+
+    const count = await Message.countDocuments({
+      threadRootId: rootId,
+      ...liveThreadFilter(senderId),
+    });
+    io.to(roomForThread(String(rootId))).emit("newThreadReply", {
+      threadRootId: String(rootId),
+      groupMessage: payload,
+      replyCount: count,
+    });
+
+    const rootPopulated = await Message.findById(rootId)
+      .populate("senderId", "fullName email profilePic")
+      .populate("replyTo");
+    emitGroupMessageExceptThread(groupId, rootId, "newGroupMessage", {
+      ...hideAnonymousAuthor(rootPopulated, senderId),
+      threadReplyCount: count,
+    });
+
+    res.status(201).json(payload);
+  } catch (error) {
+    console.error("Error posting thread reply:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -745,6 +914,11 @@ export const sendGroupMessage = async (req, res) => {
       return res.status(403).json({ message: "Only admins and moderators can send messages in this group" });
     }
 
+    if (!canBypassModeration(group, senderId)) {
+      const verdict = checkGroupTextModeration(group, `${text || ""} ${voiceTranscript || ""}`);
+      if (!verdict.allowed) return res.status(400).json({ message: verdict.reason });
+    }
+
     // Checked against the group, not taken on trust from the client: otherwise
     // any member could post namelessly in a group that never enabled it.
     const anonymous = Boolean(isAnonymous) && group.allowAnonymousQuestions === true;
@@ -875,8 +1049,9 @@ export const sendGroupMessage = async (req, res) => {
     // sent the message recognise its own optimistic copy, which is what allows the
     // broadcast to reach that account's *other* devices instead of being discarded
     // wholesale to avoid showing a duplicate.
-    io.to(`group_${groupId}`).emit("newGroupMessage", {
+    emitGroupMessageExceptThread(groupId, null, "newGroupMessage", {
       ...hideAnonymousAuthor(populatedMessage),
+      threadReplyCount: 0,
       clientId: clientId || null,
     });
 
@@ -892,7 +1067,7 @@ export const sendGroupMessage = async (req, res) => {
       mentions: validMentions,
     }).catch(() => {});
 
-    res.status(201).json(hideAnonymousAuthor(populatedMessage, senderId));
+    res.status(201).json({ ...hideAnonymousAuthor(populatedMessage, senderId), threadReplyCount: 0 });
   } catch (error) {
     console.error("Error sending group message:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -1010,7 +1185,7 @@ export const joinGroupByInvite = async (req, res) => {
 
     const populated = await Group.findById(group._id).populate(
       "members.user",
-      "fullName email profilePic bio lastSeen"
+      "fullName email profilePic bio lastSeen onlineVisibility photoVisibility"
     );
 
     // Tell the room so existing members see the new arrival without a refetch,
@@ -1023,7 +1198,7 @@ export const joinGroupByInvite = async (req, res) => {
       await postGroupWelcome(group._id, userId.toString());
     }
 
-    res.status(200).json({ group: populated, alreadyMember });
+    res.status(200).json({ group: await redactedGroupForViewer(populated, userId), alreadyMember });
   } catch (error) {
     console.error("Error in joinGroupByInvite:", error.message);
     res.status(500).json({ message: "Could not join this group" });

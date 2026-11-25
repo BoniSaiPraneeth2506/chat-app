@@ -17,6 +17,24 @@ const groupMemberSchema = new mongoose.Schema({
   },
 });
 
+const moderationSchema = new mongoose.Schema({
+  blockedWords: {
+    type: [String],
+    default: [],
+  },
+  links: {
+    mode: {
+      type: String,
+      enum: ["allow", "block", "allowedOnly"],
+      default: "allow",
+    },
+    allowedDomains: {
+      type: [String],
+      default: [],
+    },
+  },
+}, { _id: false });
+
 const groupSchema = new mongoose.Schema(
   {
     name: {
@@ -72,6 +90,10 @@ const groupSchema = new mongoose.Schema(
     allowAnonymousQuestions: {
       type: Boolean,
       default: false,
+    },
+    moderation: {
+      type: moderationSchema,
+      default: () => ({ blockedWords: [], links: { mode: "allow", allowedDomains: [] } }),
     },
     // Shown once to each member the first time they open the group after
     // joining. Both optional: a group with neither set shows nothing, so

@@ -55,6 +55,7 @@ app.use(
           "blob:",
           "https://res.cloudinary.com",   // profile pics & chat images
           "https://cloudinary.com",
+          "https://i.ytimg.com",
           ...R2_CSP,               // document/video thumbnails
         ],
         mediaSrc: [
@@ -69,6 +70,8 @@ app.use(
           "ws:",
           ...ALLOWED_ORIGINS,
           "https://res.cloudinary.com",
+          "https://api.github.com",
+          "https://api.microlink.io",
           ...R2_CSP,                     // presigned PUT uploads
         ],
         frameSrc: ["'none'"],

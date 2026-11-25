@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useAuthStore from "../store/useAuthStore";
-import { Camera, Mail, User, FileText, Globe, ImagePlus, Trash2 } from "lucide-react";
+import { Camera, Mail, User, FileText, Globe, ImagePlus, Eye, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 import {
   SOCIAL_PLATFORMS,
@@ -35,6 +35,12 @@ const cardClass = "rounded-2xl bg-base-200";
 
 const sectionLabel = "text-[11px] font-semibold uppercase tracking-wider text-base-content/40 px-1";
 
+const VISIBILITY_OPTIONS = [
+  { value: "everyone", label: "Everyone" },
+  { value: "contacts", label: "People I've chatted with" },
+  { value: "nobody", label: "Nobody" },
+];
+
 /** Quiet secondary action — a filled surface, never an outlined box. */
 const ghostButton =
   "bg-base-300/70 hover:bg-base-300 text-base-content font-medium " +
@@ -56,6 +62,8 @@ const ProfilePage = () => {
     link: authUser?.link || "",
     onlinePrivacy: authUser?.onlinePrivacy !== false,
     typingPrivacy: authUser?.typingPrivacy !== false,
+    onlineVisibility: authUser?.onlineVisibility || "everyone",
+    photoVisibility: authUser?.photoVisibility || "everyone",
     socialLinks: toSocialLinksForm(authUser),
   });
 
@@ -121,7 +129,9 @@ const ProfilePage = () => {
       bio: authUser?.bio || "",
       link: authUser?.link || "",
       onlinePrivacy: authUser?.onlinePrivacy !== false,
-    typingPrivacy: authUser?.typingPrivacy !== false,
+      typingPrivacy: authUser?.typingPrivacy !== false,
+      onlineVisibility: authUser?.onlineVisibility || "everyone",
+      photoVisibility: authUser?.photoVisibility || "everyone",
       socialLinks: toSocialLinksForm(authUser),
     });
     setIsEditing(true);
@@ -146,6 +156,8 @@ const ProfilePage = () => {
         link: formData.link.trim(),
         onlinePrivacy: formData.onlinePrivacy,
         typingPrivacy: formData.typingPrivacy,
+        onlineVisibility: formData.onlineVisibility,
+        photoVisibility: formData.photoVisibility,
         socialLinks: Object.fromEntries(
           Object.entries(formData.socialLinks).map(([key, value]) => [key, value.trim()])
         ),
@@ -381,6 +393,42 @@ const ProfilePage = () => {
                   onChange={(e) => setFormData({ ...formData, typingPrivacy: e.target.checked })}
                 />
               </label>
+
+              <div className={`${cardClass} px-4 py-3.5`}>
+                <label htmlFor="pf-online-visibility" className="flex items-center gap-2 text-xs font-medium text-base-content/55">
+                  <Eye className="w-3.5 h-3.5" />
+                  Online status
+                </label>
+                <select
+                  id="pf-online-visibility"
+                  className={`${fieldClass} h-11 px-1 text-[15px] mt-1.5 min-w-0 max-w-full [&>option]:bg-base-100 [&>option]:text-base-content`}
+                  style={{ colorScheme: "dark light" }}
+                  value={formData.onlineVisibility}
+                  onChange={(e) => setFormData({ ...formData, onlineVisibility: e.target.value })}
+                >
+                  {VISIBILITY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value} className="bg-base-100 text-base-content">{option.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className={`${cardClass} px-4 py-3.5`}>
+                <label htmlFor="pf-photo-visibility" className="flex items-center gap-2 text-xs font-medium text-base-content/55">
+                  <ImagePlus className="w-3.5 h-3.5" />
+                  Profile photo
+                </label>
+                <select
+                  id="pf-photo-visibility"
+                  className={`${fieldClass} h-11 px-1 text-[15px] mt-1.5 min-w-0 max-w-full [&>option]:bg-base-100 [&>option]:text-base-content`}
+                  style={{ colorScheme: "dark light" }}
+                  value={formData.photoVisibility}
+                  onChange={(e) => setFormData({ ...formData, photoVisibility: e.target.value })}
+                >
+                  {VISIBILITY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value} className="bg-base-100 text-base-content">{option.label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div className="flex gap-3 pt-1">

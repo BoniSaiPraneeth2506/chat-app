@@ -33,6 +33,7 @@ const MessageAttachment = ({ messageId, attachment, onOpenImage, progress, onCan
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showVideoNotePlayer, setShowVideoNotePlayer] = useState(false);
 
   // The file being sent from this device is read straight off the disk. Checked
   // against the live set rather than trusted: this value is written onto the
@@ -40,6 +41,7 @@ const MessageAttachment = ({ messageId, attachment, onOpenImage, progress, onCan
   // a previous session no longer resolves.
   const local = isLiveObjectUrl(attachment.localUrl) ? attachment.localUrl : "";
   const isUploading = typeof progress === "number";
+  const isVideoNote = Boolean(attachment.isVideoNote || /video-note/i.test(attachment.name || ""));
 
   const resolve = async () => {
     if (local) return local;
@@ -94,6 +96,44 @@ const MessageAttachment = ({ messageId, attachment, onOpenImage, progress, onCan
         <AlertCircle size={14} className="text-error shrink-0" />
         <span className="text-[11.5px] t-muted">{error}</span>
       </div>
+    );
+  }
+
+  if (isVideoNote && attachment.kind === "video") {
+    const source = local || url;
+    if (showVideoNotePlayer && source) {
+      return (
+        <div className="relative mb-1.5 size-28 overflow-hidden rounded-full border-2 border-primary/40 bg-black shadow-lg">
+          <video src={source} controls autoPlay playsInline className="size-full object-cover" />
+          {uploadOverlay}
+        </div>
+      );
+    }
+    return (
+      <button
+        type="button"
+        onClick={async () => {
+          if (restricted) return;
+          if (!source) await resolve();
+          setShowVideoNotePlayer(true);
+        }}
+        className="relative mb-1.5 grid size-28 place-items-center overflow-hidden rounded-full border-2 border-primary/40 bg-black shadow-lg active:scale-[0.98] transition-transform"
+      >
+        {attachment.posterUrl ? (
+          <img src={attachment.posterUrl} alt="Video note" className="absolute inset-0 size-full object-cover opacity-85" />
+        ) : local ? (
+          <video src={local} muted playsInline preload="metadata" className="absolute inset-0 size-full object-cover opacity-85" />
+        ) : null}
+        <span className="relative grid size-11 place-items-center rounded-full bg-black/55 text-white backdrop-blur-sm">
+          {isLoading ? <Loader size={18} className="animate-spin" /> : <Play size={20} className="ml-0.5" />}
+        </span>
+        {(attachment.duration || isUploading) && (
+          <span className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/65 px-1.5 py-0.5 text-[9px] font-semibold text-white/95">
+            {isUploading ? `${progress}%` : `${Math.round(attachment.duration)}s`}
+          </span>
+        )}
+        {uploadOverlay}
+      </button>
     );
   }
 

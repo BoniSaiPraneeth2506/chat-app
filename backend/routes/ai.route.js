@@ -7,6 +7,7 @@ import {
   textToSpeech,
   speechToText,
 } from "../controllers/ai.controller.js";
+import { summarizeChat, catchUpSummaries } from "../controllers/aiSummary.controller.js";
 
 const router = express.Router();
 
@@ -17,5 +18,7 @@ router.post("/translate", protectRoute, translate);
 router.post("/transliterate", protectRoute, transliterate);
 router.post("/text-to-speech", protectRoute, textToSpeech);
 router.post("/speech-to-text", protectRoute, speechToText);
+router.post("/summarize-chat/:conversationId", protectRoute, summarizeChat);
+router.post("/catch-up", protectRoute, catchUpSummaries);
 
 export default router;

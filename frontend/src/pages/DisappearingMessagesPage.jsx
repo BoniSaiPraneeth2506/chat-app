@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { ArrowLeft, Timer } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import useAuthStore from "../store/useAuthStore";
@@ -16,10 +15,9 @@ const DisappearingMessagesPage = () => {
   const navigate = useNavigate();
   const authUser = useAuthStore((s) => s.authUser);
   const updateProfile = useAuthStore((s) => s.updateProfile);
-  const [messageTimer, setMessageTimer] = useState(authUser?.messageTimer || "off");
+  const messageTimer = authUser?.messageTimer || "off";
 
   const select = async (value) => {
-    setMessageTimer(value);
     await updateProfile({ messageTimer: value });
     toast.success(value === "off" ? "Disappearing messages off" : `New chats disappear after ${value}`);
   };

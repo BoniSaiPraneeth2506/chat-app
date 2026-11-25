@@ -152,6 +152,14 @@ const messageSchema = new Schema(
     callStatus: {
       type: String, // "completed", "missed", "declined"
     },
+    status: {
+      type: String,
+      default: "",
+    },
+    declineReason: {
+      type: String,
+      default: "",
+    },
     deleteAt: {
       type: Date,
       // Deliberately not `expires: 0`. A TTL deletion fires no application hook,
@@ -165,6 +173,16 @@ const messageSchema = new Schema(
       expires: 600,
     },
     replyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+      default: null
+    },
+    threadRootId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+      default: null
+    },
+    threadParentId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Message",
       default: null
@@ -333,6 +351,7 @@ const messageSchema = new Schema(
 messageSchema.index({ senderId: 1, receiverId: 1, createdAt: -1 });
 messageSchema.index({ receiverId: 1, senderId: 1, createdAt: -1 });
 messageSchema.index({ groupId: 1, createdAt: -1 });
+messageSchema.index({ threadRootId: 1, createdAt: 1 }, { partialFilterExpression: { threadRootId: { $type: "objectId" } } });
 
 // The scheduled-send sweep. Sparse, because only a scheduled message carries a
 // scheduledStatus and indexing the nulls would cover the whole collection for no

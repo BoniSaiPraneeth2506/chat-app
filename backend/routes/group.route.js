@@ -9,6 +9,8 @@ import {
   removeGroupMember,
   updateMemberRole,
   getGroupMessages,
+  getThreadMessages,
+  postThreadReply,
   sendGroupMessage,
   createGroupPoll,
   voteGroupPoll,
@@ -35,6 +37,8 @@ router.delete("/:groupId/invite", protectRoute, revokeGroupInvite);
 router.delete("/:groupId/members/:memberId", protectRoute, removeGroupMember);
 router.put("/:groupId/roles", protectRoute, updateMemberRole);
 router.get("/:groupId/messages", protectRoute, getGroupMessages);
+router.get("/:groupId/threads/:rootId/messages", protectRoute, getThreadMessages);
+router.post("/:groupId/threads/:rootId/replies", protectRoute, postThreadReply);
 router.post("/:groupId/welcome-seen", protectRoute, markGroupWelcomeSeen);
 router.post("/:groupId/members/:memberId/note", protectRoute, setMemberNote);
 router.post("/:groupId/send", protectRoute, sendGroupMessage);

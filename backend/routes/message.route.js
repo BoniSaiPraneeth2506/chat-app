@@ -26,7 +26,9 @@ import {
   getMessageInfo,
   requestTranscript,
   getCallHistory,
-  searchMessages
+  searchMessages,
+  getUnreadSummary,
+  getMutualGroups
 } from "../controllers/message.controller.js";
 // rate limiting removed: middleware import intentionally omitted
 
@@ -36,6 +38,8 @@ router.get('/users',protectRoute,getUsersForSidebar)
 router.get('/blocked',protectRoute,getBlockedUsers)
 router.get('/export/:id',protectRoute,exportChat)
 router.get('/info/:id',protectRoute,getMessageInfo)
+router.get('/unread-summary',protectRoute,getUnreadSummary)
+router.get('/contact/:id/groups',protectRoute,getMutualGroups)
 router.get('/contact/:id',protectRoute,getContactById)
 router.get('/media/:id',protectRoute,getSharedMedia)
 router.get('/dates/:id',protectRoute,getMessageDates)

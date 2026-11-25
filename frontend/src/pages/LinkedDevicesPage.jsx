@@ -1,5 +1,5 @@
-import { Laptop, Smartphone, Tablet, LogOut, MonitorSmartphone, ShieldCheck } from "lucide-react";
-import { useEffect } from "react";
+import { Laptop, Smartphone, Tablet, LogOut, MonitorSmartphone, ShieldCheck, Pencil, Check, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import useAuthStore from "../store/useAuthStore";
 
 // Same surface language as the profile screen: borderless panels one step
@@ -49,7 +49,32 @@ const LinkedDevicesPage = () => {
     getSessions,
     revokeSession,
     revokeOtherSessions,
+    renameSession,
   } = useAuthStore();
+
+  const [editingSid, setEditingSid] = useState(null);
+  const [labelDraft, setLabelDraft] = useState("");
+  const [isRenaming, setIsRenaming] = useState(false);
+
+  const startRename = (session) => {
+    setEditingSid(session.sid);
+    setLabelDraft(session.label || "");
+  };
+
+  const saveRename = async (sid) => {
+    const label = labelDraft.trim();
+    if (!label) return;
+    setIsRenaming(true);
+    try {
+      await renameSession(sid, label);
+      setEditingSid(null);
+      setLabelDraft("");
+    } catch {
+      return;
+    } finally {
+      setIsRenaming(false);
+    }
+  };
 
   // Keyed on the id: authUser is replaced whenever anything about the account
   // changes, and refetching the session list each time flashed its loading state
@@ -112,7 +137,7 @@ const LinkedDevicesPage = () => {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-[15px] font-medium text-base-content truncate">
-                          {session.browser} on {session.os}
+                          {session.label || `${session.browser} on ${session.os}`}
                         </span>
                         {session.isCurrent && (
                           <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-primary/15 text-primary flex-shrink-0">
@@ -131,13 +156,53 @@ const LinkedDevicesPage = () => {
                       </div>
                     </div>
 
-                    {!session.isCurrent && (
-                      <button
-                        onClick={() => revokeSession(session.sid)}
-                        className="px-3 h-9 rounded-xl bg-base-300/70 hover:bg-error/15 hover:text-error text-[13px] font-medium text-base-content/70 active:scale-[0.97] transition-all flex-shrink-0"
-                      >
-                        Log out
-                      </button>
+                    {editingSid === session.sid ? (
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <input
+                          autoFocus
+                          type="text"
+                          value={labelDraft}
+                          onChange={(e) => setLabelDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") saveRename(session.sid);
+                            if (e.key === "Escape") setEditingSid(null);
+                          }}
+                          className="w-28 h-9 px-2 rounded-xl bg-base-300/70 text-[13px] text-base-content outline-none focus:ring-1 focus:ring-primary"
+                        />
+                        <button
+                          onClick={() => saveRename(session.sid)}
+                          disabled={isRenaming || !labelDraft.trim()}
+                          className="grid place-items-center size-9 rounded-xl bg-base-300/70 hover:bg-primary/15 hover:text-primary text-base-content/70 active:scale-[0.97] transition-all disabled:opacity-40"
+                          title="Save name"
+                        >
+                          <Check size={15} />
+                        </button>
+                        <button
+                          onClick={() => setEditingSid(null)}
+                          className="grid place-items-center size-9 rounded-xl bg-base-300/70 hover:bg-base-300 text-base-content/70 active:scale-[0.97] transition-all"
+                          title="Cancel"
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <button
+                          onClick={() => startRename(session)}
+                          className="grid place-items-center size-9 rounded-xl bg-base-300/70 hover:bg-base-300 text-base-content/70 active:scale-[0.97] transition-all"
+                          title="Rename device"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        {!session.isCurrent && (
+                          <button
+                            onClick={() => revokeSession(session.sid)}
+                            className="px-3 h-9 rounded-xl bg-base-300/70 hover:bg-error/15 hover:text-error text-[13px] font-medium text-base-content/70 active:scale-[0.97] transition-all flex-shrink-0"
+                          >
+                            Log out
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 );

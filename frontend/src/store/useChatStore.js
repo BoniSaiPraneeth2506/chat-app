@@ -55,7 +55,6 @@ import toast from "react-hot-toast";
 import axiosInstance from "../lib/axios";
 import useAuthStore from "./useAuthStore";
 import { useGroupStore } from "./useGroupStore";
-import { useThemeStore } from "./useThemeStore";
 import {
   cacheMessages,
   getCachedMessages,
@@ -81,6 +80,9 @@ const dmKey = (userId) => `dm:${userId}`;
 // message actually lives in. Written as functions rather than a module-level
 // import binding because the two stores import each other; resolving the state
 // at call time is what keeps that cycle harmless.
+const canSendReadReceipts = () =>
+  useAuthStore.getState().authUser?.readReceiptsEnabled !== false;
+
 const removeGroupMessageLocally = (messageId) => {
   const gs = useGroupStore.getState();
   if (!gs?.groupMessages?.length) return;
@@ -245,6 +247,37 @@ const processPendingIceCandidates = async (pc) => {
   }
 };
 
+const saveOutgoingCallLog = ({ callPartner, callType, callState, set }) => {
+  if (!callPartner) return;
+  const connected = callState === "connected" && Boolean(callStartTime);
+  const callDuration = connected ? Math.max(1, Math.round((Date.now() - callStartTime) / 1000)) : 0;
+  axiosInstance
+    .post("/messages/call-log", {
+      receiverId: callPartner._id || callPartner,
+      callType: callType === "video" ? "video" : "voice",
+      callDuration,
+      callStatus: "outgoing",
+    })
+    .then((res) => {
+      if (res.data) set((state) => ({ messages: upsertIntoList(state.messages, res.data) }));
+    })
+    .catch((err) => {
+      console.error("Failed to save call log", err);
+    });
+};
+
+const handleWindowShareIntent = (event) => {
+  try {
+    useChatStore.getState().handleShareIntent(event.detail || {});
+  } catch {
+    return;
+  }
+};
+
+if (typeof window !== "undefined") {
+  window.addEventListener("chatty:share", handleWindowShareIntent);
+}
+
 export const useChatStore = create((set, get) => ({
   messages: [],
   users: [],
@@ -253,6 +286,8 @@ export const useChatStore = create((set, get) => ({
   isMessagesLoading: false,
   latestMessages: {},
   unreadCounts: {},
+  selectedUnreadOnOpen: 0,
+  selectedUnreadSince: null,
   // Populated from the server by getUsers and kept current by the messagesRead
   // socket event. Deliberately not persisted locally — see the handler.
   lastReadTimestamps: {},
@@ -305,9 +340,24 @@ export const useChatStore = create((set, get) => ({
   localStream: null,
   isMuted: false,
   remoteStream: null,
+  remoteVideoEnabled: true,
   peerConnection: null,
   incomingSignal: null,
   setPeerConnection: (pc) => set({ peerConnection: pc }),
+
+  composerPrefill: null,
+  shareRequest: null,
+  handleShareIntent: ({ text, files } = {}) => {
+    const list = Array.from(files || []);
+    if (typeof text === "string" && text.trim()) {
+      set({ composerPrefill: { text, nonce: Date.now() } });
+    }
+    if (list.length > 0) {
+      set({ shareRequest: { files: list, nonce: Date.now() } });
+    }
+  },
+  consumeComposerPrefill: () => set({ composerPrefill: null }),
+  consumeShareRequest: () => set({ shareRequest: null }),
 
   isScreenSharing: false,
   screenStream: null,
@@ -613,7 +663,7 @@ export const useChatStore = create((set, get) => ({
       // Emit markAsRead to receiver
       const socket = useAuthStore.getState().socket;
       const currentUser = useAuthStore.getState().authUser;
-      if (socket && currentUser && useThemeStore.getState().privacyReadReceipts) {
+      if (socket && currentUser && canSendReadReceipts()) {
         socket.emit("markAsRead", { senderId: userId, receiverId: currentUser._id });
       }
     } catch (error) {
@@ -650,11 +700,24 @@ export const useChatStore = create((set, get) => ({
    * The local file is rendered directly rather than downloaded back once the
    * upload finishes, so the bubble never flickers between the two.
    */
-  sendAttachmentMessage: async ({ file, kind, text = "", localUrl: staged = "", posterUrl = "", restricted = false }) => {
+  sendAttachmentMessage: async (input, captionArg = "", optionsArg = {}) => {
     const authUser = useAuthStore.getState().authUser;
     const { selectedUser } = get();
     const selectedGroup = useGroupStore.getState().selectedGroup;
     if (!authUser || (!selectedUser && !selectedGroup)) return false;
+
+    const legacy = input && typeof input === "object" && "file" in input ? input : null;
+    const file = legacy ? legacy.file : input;
+    if (!file) return false;
+
+    const text = legacy ? (legacy.text ?? legacy.caption ?? "") : (captionArg || "");
+    const options = legacy ? (legacy.options || legacy) : (optionsArg || {});
+    const isVideoNote = Boolean(options.isVideoNote);
+    const kind = legacy?.kind || options.kind || (file.type?.startsWith("image/") ? "image" : file.type?.startsWith("video/") ? "video" : "document");
+    const staged = legacy?.localUrl || options.localUrl || "";
+    const posterUrl = legacy?.posterUrl || options.posterUrl || "";
+    const restricted = legacy?.restricted ?? options.restricted ?? false;
+    const duration = options.duration;
 
     const tempId = "temp-file-" + Date.now();
     const localUrl = staged || (kind === "document" ? "" : createLocalUrl(file));
@@ -670,10 +733,21 @@ export const useChatStore = create((set, get) => ({
       groupId: selectedGroup ? selectedGroup._id : undefined,
       text: text || "",
       attachments: [
-        { kind, name: file.name, mime: file.type, size: file.size, localUrl, posterUrl, pending: true },
+        {
+          kind,
+          name: file.name || (isVideoNote ? "video-note.webm" : "attachment"),
+          mime: file.type || "application/octet-stream",
+          size: file.size,
+          localUrl,
+          posterUrl,
+          duration,
+          isVideoNote,
+          pending: true,
+        },
       ],
       uploadProgress: 0,
       restricted: restricted || false,
+      isVideoNote,
       isSending: true,
       createdAt: new Date().toISOString(),
     };
@@ -716,9 +790,10 @@ export const useChatStore = create((set, get) => ({
 
       // Uploaded. The message itself carries only metadata.
       const payload = {
-        attachments: [posterUrl ? { ...attachment, posterUrl } : attachment],
+        attachments: [posterUrl || duration || isVideoNote ? { ...attachment, ...(posterUrl ? { posterUrl } : {}), ...(duration ? { duration } : {}), ...(isVideoNote ? { isVideoNote: true } : {}) } : attachment],
         clientId: tempId,
         restricted,
+        ...(isVideoNote ? { isVideoNote: true } : {}),
       };
       if (text) payload.text = text;
       const res = inGroup
@@ -733,8 +808,16 @@ export const useChatStore = create((set, get) => ({
         isSending: false,
         uploadProgress: undefined,
         attachments: (res.data.attachments || []).map((att, index) =>
-          index === 0 && localUrl ? { ...att, localUrl } : att
+          index === 0
+            ? {
+                ...att,
+                ...(localUrl ? { localUrl } : {}),
+                ...(isVideoNote ? { isVideoNote: true } : {}),
+                ...(duration ? { duration } : {}),
+              }
+            : att
         ),
+        ...(isVideoNote ? { isVideoNote: true } : {}),
       };
       const replace = (list) => list.map((m) => (m.tempId === tempId ? confirmed : m));
       if (inGroup) useGroupStore.setState((state) => ({ groupMessages: replace(state.groupMessages) }));
@@ -755,10 +838,8 @@ export const useChatStore = create((set, get) => ({
     } catch (error) {
       drop();
       releaseLocalUrl(localUrl);
-      if (error.message !== "aborted") {
-        toast.error(
-          error.response?.data?.message || error.message || "Could not send that file"
-        );
+      if (error?.message !== "aborted" && error?.name !== "CanceledError" && error?.code !== "ERR_CANCELED") {
+        throw error;
       }
       return false;
     } finally {
@@ -873,24 +954,43 @@ export const useChatStore = create((set, get) => ({
       set({ isLoadingMore: false });
     }
   },
-  sendMessage: async (messageData) => {
-    const { selectedUser, replyingToMessage } = get();
+  sendMessage: async (messageData, targetUser = null, options = {}) => {
+    const selectedUser = targetUser || get().selectedUser;
+    const { replyingToMessage } = get();
     const authUser = useAuthStore.getState().authUser;
-    if (!selectedUser || !authUser) return;
+    if (!selectedUser || !authUser) return false;
+
+    const payloadBase = typeof messageData === "string" ? { text: messageData } : (messageData || {});
+    const resolvedPayload = Object.keys(options).length > 0 ? { ...payloadBase, ...options } : payloadBase;
+    const isOpenConversation = get().selectedUser && String(get().selectedUser._id) === String(selectedUser._id);
+    const recipientId = selectedUser._id || selectedUser;
+
+    if (targetUser && !isOpenConversation) {
+      try {
+        const payload = replyingToMessage
+          ? { ...resolvedPayload, replyTo: replyingToMessage._id, clientId: "temp-" + Date.now() }
+          : { ...resolvedPayload, clientId: "temp-" + Date.now() };
+        await axiosInstance.post(`/messages/send/${recipientId}`, payload);
+        return true;
+      } catch (error) {
+        toast.error(error.response?.data?.message || "Could not send that message");
+        return false;
+      }
+    }
 
     const tempId = "temp-" + Date.now();
     const optimisticMsg = {
       _id: tempId,
       tempId,
       senderId: authUser._id,
-      receiverId: selectedUser._id,
-      text: messageData.text || "",
-      image: messageData.image || "",
-      images: messageData.images || [],
-      voice: messageData.voice || "",
-      isOneView: messageData.isOneView || false,
-      restricted: messageData.restricted || false,
-      location: messageData.location,
+      receiverId: recipientId,
+      text: resolvedPayload.text || "",
+      image: resolvedPayload.image || "",
+      images: resolvedPayload.images || [],
+      voice: resolvedPayload.voice || "",
+      isOneView: resolvedPayload.isOneView || false,
+      restricted: resolvedPayload.restricted || false,
+      location: resolvedPayload.location,
       replyTo: replyingToMessage,
       createdAt: new Date().toISOString(),
       isSending: true,
@@ -907,8 +1007,8 @@ export const useChatStore = create((set, get) => ({
     }));
 
     const payload = replyingToMessage
-      ? { ...messageData, replyTo: replyingToMessage._id, clientId: tempId }
-      : { ...messageData, clientId: tempId };
+      ? { ...resolvedPayload, replyTo: replyingToMessage._id, clientId: tempId }
+      : { ...resolvedPayload, clientId: tempId };
 
     try {
       const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, payload);
@@ -1186,16 +1286,21 @@ export const useChatStore = create((set, get) => ({
     socket.off("messageReaction");
     socket.off("messageDeleted");
     socket.off("messageEdited");
+    socket.off("disappearingTimerUpdate");
+    socket.off("privacySettingsUpdated");
     socket.off("callUser");
     socket.off("callAccepted");
     socket.off("callEnded");
     socket.off("iceCandidate");
+    socket.off("callModeChanged");
+    socket.off("renegotiateOffer");
+    socket.off("renegotiateAnswer");
     socket.off("streakUpdate");
 
     // Emit read receipt for current active chat immediately if any
     const { selectedUser } = get();
     const currentUser = useAuthStore.getState().authUser;
-    if (selectedUser && currentUser && useThemeStore.getState().privacyReadReceipts) {
+    if (selectedUser && currentUser && canSendReadReceipts()) {
       console.log(`[Socket Client] Emitting markAsRead on initialization for user: ${selectedUser._id}`);
       socket.emit("markAsRead", { senderId: selectedUser._id, receiverId: currentUser._id });
     }
@@ -1255,7 +1360,7 @@ export const useChatStore = create((set, get) => ({
         set((state) => ({ messages: upsertIntoList(state.messages, { ...newMessage }) }));
 
         // Emit read receipt back immediately if privacy setting allows it
-        if (currentUser && useThemeStore.getState().privacyReadReceipts) {
+        if (currentUser && canSendReadReceipts()) {
           console.log(`[Socket Client] Active chat message received. Emitting markAsRead for: ${selectedUser._id}`);
           socket.emit("markAsRead", { senderId: selectedUser._id, receiverId: currentUser._id });
         }
@@ -1344,6 +1449,27 @@ export const useChatStore = create((set, get) => ({
           }
         });
       }
+    });
+
+    // Keep contact cards in sync when the other side changes global privacy.
+    socket.on("privacySettingsUpdated", ({ userId, onlinePrivacy, onlineVisibility, photoVisibility, typingPrivacy, readReceiptsEnabled, lastSeen }) => {
+      const currentUser = useAuthStore.getState().authUser;
+      if (!currentUser || String(userId) === String(currentUser._id)) return;
+      const patch = {};
+      if (onlinePrivacy !== undefined) patch.onlinePrivacy = onlinePrivacy;
+      if (onlineVisibility !== undefined) patch.onlineVisibility = onlineVisibility;
+      if (photoVisibility !== undefined) patch.photoVisibility = photoVisibility;
+      if (typingPrivacy !== undefined) patch.typingPrivacy = typingPrivacy;
+      if (readReceiptsEnabled !== undefined) patch.readReceiptsEnabled = readReceiptsEnabled;
+      const hidden = onlinePrivacy === false || onlineVisibility === "nobody";
+      if (hidden) patch.lastSeen = null;
+      else if (lastSeen !== undefined) patch.lastSeen = lastSeen;
+      set((state) => ({
+        users: state.users.map((u) => (String(u._id) === String(userId) ? { ...u, ...patch } : u)),
+        selectedUser: state.selectedUser && String(state.selectedUser._id) === String(userId)
+          ? { ...state.selectedUser, ...patch }
+          : state.selectedUser,
+      }));
     });
 
     // Handle user status changes (user goes offline)
@@ -1441,25 +1567,8 @@ export const useChatStore = create((set, get) => ({
     socket.on("callEnded", () => {
       const { peerConnection, localStream, isCaller, callPartner, callType, callState } = get();
       
-      // If we are the caller, we save the call log message to the database
       if (isCaller && callPartner) {
-        let callStatus = "missed";
-        let callDuration = 0;
-        if (callState === "connected" && callStartTime) {
-          callStatus = "completed";
-          callDuration = Math.round((Date.now() - callStartTime) / 1000);
-        }
-
-        axiosInstance.post("/messages/call-log", {
-          receiverId: callPartner._id,
-          callType,
-          callDuration,
-          callStatus
-        }).then((res) => {
-          set((state) => ({ messages: upsertIntoList(state.messages, res.data) }));
-        }).catch((err) => {
-          console.error("Failed to save call log", err);
-        });
+        saveOutgoingCallLog({ callPartner, callType, callState, set });
       }
 
       callStartTime = null;
@@ -1492,9 +1601,38 @@ export const useChatStore = create((set, get) => ({
         peerConnection: null,
         incomingSignal: null,
         isCaller: false,
-        isMuted: false
+        isMuted: false,
+        remoteVideoEnabled: false
       });
       toast("Call ended");
+    });
+
+    socket.on("callModeChanged", ({ mode }) => {
+      if (mode !== "audio" && mode !== "video") return;
+      set({ callType: mode, remoteVideoEnabled: mode === "video" });
+    });
+
+    socket.on("renegotiateOffer", async ({ signal, from }) => {
+      const pc = get().peerConnection;
+      if (!pc || !signal) return;
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(signal));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit("renegotiateAnswer", { signal: pc.localDescription, to: from });
+      } catch {
+        return;
+      }
+    });
+
+    socket.on("renegotiateAnswer", async ({ signal }) => {
+      const pc = get().peerConnection;
+      if (!pc || !signal || !pc.remoteDescription) return;
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(signal));
+      } catch {
+        return;
+      }
     });
 
     // Handle ICE candidates
@@ -1559,6 +1697,7 @@ export const useChatStore = create((set, get) => ({
       socket.off("accountListsUpdated");
     socket.off("accountListsUpdated");
       socket.off("disappearingTimerUpdate");
+      socket.off("privacySettingsUpdated");
       socket.off("userOffline");
       socket.off("typing");
       socket.off("messageReaction");
@@ -1568,6 +1707,9 @@ export const useChatStore = create((set, get) => ({
       socket.off("callAccepted");
       socket.off("callEnded");
       socket.off("iceCandidate");
+      socket.off("callModeChanged");
+      socket.off("renegotiateOffer");
+      socket.off("renegotiateAnswer");
       socket.off("messagePinned");
       socket.off("chatWallpaperUpdate");
       socket.off("messageViewed");
@@ -1585,7 +1727,18 @@ export const useChatStore = create((set, get) => ({
         // ignore cross-store errors
       }
     }
-    set({ selectedUser, isRecipientProfileOpen: false, pinnedMessage: null, messages: [] });
+    const selectedUnreadOnOpen = selectedUser ? Number(get().unreadCounts?.[selectedUser._id] || 0) : 0;
+    const lr = useAuthStore.getState().authUser?.lastReadAt;
+    const rawLr = selectedUser ? (lr?.[selectedUser._id] ?? lr?.get?.(selectedUser._id)) : null;
+    const lrTs = selectedUser ? get().lastReadTimestamps?.[selectedUser._id] : null;
+    const selectedUnreadSince = rawLr
+      ? new Date(rawLr).toISOString()
+      : lrTs
+        ? new Date(lrTs).toISOString()
+        : selectedUnreadOnOpen > 0
+          ? new Date(0).toISOString()
+          : null;
+    set({ selectedUser, isRecipientProfileOpen: false, pinnedMessage: null, messages: [], selectedUnreadOnOpen, selectedUnreadSince });
     if (selectedUser) {
       set((state) => ({
         unreadCounts: {
@@ -1596,7 +1749,7 @@ export const useChatStore = create((set, get) => ({
       // Emit read receipt immediately
       const socket = useAuthStore.getState().socket;
       const currentUser = useAuthStore.getState().authUser;
-      if (socket && currentUser) {
+      if (socket && currentUser && canSendReadReceipts()) {
         socket.emit("markAsRead", { senderId: selectedUser._id, receiverId: currentUser._id });
       }
     }
@@ -1935,13 +2088,13 @@ export const useChatStore = create((set, get) => ({
     }
   },
 
-  startCall: async (type) => {
-    const selectedUser = get().selectedUser;
+  startCall: async (type, targetUser = null) => {
+    const selectedUser = targetUser || get().selectedUser;
     const socket = useAuthStore.getState().socket;
     const authUser = useAuthStore.getState().authUser;
     if (!selectedUser || !socket || !authUser) return;
 
-    set({ callState: "ringing", callType: type, callPartner: selectedUser, isCaller: true });
+    set({ callState: "ringing", callType: type, callPartner: selectedUser, isCaller: true, remoteVideoEnabled: type === "video" });
 
     try {
       // If we already have a local stream, stop its tracks before requesting new one
@@ -2095,28 +2248,95 @@ export const useChatStore = create((set, get) => ({
     get().endCall();
   },
 
+  callUser: (targetUser, type = "audio") => {
+    const normalizedType = type === "audio" ? "voice" : type === "video" ? "video" : type;
+    return get().startCall(normalizedType, targetUser);
+  },
+
+  declineCallWithMessage: async (reason = "Busy right now") => {
+    const { callPartner, callType } = get();
+    if (!callPartner) return false;
+    const partnerId = callPartner._id || callPartner;
+    const cleanReason = String(reason || "Busy right now").trim().slice(0, 60) || "Busy right now";
+    const normalizedType = callType === "video" ? "video" : "voice";
+
+    try {
+      const res = await axiosInstance.post("/messages/call-log", {
+        receiverId: partnerId,
+        callType: normalizedType,
+        callDuration: 0,
+        callStatus: "declined",
+        declineReason: cleanReason,
+      });
+
+      const partner =
+        get().users.find((u) => String(u._id) === String(partnerId)) ||
+        (String(get().selectedUser?._id) === String(partnerId) ? get().selectedUser : callPartner);
+
+      await get().sendMessage(
+        { text: `Declined ${normalizedType} call · ${cleanReason}` },
+        partner
+      );
+
+      if (String(get().selectedUser?._id) === String(partnerId) && res.data) {
+        set((state) => ({ messages: upsertIntoList(state.messages, res.data) }));
+      }
+      set({ isCaller: false, remoteVideoEnabled: false });
+      get().endCall();
+      return true;
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Could not decline that call");
+      set({ isCaller: false, remoteVideoEnabled: false });
+      get().endCall();
+      return false;
+    }
+  },
+
+  toggleCallMode: async () => {
+    const { callPartner, callType, localStream, peerConnection, callState } = get();
+    const socket = useAuthStore.getState().socket;
+    if (!socket || !callPartner || !callState || !["ringing", "connected"].includes(callState)) return false;
+
+    const nextMode = callType === "video" ? "audio" : "video";
+    const partnerId = callPartner._id || callPartner;
+
+    try {
+      if (nextMode === "audio") {
+        localStream?.getVideoTracks?.().forEach((track) => { track.enabled = false; });
+      } else {
+        const existing = localStream?.getVideoTracks?.()[0];
+        if (existing) {
+          existing.enabled = true;
+        } else {
+          const videoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          const track = videoStream.getVideoTracks()[0];
+          const nextStream = localStream || new MediaStream();
+          nextStream.addTrack(track);
+          if (peerConnection) {
+            peerConnection.addTrack(track, nextStream);
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            socket.emit("renegotiateOffer", { signal: peerConnection.localDescription, to: partnerId });
+          }
+          set({ localStream: nextStream });
+        }
+      }
+
+      set({ callType: nextMode, remoteVideoEnabled: nextMode === "video" });
+      socket.emit("callModeChanged", { to: partnerId, mode: nextMode });
+      return true;
+    } catch (err) {
+      toast.error("Could not switch call mode");
+      return false;
+    }
+  },
+
   endCall: () => {
     const { peerConnection, localStream, callPartner, callType, callState, isCaller } = get();
     const socket = useAuthStore.getState().socket;
 
     if (isCaller && callPartner) {
-      let callStatus = "missed";
-      let callDuration = 0;
-      if (callState === "connected" && callStartTime) {
-        callStatus = "completed";
-        callDuration = Math.round((Date.now() - callStartTime) / 1000);
-      }
-
-      axiosInstance.post("/messages/call-log", {
-        receiverId: callPartner._id,
-        callType,
-        callDuration,
-        callStatus
-      }).then((res) => {
-        set((state) => ({ messages: upsertIntoList(state.messages, res.data) }));
-      }).catch((err) => {
-        console.error("Failed to save call log", err);
-      });
+      saveOutgoingCallLog({ callPartner, callType, callState, set });
     }
 
     if (callPartner && socket) {
@@ -2147,7 +2367,8 @@ export const useChatStore = create((set, get) => ({
       peerConnection: null,
       incomingSignal: null,
       isCaller: false,
-      isMuted: false
+      isMuted: false,
+      remoteVideoEnabled: false
     });
   },
 

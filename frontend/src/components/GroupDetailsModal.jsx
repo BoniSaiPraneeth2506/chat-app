@@ -50,6 +50,9 @@ const GroupDetailsModal = () => {
   const [groupPic, setGroupPic] = useState("");
   const [welcomeMessage, setWelcomeMessage] = useState(selectedGroup?.welcomeMessage || "");
   const [rules, setRules] = useState(selectedGroup?.rules || "");
+  const [blockedWords, setBlockedWords] = useState((selectedGroup?.moderation?.blockedWords || []).join(", "));
+  const [linkMode, setLinkMode] = useState(selectedGroup?.moderation?.links?.mode || "allow");
+  const [allowedDomains, setAllowedDomains] = useState((selectedGroup?.moderation?.links?.allowedDomains || []).join(", "));
   const [showAddMembers, setShowAddMembers] = useState(false);
   const [selectedNewMembers, setSelectedNewMembers] = useState([]);
   const [isUpdatingGroup, setIsUpdatingGroup] = useState(false);
@@ -78,13 +81,23 @@ const GroupDetailsModal = () => {
 
   const handleUpdateGroup = async (e) => {
     e.preventDefault();
-    await updateGroup(selectedGroup._id, {
+    const payload = {
       name: name.trim(),
       description: description.trim(),
       groupPic,
       welcomeMessage: welcomeMessage.trim(),
       rules: rules.trim(),
-    });
+    };
+    if (isAdmin) {
+      payload.moderation = {
+        blockedWords: blockedWords.split(",").map((word) => word.trim()).filter(Boolean),
+        links: {
+          mode: linkMode,
+          allowedDomains: allowedDomains.split(",").map((domain) => domain.trim()).filter(Boolean),
+        },
+      };
+    }
+    await updateGroup(selectedGroup._id, payload);
     setIsEditing(false);
   };
 
@@ -177,6 +190,9 @@ const GroupDetailsModal = () => {
                         setDescription(selectedGroup.description || "");
                         setWelcomeMessage(selectedGroup.welcomeMessage || "");
                         setRules(selectedGroup.rules || "");
+                        setBlockedWords((selectedGroup.moderation?.blockedWords || []).join(", "));
+                        setLinkMode(selectedGroup.moderation?.links?.mode || "allow");
+                        setAllowedDomains((selectedGroup.moderation?.links?.allowedDomains || []).join(", "));
                         setIsEditing(true);
                       }}
                       className="p-1 text-base-content/50 hover:text-primary transition-colors"
@@ -230,6 +246,36 @@ const GroupDetailsModal = () => {
                   className="w-full px-1 py-2 text-center text-[14px] bg-transparent border-0 border-b border-base-content/15 rounded-none resize-none outline-none transition-colors focus:border-primary focus:ring-0"
                   placeholder="Group rules — one per line"
                 />
+                {isAdmin && (
+                  <>
+                    <input
+                      type="text"
+                      value={blockedWords}
+                      onChange={(e) => setBlockedWords(e.target.value)}
+                      className="w-full h-10 px-1 text-center text-[13px] bg-transparent border-0 border-b border-base-content/15 rounded-none outline-none transition-colors focus:border-primary focus:ring-0"
+                      placeholder="Blocked words — comma separated"
+                    />
+                    <select
+                      value={linkMode}
+                      onChange={(e) => setLinkMode(e.target.value)}
+                      className="w-full h-10 px-2 text-[13px] bg-base-100 text-base-content border border-base-content/15 rounded-xl outline-none transition-colors focus:border-primary focus:ring-0 [&>option]:bg-base-100 [&>option]:text-base-content"
+                      style={{ colorScheme: "dark light" }}
+                    >
+                      <option value="allow">Links: allowed</option>
+                      <option value="block">Links: block all</option>
+                      <option value="allowedOnly">Links: allowed domains only</option>
+                    </select>
+                    {linkMode === "allowedOnly" && (
+                      <input
+                        type="text"
+                        value={allowedDomains}
+                        onChange={(e) => setAllowedDomains(e.target.value)}
+                        className="w-full h-10 px-1 text-center text-[13px] bg-transparent border-0 border-b border-base-content/15 rounded-none outline-none transition-colors focus:border-primary focus:ring-0"
+                        placeholder="Allowed domains — comma separated"
+                      />
+                    )}
+                  </>
+                )}
                 <div className="flex items-center justify-center gap-2">
                   <button
                     type="button"

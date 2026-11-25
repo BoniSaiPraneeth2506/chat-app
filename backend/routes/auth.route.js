@@ -1,5 +1,5 @@
 import express from "express";
-import { checkAuth, login, logout, signup, googleAuth, updateProfile, deleteAccount, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions, toggleReadReceiptsHidden, togglePresenceHidden } from "../controllers/auth.controller.js";
+import { checkAuth, login, logout, signup, googleAuth, updateProfile, deleteAccount, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions, toggleReadReceiptsHidden, togglePresenceHidden, saveFolders, getFolders, setSessionLabel } from "../controllers/auth.controller.js";
 import protectRoute from "../middlewares/auth.middleware.js";
 import {
   setupChatLock,
@@ -35,6 +35,12 @@ router.get('/sessions',protectRoute,getSessions)
 router.post('/sessions/logout-others',protectRoute,revokeOtherSessions)
 
 router.delete('/sessions/:sid',protectRoute,revokeSession)
+
+router.put('/sessions/:sid/label',protectRoute,setSessionLabel)
+
+router.get('/folders',protectRoute,getFolders)
+
+router.put('/folders',protectRoute,saveFolders)
 
 // ── Chat lock ───────────────────────────────────────────────────────────────
 router.get('/chat-lock',protectRoute,getChatLockStatus)

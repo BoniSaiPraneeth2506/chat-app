@@ -1,12 +1,14 @@
 import crypto from "crypto";
+import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import { OAuth2Client } from "google-auth-library";
 import { generateToken } from "../lib/utils.js";
 import User from "../models/user.model.js";
 import bcrypt from 'bcryptjs'
 import cloudinary from "../lib/cloudinary.js";
-import { updateUserPrivacyState, updateTypingPrivacyState, disconnectRevokedSessions, broadcastOnlineUsers, invalidatePresenceCache } from "../lib/socket.js";
-import { sendPasswordResetOtp } from "../lib/mailer.js";
+import { io, roomForUser, updateUserPrivacyState, updateTypingPrivacyState, disconnectRevokedSessions, broadcastOnlineUsers, invalidatePresenceCache, emitToOtherSessions } from "../lib/socket.js";
+import { sendPasswordResetOtp, sendNewDeviceLoginEmail } from "../lib/mailer.js";
+import { invalidateVisibilityCache } from "../lib/privacy.js";
 import Message from "../models/message.model.js";
 import Group from "../models/group.model.js";
 import { assetUrlsOf, destroyAssets, attachmentKeysOf, destroyObjects } from "../lib/mediaCleanup.js";
@@ -70,6 +72,31 @@ const startSession = async (user, req, res) => {
         return generateToken(user._id, res, existing.sid);
     }
 
+    const isNewDevice = (user.sessions || []).length > 0;
+    if (isNewDevice) {
+        const alert = {
+            session: {
+                sid: session.sid,
+                browser: session.browser,
+                os: session.os,
+                device: session.device,
+                label: "Current device",
+                createdAt: session.createdAt,
+            },
+            ip: session.ip,
+            at: new Date().toISOString(),
+        };
+        emitToOtherSessions(user._id, session.sid, "newDeviceLogin", alert);
+        sendNewDeviceLoginEmail(user.email, {
+            browser: session.browser,
+            os: session.os,
+            device: session.device,
+            ip: session.ip,
+            at: session.createdAt,
+        }).catch((err) => console.error("Error sending new-device login email:", err.message));
+    }
+
+    session.label = "Current device";
     await User.updateOne({ _id: user._id }, { $push: { sessions: session } });
     return generateToken(user._id, res, session.sid);
 };
@@ -150,8 +177,12 @@ const sanitizeUser = (user) => ({
   contactNicknames: mapToObject(user.contactNicknames),
   // Private notes about other members; only ever sent to their author.
   memberNotes: mapToObject(user.memberNotes),
+  lastReadAt: mapToObject(user.lastReadAt),
   onlinePrivacy: user.onlinePrivacy,
+  onlineVisibility: user.onlineVisibility || "everyone",
+  photoVisibility: user.photoVisibility || "everyone",
   typingPrivacy: user.typingPrivacy !== false,
+  folders: user.folders || [],
   blockedUsers: user.blockedUsers || [],
   favorites: user.favorites || [],
   archived: user.archived || [],
@@ -172,6 +203,8 @@ const sanitizeUser = (user) => ({
   lockedGroups: user.lockedGroups || [],
   lastSeen: user.lastSeen,
   messageTimer: user.messageTimer,
+  disappearingTimers: mapToObject(user.disappearingTimers),
+  readReceiptsEnabled: user.readReceiptsEnabled !== false,
   // Chat streaks — only the signed-in user's own streak map is sent, so the
   // frontend can look up streak counts when viewing another user's profile.
   chatStreaks: mapToObject(user.chatStreaks),
@@ -355,10 +388,11 @@ const logout = async (req, res) => {
 
 const updateProfile = async (req, res) => {
     try {
-        const { profilePic, bannerPic, fullName, email, bio, link, socialLinks, onlinePrivacy, typingPrivacy, messageTimer } = req.body;
+        const { profilePic, bannerPic, fullName, email, bio, link, socialLinks, onlinePrivacy, onlineVisibility, photoVisibility, typingPrivacy, messageTimer, readReceiptsEnabled } = req.body;
         const userId = req.user._id;
 
         const updateData = {};
+        let privacyBroadcast = null;
 
         if (fullName) updateData.fullName = fullName;
 
@@ -377,11 +411,36 @@ const updateProfile = async (req, res) => {
 
         if (typingPrivacy !== undefined) {
             updateData.typingPrivacy = Boolean(typingPrivacy);
-            updateTypingPrivacyState(userId, typingPrivacy === false);
+            privacyBroadcast = privacyBroadcast || {};
+            privacyBroadcast.typingPrivacy = Boolean(typingPrivacy);
         }
         if (onlinePrivacy !== undefined) {
             updateData.onlinePrivacy = onlinePrivacy;
-            updateUserPrivacyState(userId, onlinePrivacy === false);
+            privacyBroadcast = privacyBroadcast || {};
+            privacyBroadcast.onlinePrivacy = onlinePrivacy;
+        }
+        if (onlineVisibility !== undefined) {
+            if (!["everyone", "contacts", "nobody"].includes(onlineVisibility)) {
+                return res.status(400).json({ message: "Invalid onlineVisibility value" });
+            }
+            updateData.onlineVisibility = onlineVisibility;
+            updateData.onlinePrivacy = onlineVisibility !== "nobody";
+            privacyBroadcast = privacyBroadcast || {};
+            privacyBroadcast.onlineVisibility = onlineVisibility;
+            privacyBroadcast.onlinePrivacy = updateData.onlinePrivacy;
+        }
+        if (photoVisibility !== undefined) {
+            if (!["everyone", "contacts", "nobody"].includes(photoVisibility)) {
+                return res.status(400).json({ message: "Invalid photoVisibility value" });
+            }
+            updateData.photoVisibility = photoVisibility;
+            privacyBroadcast = privacyBroadcast || {};
+            privacyBroadcast.photoVisibility = photoVisibility;
+        }
+        if (readReceiptsEnabled !== undefined) {
+            updateData.readReceiptsEnabled = Boolean(readReceiptsEnabled);
+            privacyBroadcast = privacyBroadcast || {};
+            privacyBroadcast.readReceiptsEnabled = Boolean(readReceiptsEnabled);
         }
 
         if (messageTimer !== undefined) updateData.messageTimer = messageTimer;
@@ -417,6 +476,23 @@ const updateProfile = async (req, res) => {
             updateData,
             { new: true }
         );
+
+        invalidateVisibilityCache(userId);
+        if (updatedUser.onlinePrivacy !== undefined || updatedUser.onlineVisibility !== undefined) {
+            const hidden = updatedUser.onlinePrivacy === false || updatedUser.onlineVisibility === "nobody";
+            updateUserPrivacyState(userId, hidden);
+        }
+        if (updatedUser.typingPrivacy !== undefined) {
+            updateTypingPrivacyState(userId, updatedUser.typingPrivacy === false);
+        }
+        if (privacyBroadcast) {
+            const payload = { userId: String(userId), ...privacyBroadcast };
+            io.emit("privacySettingsUpdated", { ...payload, lastSeen: null });
+            io.to(roomForUser(userId)).emit("privacySettingsUpdated", {
+                ...payload,
+                lastSeen: updatedUser.lastSeen,
+            });
+        }
 
         // Return only whitelisted fields
         res.status(200).json(sanitizeUser(updatedUser));
@@ -607,6 +683,7 @@ const getSessions = async (req, res) => {
                 browser: s.browser,
                 os: s.os,
                 device: s.device,
+                label: s.label || "",
                 createdAt: s.createdAt,
                 lastActive: s.lastActive,
                 isCurrent: s.sid === req.sessionId,
@@ -728,4 +805,120 @@ const togglePresenceHidden = async (req, res) => {
   }
 };
 
-export { signup, login, logout, googleAuth, updateProfile, checkAuth, deleteAccount, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions, toggleReadReceiptsHidden, togglePresenceHidden };
+const MAX_FOLDERS = 5;
+
+const normalizeFolderIds = (value) => {
+  if (!Array.isArray(value)) return [];
+  const ids = [];
+  const seen = new Set();
+  for (const entry of value) {
+    const id = String(entry?._id || entry?.id || entry || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(id) || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+};
+
+const normalizeFolders = (input) => {
+  if (!Array.isArray(input)) return null;
+  if (input.length > MAX_FOLDERS) return { error: `You can keep up to ${MAX_FOLDERS} folders` };
+  const names = new Set();
+  const folders = [];
+  for (const folder of input) {
+    const source = folder && typeof folder === "object" ? folder : {};
+    const name = typeof source.name === "string" ? source.name.trim().slice(0, 24) : "";
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (names.has(key)) continue;
+    names.add(key);
+    const parsedCreatedAt = source.createdAt ? new Date(source.createdAt) : null;
+    const hasValidCreatedAt = parsedCreatedAt && !Number.isNaN(parsedCreatedAt.getTime()) && parsedCreatedAt.getTime() > 0;
+    folders.push({
+      id:
+        typeof source.id === "string" && source.id.trim()
+          ? source.id.trim().slice(0, 64)
+          : new mongoose.Types.ObjectId().toString(),
+      name,
+      emoji: typeof source.emoji === "string" ? Array.from(source.emoji.trim()).slice(0, 4).join("") : "",
+      users: normalizeFolderIds(source.users),
+      groups: normalizeFolderIds(source.groups),
+      createdAt: hasValidCreatedAt ? parsedCreatedAt : null,
+    });
+  }
+  return { folders };
+};
+
+const saveFolders = async (req, res) => {
+  try {
+    const normalized = normalizeFolders(req.body?.folders);
+    if (!normalized) return res.status(400).json({ message: "Invalid folders payload" });
+    if (normalized.error) return res.status(400).json({ message: normalized.error });
+
+    const existing = await User.findById(req.user._id).select("folders").lean();
+    if (!existing) return res.status(404).json({ message: "User not found" });
+    const existingFolders = Array.isArray(existing.folders) ? existing.folders : [];
+    const existingCreatedAt = new Map(
+      existingFolders
+        .filter((f) => f && typeof f === "object" && f.id)
+        .map((f) => [String(f.id), f.createdAt])
+    );
+    const folders = normalized.folders.map((folder) => {
+      const prev = existingCreatedAt.get(String(folder.id));
+      const prevDate = prev ? new Date(prev) : null;
+      const hasPrev = prevDate && !Number.isNaN(prevDate.getTime()) && prevDate.getTime() > 0;
+      const isNew = !existingCreatedAt.has(String(folder.id));
+      return {
+        ...folder,
+        createdAt: hasPrev ? prevDate : folder.createdAt && new Date(folder.createdAt).getTime() > 0 ? new Date(folder.createdAt) : isNew ? new Date() : null,
+      };
+    });
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user._id,
+      { $set: { folders } },
+      { new: true, runValidators: false }
+    ).select("-password");
+    if (!updatedUser) return res.status(404).json({ message: "User not found" });
+
+    const sanitized = sanitizeUser(updatedUser);
+    res.status(200).json({ folders: sanitized.folders || [], user: sanitized });
+  } catch (err) {
+    console.error("Error in saveFolders:", err.message);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+const getFolders = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select("folders");
+    if (!user) return res.status(404).json({ message: "User not found" });
+    res.status(200).json({ folders: Array.isArray(user.folders) ? user.folders : [] });
+  } catch (err) {
+    console.error("Error in getFolders:", err.message);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+const setSessionLabel = async (req, res) => {
+  try {
+    const { sid } = req.params;
+    const label = typeof req.body?.label === "string" ? req.body.label.trim() : "";
+    if (!label || label.length > 40) {
+      return res.status(400).json({ message: "Label must be between 1 and 40 characters" });
+    }
+    const result = await User.updateOne(
+      { _id: req.user._id, "sessions.sid": sid },
+      { $set: { "sessions.$.label": label } }
+    );
+    if (!result.matchedCount) {
+      return res.status(404).json({ message: "Session not found" });
+    }
+    const updatedUser = await User.findById(req.user._id);
+    res.status(200).json(sanitizeUser(updatedUser));
+  } catch (err) {
+    console.error("Error in setSessionLabel:", err.message);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export { sanitizeUser, signup, login, logout, googleAuth, updateProfile, checkAuth, deleteAccount, forgotPassword, resetPassword, getSessions, revokeSession, revokeOtherSessions, toggleReadReceiptsHidden, togglePresenceHidden, saveFolders, getFolders, setSessionLabel };

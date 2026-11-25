@@ -3,11 +3,17 @@ import { useGroupStore } from "../store/useGroupStore";
 import { useEffect, useMemo, useRef, useLayoutEffect, useState } from "react";
 import axiosInstance from "../lib/axios";
 import toast from "react-hot-toast";
-import { X, Globe, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image, Link2, EyeOff, ChevronRight, Mic, Play } from "lucide-react";
+import { X, FileText, Calendar, ShieldCheck, Clock, CornerUpLeft, Trash2, Pencil, Phone, Video, Pin, Forward, Image, Link2, Globe, EyeOff, ChevronRight, Mic, Play, MessageSquareText } from "lucide-react";
 import ForwardModal from "./ForwardModal";
 import MediaGallerySheet from "./MediaGallerySheet";
 import { fetchAttachmentUrl } from "../lib/attachments";
 import MessageAttachment from "./MessageAttachment";
+import LinkPreviewCard from "./LinkPreviewCard";
+import ThreadPanel from "./ThreadPanel";
+import AttachmentPreviewModal from "./AttachmentPreviewModal";
+import UnreadSummaryPill from "./UnreadSummaryPill";
+import AISummaryPill from "./ai-summary/AISummaryPill";
+import MutualGroupsPanel from "./MutualGroupsPanel";
 import LocationContent from "./LocationContent";
 import LiveLocationModal from "./LiveLocationModal";
 import SocialLinksRow from "./SocialLinksRow";
@@ -40,7 +46,7 @@ import { focusWithKeyboard, hideKeyboard } from "../lib/keyboard";
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
 
 const getYoutubeId = (url) => {
-  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
   const match = url.match(regExp);
   return (match && match[2].length === 11) ? match[2] : null;
 };
@@ -70,124 +76,6 @@ const bubblePaddingClass = (message) => {
   if (message.location) return "py-2 px-2.5 pb-6 pr-12";
   if (isRichMediaMessage(message)) return "py-1 px-1.5 pb-2 pr-10";
   return "py-2 px-2.5 pb-3 pr-12";
-};
-
-const LinkPreviewCard = ({ url }) => {
-  const [preview, setPreview] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [hasError, setHasError] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    setHasError(false);
-
-    fetch(`https://api.microlink.io?url=${encodeURIComponent(url)}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (active) {
-          if (data.status === "success" && data.data) {
-            setPreview(data.data);
-          } else {
-            setHasError(true);
-          }
-        }
-      })
-      .catch((err) => {
-        console.log("Link preview error:", err);
-        if (active) setHasError(true);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [url]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center gap-2.5 mt-2 p-2.5 border rounded-xl animate-pulse w-full max-w-[280px] select-none">
-        <div className="w-10 h-10 bg-base-300 rounded-lg shrink-0" />
-        <div className="flex-1 space-y-1.5 min-w-0">
-          <div className="h-3 bg-base-300 rounded w-3/4" />
-          <div className="h-2.5 bg-base-300 rounded w-1/2" />
-        </div>
-      </div>
-    );
-  }
-
-  if (hasError || !preview) {
-    try {
-      const parsedUrl = new URL(url);
-      return (
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2 mt-2 p-2 hover:bg-base-200 border border-base-300 rounded-lg transition-colors text-left w-full max-w-[280px] text-xs"
-        >
-          <Globe size={16} className="text-primary shrink-0" />
-          <span className="truncate font-medium text-primary underline">{parsedUrl.hostname}</span>
-        </a>
-      );
-    } catch {
-      return null;
-    }
-  }
-
-  const { title, description, image, logo, publisher } = preview;
-  let hostname = "";
-  try {
-    hostname = new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    hostname = publisher || "Link";
-  }
-
-  return (
-    <a 
-      href={url} 
-      target="_blank" 
-      rel="noopener noreferrer" 
-      className="flex flex-col mt-2 hover:bg-base-200 border border-base-300 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all text-left w-full max-w-[280px] group block"
-    >
-      {image?.url && (
-        <div className="relative w-full h-32 overflow-hidden bg-base-300">
-          <img 
-            src={image.url} 
-            alt={title || "Preview Card"} 
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-          />
-        </div>
-      )}
-      <div className="p-2.5 select-none space-y-1">
-        <div className="flex items-center gap-1.5">
-          {logo?.url ? (
-            <img 
-              src={logo.url} 
-              alt="Logo" 
-              className="w-3.5 h-3.5 object-contain rounded"
-            />
-          ) : (
-            <Globe size={12} className="text-primary" />
-          )}
-          <span className="text-[10px] font-semibold truncate uppercase tracking-wider">
-            {hostname}
-          </span>
-        </div>
-        {title && (
-          <h4 className="text-xs font-bold text-base-content leading-tight line-clamp-2 group-hover:text-primary transition-colors">
-            {title}
-          </h4>
-        )}
-        {description && (
-          <p className="text-[11px] leading-snug line-clamp-2">
-            {description}
-          </p>
-        )}
-      </div>
-    </a>
-  );
 };
 
 const MessageCalendar = ({ userId, onPickDay }) => {
@@ -460,6 +348,9 @@ const ChatContainer = () => {
     isMessagesLoading,
     selectedUser,
     lastReadTimestamps,
+    unreadCounts,
+    selectedUnreadOnOpen,
+    selectedUnreadSince,
     loadMoreMessages,
     cancelAttachmentUpload,
     jumpToMessage,
@@ -493,15 +384,25 @@ const ChatContainer = () => {
     jumpRequest,
     consumeJumpRequest,
     sendMessage,
+    sendAttachmentMessage,
+    shareRequest,
+    consumeShareRequest,
+    callUser,
   } = useChatStore();
 
   const {
     selectedGroup,
     groupMessages,
     isGroupMessagesLoading,
+    unreadGroupCounts,
+    selectedGroupUnreadOnOpen,
+    selectedGroupUnreadSince,
   } = useGroupStore();
 
   const [reactionsSheet, setReactionsSheet] = useState(null);
+  const [threadRootMessage, setThreadRootMessage] = useState(null);
+  const [sharedFiles, setSharedFiles] = useState(null);
+  const unreadOnOpenRef = useRef({ key: "", count: 0 });
 
   // The contact profile's gallery.
   //
@@ -514,7 +415,8 @@ const ChatContainer = () => {
   const [galleryTab, setGalleryTab] = useState("media");
 
   const { authUser, onlineUsers } = useAuthStore();
-  const { theme, wallpaper, privacyReadReceipts, textSize, bubbleStyle, bubbleOverrides } = useThemeStore();
+  const { theme, wallpaper, textSize, bubbleStyle, bubbleOverrides } = useThemeStore();
+  const readReceiptsEnabled = authUser?.readReceiptsEnabled !== false;
 
   // Message text scale (Features: Custom Bubble Styles). Extra Large reads
   // comfortably without reflowing the composer or the header.
@@ -543,7 +445,21 @@ const ChatContainer = () => {
 
   const activeMessages = selectedGroup ? groupMessages : messages;
   const activeLoading = selectedGroup ? isGroupMessagesLoading : isMessagesLoading;
-  const activeWallpaper = authUser?.chatWallpapers?.[selectedUser?._id] || selectedUser?.chatWallpapers?.[authUser?._id] || wallpaper;
+  const activeWallpaper =
+    authUser?.chatWallpapers?.[selectedUser?._id] ||
+    selectedUser?.chatWallpapers?.[authUser?._id] ||
+    wallpaper;
+
+  const activeChatKey = selectedGroup?._id || selectedUser?._id || "";
+  const liveUnreadCount = selectedGroup
+    ? Number(unreadGroupCounts?.[selectedGroup._id] || 0)
+    : Number(unreadCounts?.[selectedUser?._id] || 0);
+  const initialUnreadOnOpen = selectedGroup ? Number(selectedGroupUnreadOnOpen || 0) : Number(selectedUnreadOnOpen || 0);
+  const unreadSince = selectedGroup ? selectedGroupUnreadSince : selectedUnreadSince;
+  const unreadByReadAt = unreadSince
+    ? messages.filter((m) => !m.deletedForEveryone && !m.isDeletedForEveryone && new Date(m.createdAt) > new Date(unreadSince) && String(m.senderId?._id || m.senderId) !== String(authUser?._id)).length
+    : 0;
+  const unreadForSummary = Math.max(initialUnreadOnOpen, liveUnreadCount, unreadByReadAt);
   const messageEndRef = useRef(null);
   // Anchor for the chat panel-scoped overlays (Chat Theme / Bubble Theme /
   // wallpaper dimness) so they never cover the desktop sidebar.
@@ -1213,6 +1129,17 @@ const ChatContainer = () => {
   };
 
   useEffect(() => {
+    if (!shareRequest?.files?.length) return;
+    setSharedFiles(shareRequest.files);
+    consumeShareRequest();
+  }, [shareRequest?.nonce, shareRequest?.files, consumeShareRequest]);
+
+  useEffect(() => {
+    setThreadRootMessage(null);
+    setSharedFiles(null);
+  }, [selectedUser?._id, selectedGroup?._id]);
+
+  useEffect(() => {
     if (!selectedUser?._id) return;
     // A global-search result asked this conversation to land on one message
     // rather than the newest. Route it straight to the jump instead of the
@@ -1468,12 +1395,12 @@ const ChatContainer = () => {
     const messageTime = new Date(message.createdAt).getTime();
 
       if (messageTime <= lastReadTime) {
-      return <DoubleCheck className={`w-[15px] h-[13px] ${privacyReadReceipts ? 'text-blue-500' : 'text-zinc-400'} flex-shrink-0`} />;
+      return <DoubleCheck className={`w-[15px] h-[13px] ${readReceiptsEnabled ? 'text-blue-500' : 'text-zinc-400'} flex-shrink-0`} />;
     }
 
     // Heuristic: If recipient has sent any message after this message, they have read it!
     if ((latestIncomingAt.get(receiverId) || 0) > messageTime) {
-      return <DoubleCheck className={`w-[15px] h-[13px] ${privacyReadReceipts ? 'text-blue-500' : 'text-zinc-400'} flex-shrink-0`} />;
+      return <DoubleCheck className={`w-[15px] h-[13px] ${readReceiptsEnabled ? 'text-blue-500' : 'text-zinc-400'} flex-shrink-0`} />;
     }
 
     // Condition 2: Delivered (online)
@@ -1546,7 +1473,10 @@ const ChatContainer = () => {
   }, [activeMessages, pendingScrollId]);
 
   return (
-    <div ref={overlayRef} className="flex-1 flex h-full max-h-full overflow-hidden relative">
+    <div
+      ref={overlayRef}
+      className="flex-1 flex h-full max-h-full overflow-hidden relative"
+    >
       {/* Left Column: Chat View */}
       <div className="flex-1 flex flex-col h-full max-h-full overflow-hidden bg-base-100">
         <ChatHeader overlayRef={overlayRef} />
@@ -1583,6 +1513,8 @@ const ChatContainer = () => {
             </button>
           </div>
         )}
+
+
 
         <div 
           ref={scrollableRef}
@@ -1624,6 +1556,13 @@ const ChatContainer = () => {
                 new Date(message.createdAt).toDateString();
 
               if (message.isCallLog) {
+                const senderId = String(message.senderId?._id || message.senderId || "");
+                const receiverId = String(message.receiverId?._id || message.receiverId || "");
+                const partnerId = senderId === String(authUser?._id) ? receiverId : senderId;
+                const partner = users?.find((u) => String(u._id) === partnerId) ||
+                  (String(selectedUser?._id) === partnerId ? selectedUser : null);
+                const callStatus = message.status || message.callStatus;
+                const canCallBack = ["missed", "declined"].includes(callStatus) && Boolean(partner?._id);
 // Automated "welcome to the group" system card — see
               // postGroupWelcome on the backend. Centered, not a bubble, with
               // quick-tap greeting stickers that send straight into the chat.
@@ -1674,11 +1613,26 @@ const ChatContainer = () => {
                         <Phone size={13} className={message.callStatus === "missed" ? "text-red-500" : "text-emerald-500"} />
                       )}
                       <span className="capitalize">
-                        {(message.senderId?._id || message.senderId) === authUser._id ? "Outgoing" : "Incoming"} {message.callType} call • {message.callStatus === "completed" ? `duration ${formatCallDuration(message.callDuration)}` : message.callStatus}
+                        {(message.senderId?._id || message.senderId) === authUser._id ? "Outgoing" : "Incoming"} {message.callType} call • {callStatus === "completed" ? `duration ${formatCallDuration(message.callDuration)}` : callStatus}
+                        {message.declineReason ? ` · ${message.declineReason}` : ""}
                       </span>
                       <span className="text-[10px] opacity-60">
                         {formatMessageTime(message.createdAt)}
                       </span>
+                      {canCallBack && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            callUser(partner, "audio");
+                          }}
+                          className="ml-1 grid size-6 place-items-center rounded-full text-primary hover:bg-primary/10"
+                          title="Call back"
+                          aria-label="Call back"
+                        >
+                          <Phone size={12} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ].filter(Boolean);
@@ -1835,16 +1789,29 @@ const ChatContainer = () => {
                           {emoji}
                         </button>
                       ))}
-                      <div className="relative">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            haptic("tap");
-                            setReactionPickerId(reactionPickerId === message._id ? null : message._id);
-                          }}
-                          className="grid h-6 w-6 place-items-center rounded-full bg-base-300/60 text-sm leading-none text-base-content active:scale-110 transition-transform"
-                          title="More emoji"
-                        >
+                        {selectedGroup && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setThreadRootMessage(message);
+                              setMobileEmojiId(null);
+                            }}
+                            className="px-1.5 text-[10px] font-semibold text-primary active:scale-95 transition-transform"
+                            title="Reply in thread"
+                          >
+                            Thread
+                          </button>
+                        )}
+                        <div className="relative">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              haptic("tap");
+                              setReactionPickerId(reactionPickerId === message._id ? null : message._id);
+                            }}
+                            className="grid h-6 w-6 place-items-center rounded-full bg-base-300/60 text-sm leading-none text-base-content active:scale-110 transition-transform"
+                            title="More emoji"
+                          >
                           +
                         </button>
                         {reactionPickerId === message._id && (
@@ -1895,6 +1862,18 @@ const ChatContainer = () => {
                         )}
                       </div>
                       <div className="w-[1px] h-3 bg-base-300 mx-1" />
+                      {selectedGroup && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setThreadRootMessage(message);
+                          }}
+                          className="px-1 text-[10px] font-semibold text-primary hover:text-primary-focus transition-colors"
+                          title="Reply in thread"
+                        >
+                          Thread
+                        </button>
+                      )}
                       <button onClick={() => setReplyingToMessage(message)} className="hover:text-primary transition-colors flex items-center" title="Reply"><CornerUpLeft size={13} /></button>
                       {!message.isDeletedForEveryone && !message.restricted && (<button onClick={(e) => { e.stopPropagation(); setForwardingMessage(message); }} className="hover:text-primary transition-colors flex items-center" title="Forward"><Forward size={13} /></button>)}
                       {message.senderId === authUser?._id && !message.isDeletedForEveryone && message.text && (Date.now() - new Date(message.createdAt).getTime() <= 15 * 60 * 1000) && (<button onClick={() => setEditingMessage(message)} className="hover:text-primary transition-colors flex items-center" title="Edit"><Pencil size={13} /></button>)}
@@ -1938,6 +1917,20 @@ const ChatContainer = () => {
                       {renderMessageContent(message)}
                       {/* Inline AI: translation / script change / synthesized audio */}
                       <MessageAiPanel message={message} />
+                      {selectedGroup && Number(message.threadReplyCount || 0) > 0 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setThreadRootMessage(message);
+                          }}
+                          className="mt-1 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary hover:bg-primary/20 transition-colors"
+                          title="Open thread"
+                        >
+                          <MessageSquareText size={10} />
+                          {message.threadReplyCount} {message.threadReplyCount === 1 ? "reply" : "replies"}
+                        </button>
+                      )}
                     </>
                   )}
                   
@@ -2032,7 +2025,21 @@ const ChatContainer = () => {
           </div>
         )}
 
-        <MessageInput />
+        <div className="relative shrink-0">
+          {(selectedGroup || selectedUser) && unreadForSummary > 0 && (
+            <div className="absolute left-0 right-0 bottom-full mb-1 z-30 pointer-events-none flex justify-center">
+              <div className="pointer-events-auto">
+                <AISummaryPill
+                  conversationId={selectedGroup?._id || selectedUser?._id}
+                  type={selectedGroup ? "group" : "dm"}
+                  unreadCount={unreadForSummary}
+                  since={unreadSince}
+                />
+              </div>
+            </div>
+          )}
+          <MessageInput />
+        </div>
 
         {/* Selection-mode actions (DM) now live in ChatHeader's toolbar
             instead of a floating bottom bar — see ChatHeader.jsx. */}
@@ -2256,6 +2263,10 @@ const ChatContainer = () => {
             </div>
 
             {/* Links website */}
+            {selectedUser._id !== authUser._id && (
+              <MutualGroupsPanel userId={selectedUser._id} />
+            )}
+
             <div className="space-y-1">
               <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold flex items-center gap-1">
                 <Globe size={12} />
@@ -2295,7 +2306,7 @@ const ChatContainer = () => {
                 </span>
                 <select
                   className="w-full h-11 px-3 rounded-2xl bg-base-200 border-0 text-xs text-base-content outline-none focus:ring-2 transition-shadow"
-                  value={authUser?.disappearingTimers?.[selectedUser._id] || "off"}
+                  value={authUser?.disappearingTimers?.[selectedUser._id] || authUser?.messageTimer || "off"}
                   onChange={(e) => setDisappearingTimer(selectedUser._id, e.target.value)}
                 >
                   <option value="off">Off (Keep messages)</option>
@@ -2487,6 +2498,27 @@ const ChatContainer = () => {
 
       {/* Interactive shared / live location map */}
       <LiveLocationModal />
+
+      {threadRootMessage && (
+        <ThreadPanel
+          rootMessage={threadRootMessage}
+          onClose={() => setThreadRootMessage(null)}
+        />
+      )}
+
+      {sharedFiles?.length > 0 && (
+        <AttachmentPreviewModal
+          files={sharedFiles}
+          onClose={() => setSharedFiles(null)}
+          onSend={async (files, caption) => {
+            for (const file of files) {
+              const sent = await sendAttachmentMessage(file, caption);
+              if (!sent) return;
+            }
+            setSharedFiles(null);
+          }}
+        />
+      )}
     </div>
   );
 };

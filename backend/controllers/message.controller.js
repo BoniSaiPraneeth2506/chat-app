@@ -70,6 +70,7 @@ import { transcribeAudioUrl, isTranscriptionConfigured } from "../lib/assemblyai
 
 import Message from "../models/message.model.js";
 import User from "../models/user.model.js";
+import { sanitizeUser } from "./auth.controller.js";
 import cloudinary from "../lib/cloudinary.js";
 import { getReceiverSocketId, io, invalidateBlockCache, emitAccountLists, registerLiveShare, unregisterLiveShare, relayLiveLocationStopped } from "../lib/socket.js";
 import sanitizeHtml from "sanitize-html";
@@ -83,6 +84,12 @@ import {
 } from "../lib/attachments.js";
 import { pushDmNotification } from "../lib/fcmNotifications.js";
 import LiveLocation from "../models/liveLocation.model.js";
+import {
+  applyContactVisibility,
+  applyMessageContactVisibility,
+  checkGroupTextModeration,
+  canBypassModeration,
+} from "../lib/privacy.js";
 
 // ── Security Helpers ──────────────────────────────────────────────────────────
 
@@ -257,6 +264,32 @@ const validateVoice = (dataUri) => {
  */
 const SIDEBAR_USER_FIELDS = "-password -lastReadAt -resetPasswordOtp -resetPasswordExpires -sessions";
 
+const privacyValue = (map, key) => {
+  if (!map) return undefined;
+  if (map instanceof Map) return map.get(String(key));
+  return map[String(key)];
+};
+
+const canSeeLastSeen = (target, viewerId) =>
+  target?.onlinePrivacy !== false && !privacyValue(target?.presenceHidden, viewerId);
+
+const canSeeReadReceipts = (target, viewerId) =>
+  target?.readReceiptsEnabled !== false && !privacyValue(target?.readReceiptsHidden, viewerId);
+
+const stripContactPrivacy = async (users, viewerId) => {
+  const list = await applyContactVisibility(
+    (Array.isArray(users) ? users : [users]).filter(Boolean),
+    viewerId
+  );
+  return list.map((user) => {
+    if (!canSeeLastSeen(user, viewerId)) user.lastSeen = null;
+    delete user.presenceHidden;
+    delete user.readReceiptsHidden;
+    delete user.readReceiptsEnabled;
+    return user;
+  });
+};
+
 /**
  * Attaches an `unreadCount` to each sidebar user: messages they sent me since
  * I last read that conversation.
@@ -305,22 +338,28 @@ const attachUnreadCounts = async (users, me) => {
   // whole lastReadAt map would expose who else they talk to, which is why
   // SIDEBAR_USER_FIELDS strips the field and this is fetched separately.
   const readRows = await User.find({ _id: { $in: users.map((u) => u._id) } })
-    .select("lastReadAt")
+    .select("lastReadAt readReceiptsEnabled readReceiptsHidden")
     .lean();
   const myId = me._id.toString();
   const readMineAt = new Map(
     readRows.map((r) => {
       const map = r.lastReadAt || {};
       const value = map instanceof Map ? map.get(myId) : map[myId];
-      return [r._id.toString(), value ? new Date(value).getTime() : 0];
+      return [
+        r._id.toString(),
+        canSeeReadReceipts(r, myId) && value ? new Date(value).getTime() : 0,
+      ];
     })
   );
 
-  return users.map((u) => ({
-    ...u,
-    unreadCount: countBySender.get(u._id.toString()) || 0,
-    readMyMessagesAt: readMineAt.get(u._id.toString()) || 0,
-  }));
+  return stripContactPrivacy(
+    users.map((u) => ({
+      ...u,
+      unreadCount: countBySender.get(u._id.toString()) || 0,
+      readMyMessagesAt: readMineAt.get(u._id.toString()) || 0,
+    })),
+    myId
+  );
 };
 
 const MAX_NICKNAME_LENGTH = 40;
@@ -373,8 +412,10 @@ const getBlockedUsers = async (req, res) => {
   try {
     const me = await User.findById(req.user._id)
       .select("blockedUsers")
-      .populate("blockedUsers", "fullName email profilePic bio");
-    res.status(200).json(me?.blockedUsers || []);
+      .populate("blockedUsers", "fullName email profilePic bio onlineVisibility photoVisibility");
+    res.status(200).json(
+      await applyContactVisibility(me?.blockedUsers || [], req.user._id)
+    );
   } catch (error) {
     console.error("Error in getBlockedUsers:", error.message);
     res.status(500).json({ message: "Could not load blocked users" });
@@ -563,6 +604,10 @@ const unexpired = () => ({
   $or: [{ deleteAt: null }, { deleteAt: { $exists: false } }, { deleteAt: { $gt: new Date() } }],
 });
 
+const threadFilter = () => ({
+  $or: [{ threadRootId: null }, { threadRootId: { $exists: false } }],
+});
+
 /**
  * One contact, by id, for a QR deep link.
  *
@@ -749,7 +794,7 @@ const searchMessages = async (req, res) => {
         .select(FIELDS)
         .lean(),
       myGroups.length
-        ? Message.find(buildClauses([{ groupId: { $in: myGroups.map((g) => g._id) } }, { deletedFor: { $ne: me } }, unexpired()]))
+        ? Message.find(buildClauses([{ groupId: { $in: myGroups.map((g) => g._id) } }, { deletedFor: { $ne: me } }, threadFilter(), unexpired()]))
             .sort({ createdAt: -1 })
             .limit(LIMIT)
             .select(FIELDS)
@@ -757,7 +802,7 @@ const searchMessages = async (req, res) => {
         : Promise.resolve([]),
       Message.countDocuments(buildClauses(dmClauses)),
       myGroups.length
-        ? Message.countDocuments(buildClauses([{ groupId: { $in: myGroups.map((g) => g._id) } }, { deletedFor: { $ne: me } }, unexpired()]))
+        ? Message.countDocuments(buildClauses([{ groupId: { $in: myGroups.map((g) => g._id) } }, { deletedFor: { $ne: me } }, threadFilter(), unexpired()]))
         : Promise.resolve(0),
     ]);
 
@@ -766,9 +811,12 @@ const searchMessages = async (req, res) => {
     const otherIds = [...new Set(dms.map((m) => (String(m.senderId) === String(me) ? m.receiverId : m.senderId)).filter((id) => id && String(id) !== String(me)).map(String))];
     const contactMap = {};
     if (otherIds.length) {
-      const contacts = await User.find({ _id: { $in: otherIds } })
-        .select("fullName profilePic")
-        .lean();
+      const contacts = await applyContactVisibility(
+        await User.find({ _id: { $in: otherIds } })
+          .select("_id fullName profilePic onlineVisibility photoVisibility")
+          .lean(),
+        me
+      );
       contacts.forEach((c) => { contactMap[String(c._id)] = c; });
     }
     const groupMap = {};
@@ -896,7 +944,7 @@ const getMessages = async (req, res) => {
       const window = [...before.reverse(), ...after];
       res.setHeader("X-Window-Anchor", aroundId);
       res.setHeader("X-Window-Has-Newer", after.length === half ? "1" : "0");
-      return res.status(200).json(window);
+      return res.status(200).json(await applyMessageContactVisibility(window, myId));
     }
 
     if (limit > 0) {
@@ -917,7 +965,7 @@ const getMessages = async (req, res) => {
       .limit(limit)
       .populate("replyTo");
 
-      res.status(200).json(messages.reverse());
+      res.status(200).json(await applyMessageContactVisibility(messages.reverse(), myId));
     } else {
       const messages = await Message.find({
         $and: [
@@ -933,7 +981,7 @@ const getMessages = async (req, res) => {
       })
       .sort({ createdAt: 1 })
       .populate("replyTo");
-      res.status(200).json(messages);
+      res.status(200).json(await applyMessageContactVisibility(messages, myId));
     }
   } catch (err) {
     console.log(err);
@@ -1163,6 +1211,8 @@ const sendMessage = async (req, res) => {
       location: locationData,
       attachments: verifiedAttachments.length > 0 ? verifiedAttachments : undefined,
       contact: contactCard,
+      status: "sent",
+      declineReason: "",
     });
 
     await newMessage.save();
@@ -1268,7 +1318,7 @@ const setDisappearingTimer = async (req, res) => {
       }
     }
 
-    res.status(200).json(sender);
+    res.status(200).json(sanitizeUser(sender));
   } catch (error) {
     console.log("Error in setDisappearingTimer:", error);
     res.status(500).json({ message: "Failed to update disappearing timer" });
@@ -1795,7 +1845,15 @@ const editMessage = async (req, res) => {
       return res.status(400).json({ message: "Messages can only be edited within 15 minutes of sending" });
     }
 
-    message.text = text ? sanitizeText(text) : text; // strip HTML/JS on edit too
+    const nextText = text ? sanitizeText(text) : text;
+    if (message.groupId) {
+      const group = await Group.findById(message.groupId).select("members moderation");
+      if (group && !canBypassModeration(group, userId)) {
+        const verdict = checkGroupTextModeration(group, nextText);
+        if (!verdict.allowed) return res.status(400).json({ message: verdict.reason });
+      }
+    }
+    message.text = nextText; // strip HTML/JS on edit too
     message.isEdited = true;
     await message.save();
 
@@ -1859,19 +1917,23 @@ const toggleBlockUser = async (req, res) => {
 const createCallLog = async (req, res) => {
   try {
     // Supports both 1-on-1 and group call logs. For group calls, pass `groupId` in the body.
-    const { receiverId, groupId, callType, callDuration, callStatus } = req.body;
+    const { receiverId, groupId, callType, callDuration, callStatus, declineReason } = req.body;
     const senderId = req.user._id;
+    const status = callStatus || "outgoing";
+    const reason = typeof declineReason === "string" ? declineReason.trim().slice(0, 60) : "";
+    const duration = Math.max(0, Number(callDuration) || 0);
+    const minutes = Math.floor(duration / 60);
+    const seconds = duration % 60;
+    const durationStr = `${minutes}:${String(seconds).padStart(2, "0")}`;
 
     let text = "";
-    if (callStatus === "completed") {
-      const minutes = Math.floor(callDuration / 60);
-      const seconds = callDuration % 60;
-      const durationStr = `${minutes}:${seconds < 10 ? "0" : ""}${seconds}`;
-      text = `${callType === "video" ? "📹 Video Call" : "📞 Voice Call"} (${durationStr})`;
-    } else if (callStatus === "missed") {
+    if (["completed", "outgoing", "incoming"].includes(status)) {
+      const label = callType === "video" ? "📹 Video Call" : "📞 Voice Call";
+      text = duration > 0 ? `${label} (${durationStr})` : `${label} · no answer`;
+    } else if (status === "missed") {
       text = `Missed ${callType} call`;
-    } else if (callStatus === "declined") {
-      text = `Declined ${callType} call`;
+    } else if (status === "declined") {
+      text = `Declined ${callType} call${reason ? ` (${reason})` : ""}`;
     }
 
     const newMessageData = {
@@ -1879,8 +1941,10 @@ const createCallLog = async (req, res) => {
       text,
       isCallLog: true,
       callType,
-      callDuration,
-      callStatus,
+      callDuration: duration,
+      callStatus: status,
+      status,
+      declineReason: status === "declined" ? reason : "",
     };
 
     if (groupId) {
@@ -2102,7 +2166,7 @@ const getMessageInfo = async (req, res) => {
 
     if (message.groupId) {
       const group = await Group.findById(message.groupId)
-        .populate("members.user", "fullName profilePic lastReadAt");
+        .populate("members.user", "fullName profilePic lastReadAt readReceiptsEnabled readReceiptsHidden");
       if (!group) return res.status(404).json({ message: "Group not found" });
 
       const isMember = group.members.some((m) => m.user?._id?.toString() === userId);
@@ -2111,10 +2175,16 @@ const getMessageInfo = async (req, res) => {
       const key = message.groupId.toString();
       group.members
         .filter((m) => m.user && m.user._id.toString() !== userId)
-        .forEach((m) => place(m.user, m.user.lastReadAt?.get?.(key)));
+        .forEach((m) => place(
+          m.user,
+          canSeeReadReceipts(m.user, userId) ? m.user.lastReadAt?.get?.(key) : null
+        ));
     } else if (message.receiverId) {
-      const other = await User.findById(message.receiverId).select("fullName profilePic lastReadAt");
-      if (other) place(other, other.lastReadAt?.get?.(userId));
+      const other = await User.findById(message.receiverId)
+        .select("fullName profilePic lastReadAt readReceiptsEnabled readReceiptsHidden");
+      if (other) {
+        place(other, canSeeReadReceipts(other, userId) ? other.lastReadAt?.get?.(userId) : null);
+      }
     }
 
     const byTime = (a, b) => new Date(b.readAt) - new Date(a.readAt);
@@ -2497,22 +2567,192 @@ const getCallHistory = async (req, res) => {
         };
       }
 
+      const rawStatus = call.callStatus || call.status || "completed";
+      const isOutgoing = String(call.senderId?._id) === String(userId);
+      const duration = Number(call.callDuration) || 0;
+      const callStatus =
+        isGroup || rawStatus === "declined"
+          ? rawStatus
+          : isOutgoing
+            ? "outgoing"
+            : duration > 0
+              ? "incoming"
+              : "missed";
+
       return {
         _id: call._id,
         callType: call.callType || "voice",
-        callStatus: call.callStatus || "completed",
-        callDuration: call.callDuration || 0,
+        callStatus,
+        status: callStatus,
+        declineReason: call.declineReason || "",
+        callDuration: duration,
         createdAt: call.createdAt,
         isGroup,
         user,
-        isOutgoing: String(call.senderId?._id) === String(userId),
+        isOutgoing,
       };
     });
+
+    const contactIds = [
+      ...new Set(
+        history
+          .filter((row) => row.user?.idType === "user" && row.user?._id)
+          .map((row) => String(row.user._id))
+      ),
+    ];
+    if (contactIds.length) {
+      const visible = await applyContactVisibility(
+        await User.find({ _id: { $in: contactIds } })
+          .select("_id fullName profilePic onlineVisibility photoVisibility")
+          .lean(),
+        userId
+      );
+      const pictureById = new Map(visible.map((u) => [String(u._id), u.profilePic || ""]));
+      for (const row of history) {
+        if (row.user?.idType === "user" && pictureById.has(String(row.user._id))) {
+          row.user.picture = pictureById.get(String(row.user._id));
+        }
+      }
+    }
 
     res.status(200).json(history);
   } catch (err) {
     console.error("Error in getCallHistory:", err.message);
     res.status(500).json({ message: "Failed to fetch call history" });
+  }
+};
+
+const getUnreadSummary = async (req, res) => {
+  try {
+    const me = req.user._id;
+    const lastReadAt = req.user.lastReadAt || new Map();
+    const readAtFor = (id) => {
+      const value = lastReadAt instanceof Map ? lastReadAt.get(String(id)) : lastReadAt[String(id)];
+      return value ? new Date(value) : new Date(0);
+    };
+    const groups = await Group.find({ "members.user": me }).select("_id name groupPic");
+    const allowedIds = new Set(groups.map((g) => String(g._id)));
+    const { groupId } = req.query;
+
+    if (groupId) {
+      const id = String(groupId);
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ message: "Invalid group id" });
+      }
+      if (!allowedIds.has(id)) {
+        return res.status(403).json({ message: "Not a member of this group" });
+      }
+      const query = {
+        groupId: new mongoose.Types.ObjectId(id),
+        deletedFor: { $ne: me },
+        createdAt: { $gt: readAtFor(id) },
+        $and: [threadFilter(), unexpired()],
+      };
+      const [unreadCount, mentionsCount, recent] = await Promise.all([
+        Message.countDocuments(query),
+        Message.countDocuments({ ...query, mentions: me }),
+        Message.find(query)
+          .sort({ createdAt: -1 })
+          .limit(60)
+          .populate("senderId", "fullName")
+          .lean(),
+      ]);
+      const chronological = [...recent].reverse();
+      const senderCounts = new Map();
+      for (const m of chronological) {
+        const name = m.senderId?.fullName || "Member";
+        senderCounts.set(name, (senderCounts.get(name) || 0) + 1);
+      }
+      const topSenders = [...senderCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n);
+      const bullets = chronological.slice(-6).map((message) => {
+        let preview = (message.text || "").trim();
+        if (!preview) {
+          if (message.poll?.question) preview = `Poll: ${message.poll.question}`;
+          else if (message.attachments?.length) preview = "Shared a file";
+          else if (message.image || message.images?.length) preview = "Shared a photo";
+          else if (message.voice) preview = "Sent a voice note";
+          else if (message.location?.lat) preview = "Shared a location";
+          else preview = "Sent a message";
+        }
+        return {
+          _id: String(message._id),
+          senderName: message.senderId?.fullName || "Member",
+          createdAt: message.createdAt,
+          text: preview.slice(0, 180),
+        };
+      });
+      const summary = `${unreadCount} unread message${unreadCount === 1 ? "" : "s"}${topSenders.length ? ` from ${topSenders.join(", ")}` : ""}${mentionsCount ? ` · ${mentionsCount} mention${mentionsCount === 1 ? "" : "s"}` : ""}.`;
+      return res.status(200).json({ groupId: id, unreadCount, mentionsCount, summary, bullets });
+    }
+
+    if (!groups.length) {
+      return res.status(200).json({ total: 0, groups: [] });
+    }
+
+    const base = {
+      deletedFor: { $ne: me },
+      $and: [
+        threadFilter(),
+        unexpired(),
+        { $or: groups.map((g) => ({ groupId: g._id, createdAt: { $gt: readAtFor(g._id) } })) },
+      ],
+    };
+    const [counts, mentions] = await Promise.all([
+      Message.aggregate([{ $match: base }, { $group: { _id: "$groupId", count: { $sum: 1 } } }]),
+      Message.aggregate([
+        { $match: { ...base, mentions: me } },
+        { $group: { _id: "$groupId", count: { $sum: 1 } } },
+      ]),
+    ]);
+    const countMap = new Map(counts.map((row) => [String(row._id), row.count]));
+    const mentionMap = new Map(mentions.map((row) => [String(row._id), row.count]));
+    const rows = groups.map((g) => ({
+      groupId: String(g._id),
+      name: g.name,
+      groupPic: g.groupPic || "",
+      unreadCount: countMap.get(String(g._id)) || 0,
+      mentionsCount: mentionMap.get(String(g._id)) || 0,
+    }));
+    res.status(200).json({
+      total: rows.reduce((sum, row) => sum + row.unreadCount, 0),
+      groups: rows,
+    });
+  } catch (err) {
+    console.error("Error in getUnreadSummary:", err.message);
+    res.status(500).json({ message: "Failed to fetch unread summary" });
+  }
+};
+
+const getMutualGroups = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const me = req.user._id;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+    if (String(id) === String(me)) return res.status(200).json([]);
+    const contact = await User.findById(id).select("_id");
+    if (!contact) return res.status(404).json({ message: "User not found" });
+
+    const groups = await Group.find({
+      "members.user": { $all: [me, new mongoose.Types.ObjectId(id)] },
+    })
+      .select("_id name groupPic description members")
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    res.status(200).json(
+      groups.map((g) => ({
+        _id: g._id,
+        name: g.name,
+        groupPic: g.groupPic || "",
+        description: g.description || "",
+        memberCount: g.members?.length || 0,
+      }))
+    );
+  } catch (err) {
+    console.error("Error in getMutualGroups:", err.message);
+    res.status(500).json({ message: "Failed to fetch mutual groups" });
   }
 };
 
@@ -2546,4 +2786,6 @@ export {
   ,SIDEBAR_USER_FIELDS
   ,attachUnreadCounts
   ,searchMessages
+  ,getUnreadSummary
+  ,getMutualGroups
 };

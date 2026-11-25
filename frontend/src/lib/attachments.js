@@ -13,8 +13,9 @@ import axiosInstance from "./axios";
 /** Which bucket-backed kind this file belongs to, or null if it is not allowed. */
 export const kindFor = (file, limits) => {
   if (!file || !limits?.enabled) return null;
+  const mime = String(file.type || "").split(";")[0].trim().toLowerCase();
   for (const kind of ["video", "image", "document", "audio"]) {
-    if (limits[kind]?.types?.includes(file.type)) return kind;
+    if (limits[kind]?.types?.includes(mime)) return kind;
   }
   return null;
 };

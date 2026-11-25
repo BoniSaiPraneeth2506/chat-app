@@ -279,7 +279,7 @@ Media Upload:
 - **Message forwarding**: single or multi-select forward to multiple contacts with "Forwarded" flag
 - **Message reactions**: emoji picker (👍❤️😂😮😢🙏), one per user, toggle by re-clicking, double-click ❤️
 - **Message pinning**: one pinned message per conversation, sticky banner, auto-unpins previous
-- **Disappearing messages**: off / 1h / 24h / 7d via MongoDB TTL index (`deleteAt`, `expires: 600`); media purged by background job
+- **Disappearing messages**: off / 1h / 24h / 7d / 30d via MongoDB TTL index (`deleteAt`, `expires: 600`); media purged by background job
 - **View-once messages**: self-destructing photos with "Opened" state, viewed tracking, `FLAG_SECURE` screenshot blocking on Android
 - **Scheduled messages**: schedule for future delivery, background scheduler polls every 10s, cancel pending
 - **Message drafts**: per-conversation auto-save/restore
@@ -390,9 +390,13 @@ Media Upload:
 | bio | String | |
 | link | String | Personal website/social link |
 | socialLinks | `{ github, twitter, linkedin, youtube, portfolio }` | Social profile URLs |
-| onlinePrivacy | Boolean | default true — hides online status |
+| onlinePrivacy | Boolean | default true — hides online status globally |
 | typingPrivacy | Boolean | default true — hides typing indicator |
-| disappearingTimers | Map\<String, String\> | Per-conversation timer ("off"/"1h"/"24h"/"7d"), keyed by other user's ID |
+| messageTimer | String | Global disappearing-message default ("off"/"1h"/"24h"/"7d"/"30d") |
+| disappearingTimers | Map\<String, String\> | Per-conversation timer ("off"/"1h"/"24h"/"7d"/"30d"), keyed by other user's ID |
+| readReceiptsEnabled | Boolean | default true — global read-receipt switch, enforced server-side |
+| readReceiptsHidden | Map\<String, Boolean\> | Contacts who do not get your blue ticks |
+| presenceHidden | Map\<String, Boolean\> | Contacts who cannot see your online status/last seen |
 | lastSeen | Date | Updated on socket disconnect |
 | contactNicknames | Map\<String, String\> | Private per-contact renames, keyed by contact user ID |
 | lastReadAt | Map\<String, Date\> | Per-conversation read timestamp |
@@ -488,8 +492,10 @@ Base URL: `/api` (e.g., `http://localhost:5001/api`)
 | POST | `/logout` | No | Clears JWT cookie, removes current session from user. |
 | POST | `/forgot-password` | No | Body: `{ email }`. Sends 6-digit OTP via Brevo → Resend → SMTP. Dev mode returns OTP. |
 | POST | `/reset-password` | No | Body: `{ email, otp, newPassword }`. Validates OTP, updates password. |
-| PUT | `/update-profile` | Yes | Update fullName, email, bio, link, socialLinks, profilePic, bannerPic, onlinePrivacy, typingPrivacy, messageTimer. Images uploaded to Cloudinary. |
+| PUT | `/update-profile` | Yes | Update fullName, email, bio, link, socialLinks, profilePic, bannerPic, onlinePrivacy, typingPrivacy, messageTimer, readReceiptsEnabled. Images uploaded to Cloudinary. |
 | GET | `/check` | Yes | Returns currently authenticated user. |
+| PUT | `/read-receipts/:userId` | Yes | Hide/show read receipts for one contact. Body: `{ hidden }`. |
+| PUT | `/presence/:userId` | Yes | Hide/show online status and last seen for one contact. Body: `{ hidden }`. |
 | DELETE | `/account` | Yes | Delete account. Body: `{ password }` or `{ confirm: "DELETE" }`. Cleans up messages, media, groups, blocks, nicknames. |
 | GET | `/sessions` | Yes | Lists all device sessions with `isCurrent` flag. |
 | POST | `/sessions/logout-others` | Yes | Revokes all sessions except the current one. |
@@ -515,7 +521,7 @@ Base URL: `/api` (e.g., `http://localhost:5001/api`)
 | GET | `/dates/:id` | Days with messages for the chat calendar. Accepts `?tz=` offset. |
 | GET | `/:id` | Get messages with user `:id`. Supports `?limit=&skip=` pagination, `?around=<messageId>` window. Response header `X-Pinned-Message` has pinned message. |
 | POST | `/send/:id` | Send DM. Body: `{ text?, image?, images?, voice?, attachments?, replyTo?, isForwarded?, isOneView?, scheduledAt?, clientId?, contact? }`. Validates blocks, uploads media, sets `deleteAt`, emits `newMessage`. |
-| POST | `/disappearing/:id` | Set disappearing timer. Body: `{ timer }` ("off"/"1h"/"24h"/"7d"). Updates both users, emits `disappearingTimerUpdate`. |
+| POST | `/disappearing/:id` | Set disappearing timer. Body: `{ timer }` ("off"/"1h"/"24h"/"7d"/"30d"). Updates both users, emits `disappearingTimerUpdate`. |
 | POST | `/reaction/:id` | Toggle emoji reaction. Body: `{ emoji }`. Emits `messageReaction`. |
 | POST | `/action/:id` | Toggle favorite/archive/pin. Body: `{ action, scope }`. Enforces max 2 pins. Emits `accountListsUpdated`. |
 | PUT | `/edit/:id` | Edit message text (sender only, within 15 min). Body: `{ text }`. Emits `messageEdited`. |
@@ -635,6 +641,7 @@ Socket connection URL: same origin as backend, established with `auth: { token }
 | `groupCallEnded` | `{ groupId, duration, endedBy, startedBy, type }` | Group call ended |
 | `groupHandRaised` | `{ userId, socketId, raised }` | Raise/lower hand in call |
 | `groupMuteAllRequested` | `{ by }` | Host requested all to mute |
+| `privacySettingsUpdated` | `{ userId, onlinePrivacy?, typingPrivacy?, readReceiptsEnabled?, lastSeen }` | Global privacy changed by a contact |
 | `rateLimited` | `{ action, message }` | Socket action was throttled |
 
 ---
@@ -666,7 +673,7 @@ Persists UI preferences to localStorage:
 - `theme` (one of 32 named themes)
 - `wallpaper` (chat background preset)
 - `soundEnabled` (message notification sound)
-- `privacyReadReceipts` (show/hide blue read ticks)
+- Read receipts are now server-backed via `authUser.readReceiptsEnabled` (Settings → App Preferences)
 
 ### `useChatLockStore` (`frontend/src/store/useChatLockStore.js`)
 Chat lock session state (not persisted across reloads):
@@ -790,6 +797,7 @@ Social platform definitions (GitHub, Twitter, LinkedIn, YouTube, Portfolio) with
 - **Helmet**: Content-Security-Policy with directives for Cloudinary, R2, and allowed origins.
 - **Google Sign-In**: ID token verified server-side via `google-auth-library`. On Android, native Credential Manager (`@capgo/capacitor-social-login`) instead of browser redirect (Google blocks OAuth from WebViews).
 - **Blocking**: enforced server-side in `sendMessage` AND on socket relay (typing, calls, read receipts). Block list cached in-memory for 30s.
+- **Privacy settings**: global and per-contact read receipts/online status are enforced server-side; REST responses redact hidden last-seen and read timestamps.
 - **HTML sanitization**: `sanitize-html` strips all HTML/JS from message text.
 - **Input validation**: image/voice type whitelists + size caps, regex escaping for search (ReDoS prevention), R2 attachment verification after upload.
 - **Spoofing protection**: server validates `from`/`receiverId` against authenticated user on socket events.

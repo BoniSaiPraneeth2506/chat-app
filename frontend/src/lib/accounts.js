@@ -59,3 +59,39 @@ export const clearAccounts = () => {
     // ignore
   }
 };
+
+const UNREAD_KEY = "accountUnreadCounts";
+
+const readUnread = () => {
+  try {
+    const raw = localStorage.getItem(UNREAD_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeUnread = (counts) => {
+  try {
+    localStorage.setItem(UNREAD_KEY, JSON.stringify(counts));
+  } catch {
+    return;
+  }
+};
+
+export const setAccountUnread = (accountId, count) => {
+  if (!accountId) return;
+  const value = Math.max(0, Number(count) || 0);
+  const counts = readUnread();
+  if (value > 0) counts[accountId] = value;
+  else delete counts[accountId];
+  writeUnread(counts);
+};
+
+export const getAccountUnread = (accountId) => Number(readUnread()[accountId]) || 0;
+
+export const getAccountsWithUnread = () =>
+  Object.entries(readUnread())
+    .filter(([, count]) => Number(count) > 0)
+    .map(([_id, count]) => ({ _id, count: Number(count) }));

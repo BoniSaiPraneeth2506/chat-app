@@ -33,6 +33,10 @@ const sessionSchema=new mongoose.Schema({
         type:String,
         default:""
     },
+    label:{
+        type:String,
+        default:""
+    },
     createdAt:{
         type:Date,
         default:Date.now
@@ -66,6 +70,35 @@ const socialLinksSchema=new mongoose.Schema({
     portfolio:{
         type:String,
         default:""
+    }
+},{_id:false})
+
+const folderSchema=new mongoose.Schema({
+    id:{
+        type:String,
+        default:""
+    },
+    name:{
+        type:String,
+        default:""
+    },
+    emoji:{
+        type:String,
+        default:""
+    },
+    users:[{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"User",
+        default:[]
+    }],
+    groups:[{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"Group",
+        default:[]
+    }],
+    createdAt:{
+        type:Date,
+        default:null
     }
 },{_id:false})
 
@@ -113,6 +146,16 @@ const userSchema=new mongoose.Schema({
     onlinePrivacy:{
         type:Boolean,
         default:true
+    },
+    onlineVisibility:{
+        type:String,
+        enum:["everyone","contacts","nobody"],
+        default:"everyone"
+    },
+    photoVisibility:{
+        type:String,
+        enum:["everyone","contacts","nobody"],
+        default:"everyone"
     },
     // Whether this user broadcasts "typing…". Defaults to true so existing
     // accounts keep behaving exactly as before. Enforced on the server rather
@@ -303,6 +346,10 @@ const userSchema=new mongoose.Schema({
         type:[sessionSchema],
         default:[]
     },
+    folders:{
+        type:[folderSchema],
+        default:[]
+    },
     // Daily chat streaks: keyed by the other user's id. Each entry tracks
     // the current consecutive-day count, the date of the last message, and
     // the longest streak ever reached — same mechanic as Snapchat.
@@ -315,10 +362,17 @@ const userSchema=new mongoose.Schema({
         },{ _id:false }),
         default:new Map()
     },
+    // Global read-receipt setting. When false, the server suppresses the
+    // `messagesRead` socket event for every contact and redacts read marks
+    // from REST responses.
+    readReceiptsEnabled:{
+        type:Boolean,
+        default:true
+    },
     // Per-contact read receipt hiding: keyed by the other user's id. When
     // true, the server suppresses the `messagesRead` socket event for that
     // sender so their blue ticks never update — even if the global
-    // privacyReadReceipts toggle is on.
+    // readReceiptsEnabled toggle is on.
     readReceiptsHidden:{
         type:Map,
         of:Boolean,

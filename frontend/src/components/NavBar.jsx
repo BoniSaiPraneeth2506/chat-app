@@ -8,10 +8,18 @@ import { useGroupStore } from "../store/useGroupStore";
 import { useChannelStore } from "../store/useChannelStore";
 import { useChatLockStore } from "../store/useChatLockStore";
 import { haptic } from "../lib/haptics";
+import { getAccountsWithUnread } from "../lib/accounts";
 
 const Navbar = () => {
   const { authUser, savedAccounts, switchAccount, forgetSavedAccount, refreshSavedAccounts } = useAuthStore();
   const [isSwitching, setIsSwitching] = useState(false);
+  const unreadCounts = useChatStore((s) => s.unreadCounts);
+  const groupUnreadCounts = useGroupStore((s) => s.unreadGroupCounts);
+  const accountUnreadIds = new Set(getAccountsWithUnread().map((entry) => entry._id));
+  const liveUnread =
+    Object.values(unreadCounts || {}).reduce((sum, n) => sum + (Number(n) || 0), 0) +
+    Object.values(groupUnreadCounts || {}).reduce((sum, n) => sum + (Number(n) || 0), 0);
+  if (authUser?._id && liveUnread > 0) accountUnreadIds.add(authUser._id);
   const lastWordmarkTap = useRef(0);
   const forgetTimer = useRef(null);
 
@@ -203,7 +211,12 @@ const Navbar = () => {
                           }}
                           className="flex-1 min-w-0 text-left disabled:cursor-default"
                         >
-                          <span className="block text-xs font-medium truncate">{acc.fullName}</span>
+                          <span className="flex items-center gap-1.5 min-w-0">
+                            <span className="block text-xs font-medium truncate">{acc.fullName}</span>
+                            {accountUnreadIds.has(acc._id) && (
+                              <span className="size-1.5 rounded-full bg-primary flex-shrink-0" />
+                            )}
+                          </span>
                           <span className="block text-[10px] text-base-content/45 truncate">{acc.email}</span>
                         </button>
                       </div>

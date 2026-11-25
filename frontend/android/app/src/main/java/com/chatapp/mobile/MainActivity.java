@@ -3,13 +3,22 @@ package com.chatapp.mobile;
 import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
+import android.util.Base64;
 import android.webkit.JavascriptInterface;
+import android.webkit.WebView;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.BridgeActivity;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class MainActivity extends BridgeActivity {
@@ -27,6 +36,7 @@ public class MainActivity extends BridgeActivity {
     // grouping, MessagingStyle, or ids.
 
     private String launchTapData = null;
+    private String pendingShareJson = null;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -38,6 +48,7 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
 
         captureLaunchTap(getIntent());
+        captureShareIntent(getIntent(), false);
         // Expose the native tap bridge to the WebView. The WebView is created by
         // Capacitor inside super.onCreate above (load() builds it), so it is
         // available here.
@@ -64,6 +75,7 @@ public class MainActivity extends BridgeActivity {
         super.onNewIntent(intent);
         setIntent(intent);
         captureLaunchTap(intent);
+        captureShareIntent(intent, true);
     }
 
     private synchronized void captureLaunchTap(Intent intent) {
@@ -102,6 +114,108 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception e) {
             launchTapData = null;
         }
+    }
+
+    private Uri getShareUri(Intent intent) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri.class);
+        }
+        return intent.getParcelableExtra(Intent.EXTRA_STREAM);
+    }
+
+    private ArrayList<Uri> getShareUris(Intent intent) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri.class);
+        }
+        return intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+    }
+
+    private void addSharedFile(Uri uri, JSONArray files) {
+        if (uri == null) return;
+        try {
+            String name = "shared-file";
+            Cursor cursor = getContentResolver().query(uri, new String[] { OpenableColumns.DISPLAY_NAME }, null, null, null);
+            if (cursor != null) {
+                try {
+                    if (cursor.moveToFirst()) {
+                        int column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                        if (column >= 0 && cursor.getString(column) != null) name = cursor.getString(column);
+                    }
+                } finally {
+                    cursor.close();
+                }
+            }
+            String type = getContentResolver().getType(uri);
+            if (type == null) type = "application/octet-stream";
+            InputStream input = getContentResolver().openInputStream(uri);
+            if (input == null) return;
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
+            input.close();
+            JSONObject file = new JSONObject();
+            putString(file, "name", name);
+            putString(file, "type", type);
+            putString(file, "bytes", Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP));
+            files.put(file);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void captureShareIntent(Intent intent, boolean dispatchNow) {
+        if (intent == null) return;
+        String action = intent.getAction();
+        if (!Intent.ACTION_SEND.equals(action) && !Intent.ACTION_SEND_MULTIPLE.equals(action)) return;
+
+        JSONArray files = new JSONArray();
+        if (Intent.ACTION_SEND.equals(action)) {
+            addSharedFile(getShareUri(intent), files);
+        } else {
+            ArrayList<Uri> uris = getShareUris(intent);
+            if (uris != null) {
+                for (Uri uri : uris) addSharedFile(uri, files);
+            }
+        }
+
+        String text = intent.getStringExtra(Intent.EXTRA_TEXT);
+        if (text == null || text.isEmpty()) text = intent.getStringExtra(Intent.EXTRA_SUBJECT);
+        if ((text == null || text.isEmpty()) && files.length() == 0) return;
+
+        try {
+            JSONObject detail = new JSONObject();
+            putString(detail, "text", text);
+            detail.put("files", files);
+            synchronized (this) {
+                pendingShareJson = detail.toString();
+            }
+            if (dispatchNow) dispatchPendingShare();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void dispatchPendingShare() {
+        String json;
+        synchronized (this) {
+            json = pendingShareJson;
+        }
+        if (json == null) return;
+        WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+        if (webView == null) return;
+        final String script = "window.dispatchEvent(new CustomEvent('chatty:share', { detail: " + json + " })); if (window.AndroidBridge && window.AndroidBridge.ackPendingShare) { window.AndroidBridge.ackPendingShare(); }";
+        webView.post(() -> webView.evaluateJavascript(script, null));
+    }
+
+    @JavascriptInterface
+    public synchronized void ackPendingShare() {
+        pendingShareJson = null;
+    }
+
+    @JavascriptInterface
+    public synchronized String takePendingShare() {
+        String json = pendingShareJson;
+        pendingShareJson = null;
+        return json == null ? "" : json;
     }
 
     private static void putString(JSONObject obj, String key, String value) {

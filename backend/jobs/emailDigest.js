@@ -30,6 +30,10 @@ const INACTIVE_AFTER = 3 * DAY;
 const NUDGE_EVERY = 3 * DAY;
 const TICK = HOUR;
 
+const noThreadReplies = () => ({
+  $or: [{ threadRootId: null }, { threadRootId: { $exists: false } }],
+});
+
 let tickInterval = null;
 
 const recipients = () => {
@@ -109,6 +113,7 @@ const collectActivity = async (user) => {
       deletedFor: { $ne: user._id },
       isDeletedForEveryone: { $ne: true },
       createdAt: { $gt: since },
+      $and: [noThreadReplies()],
     };
 
     const [count, mentioned] = await Promise.all([
@@ -118,7 +123,7 @@ const collectActivity = async (user) => {
     mentions += mentioned;
     if (!count) continue;
 
-    const latest = await Message.findOne({ groupId: group._id })
+    const latest = await Message.findOne({ groupId: group._id, ...noThreadReplies() })
       .sort({ createdAt: -1 })
       .select("text voice image poll isAnonymous");
 

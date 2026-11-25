@@ -94,7 +94,8 @@ export const validateUploadRequest = ({ kind, mime, size }) => {
   const rule = ATTACHMENT_RULES[kind];
   if (!rule) return { valid: false, reason: "Unsupported attachment type" };
 
-  if (typeof mime !== "string" || !rule.types.includes(mime)) {
+  const normalizedMime = typeof mime === "string" ? mime.split(";")[0].trim().toLowerCase() : "";
+  if (!rule.types.includes(normalizedMime)) {
     return { valid: false, reason: `That ${rule.label.toLowerCase()} format isn't supported` };
   }
 
@@ -176,10 +177,12 @@ export const verifyAttachment = async ({ key, kind, size, mime }) => {
     if (Number.isInteger(size) && head.ContentLength !== size) {
       return { valid: false, reason: "Uploaded file does not match the declared size" };
     }
-    if (mime && head.ContentType && head.ContentType !== mime) {
+    const expectedMime = typeof mime === "string" ? mime.split(";")[0].trim().toLowerCase() : "";
+    const actualMime = typeof head.ContentType === "string" ? head.ContentType.split(";")[0].trim().toLowerCase() : "";
+    if (expectedMime && actualMime && actualMime !== expectedMime) {
       return { valid: false, reason: "Uploaded file does not match the declared type" };
     }
-    return { valid: true, size: head.ContentLength, mime: head.ContentType || mime };
+    return { valid: true, size: head.ContentLength, mime: head.ContentType || mime || expectedMime };
   } catch (err) {
     if (err?.$metadata?.httpStatusCode === 404 || err?.name === "NotFound") {
       return { valid: false, reason: "Upload not found — please try again" };

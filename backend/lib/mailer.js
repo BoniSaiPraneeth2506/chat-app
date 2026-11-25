@@ -156,6 +156,34 @@ export const sendEmail = async ({ to, subject, text, html }) => {
   throw lastError;
 };
 
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+export const sendNewDeviceLoginEmail = async (to, { browser, os, device, ip, at } = {}) => {
+  const deviceLabel = [browser, os, device].filter(Boolean).join(" on ") || "a new device";
+  const when = at ? new Date(at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : "just now";
+  const where = ip ? ` from ${ip}` : "";
+
+  return sendEmail({
+    to,
+    subject: "New sign-in to your Chatty account",
+    text: `A new device signed in to your Chatty account: ${deviceLabel}${where} at ${when}.\n\nIf this was you, you can ignore this email. If it was not you, change your password and sign out of all devices.`,
+    html: `
+      <div style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;color:#1a1d29;">
+        <h2 style="color:#0a2463;">New sign-in to your Chatty account</h2>
+        <p>Your account was just signed in on <strong>${escapeHtml(deviceLabel)}</strong>${where ? ` from <strong>${escapeHtml(ip)}</strong>` : ""} at ${escapeHtml(when)}.</p>
+        <p>If this was you, no action is needed. If it was not you, change your password and sign out of all devices.</p>
+        <p style="color:#5b6072;font-size:12px;">You are receiving this because a new device was added to your account.</p>
+      </div>
+    `,
+  });
+};
+
 export const sendPasswordResetOtp = async (to, otp) => {
   if (!isMailConfigured()) {
     console.log(`[DEV] Password reset OTP for ${to}: ${otp}`);

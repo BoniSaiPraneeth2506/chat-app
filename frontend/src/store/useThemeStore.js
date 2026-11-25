@@ -33,7 +33,6 @@ export const useThemeStore = create((set, get) => ({
   theme: localStorage.getItem("chat-theme") || "dark",
   wallpaper: localStorage.getItem("chat-wallpaper") || "default",
   soundEnabled: localStorage.getItem("sound-enabled") !== "false",
-  privacyReadReceipts: localStorage.getItem("privacy-read-receipts") !== "false",
   textSize: localStorage.getItem("chat-text-size") || "medium",
   // Bubble palette preset for the whole app, and per-chat overrides read from
   // localStorage as { chatId: presetId }.
@@ -54,10 +53,6 @@ export const useThemeStore = create((set, get) => ({
   setSoundEnabled: (enabled) => {
     localStorage.setItem("sound-enabled", String(enabled));
     set({ soundEnabled: enabled });
-  },
-  setPrivacyReadReceipts: (enabled) => {
-    localStorage.setItem("privacy-read-receipts", String(enabled));
-    set({ privacyReadReceipts: enabled });
   },
   setTextSize: (textSize) => {
     localStorage.setItem("chat-text-size", String(textSize));

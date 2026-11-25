@@ -10,6 +10,7 @@ import LiveLocation from '../models/liveLocation.model.js';
 import { isOriginAllowed } from './origins.js';
 import { canDo } from './groupPermissions.js';
 import { sendPushNotification } from './fcmNotifications.js';
+import { canSeeOnline, visibilityModeOf } from './privacy.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -70,6 +71,25 @@ export function getReceiverSocketId(userId) {
 }
 
 export const roomForUser = (userId) => `user_${userId}`;
+
+export const roomForThread = (rootId) => `thread_${rootId}`;
+
+export function emitToOtherSessions(userId, excludeSid, event, payload) {
+    for (const socket of io.sockets.sockets.values()) {
+        if (socket.userId?.toString() !== String(userId)) continue;
+        if (excludeSid && socket.sessionId === excludeSid) continue;
+        socket.emit(event, payload);
+    }
+}
+
+export function emitGroupMessageExceptThread(groupId, threadRootId, event, payload) {
+    const room = `group_${groupId}`;
+    if (!threadRootId) {
+        io.to(room).emit(event, payload);
+        return;
+    }
+    io.to(room).except(roomForThread(threadRootId)).emit(event, payload);
+}
 
 /** True if the user currently has at least one live socket (is online). */
 export function isUserOnline(userId) {
@@ -251,7 +271,13 @@ export function invalidatePresenceCache(userId) {
 }
 
 export const broadcastOnlineUsers = async () => {
-    const visibleOnlineUsers = onlineUserIds().filter((id) => !privateUsersSet.has(id));
+    const ids = onlineUserIds();
+    const modes = new Map(
+        await Promise.all(ids.map(async (id) => [id, await visibilityModeOf(id)]))
+    );
+    const visibleOnlineUsers = ids.filter(
+        (id) => modes.get(id) !== "nobody" && !privateUsersSet.has(id)
+    );
     // Default for most viewers: the full visible list.
     io.emit("getOnlineUsers", visibleOnlineUsers);
     // Per-contact hiding is viewer-specific: user A hiding from B means B's
@@ -260,7 +286,21 @@ export const broadcastOnlineUsers = async () => {
     // viewers' rooms with the hiders filtered out. Lookups are cached (30s) so
     // this stays cheap even on the periodic heartbeat.
     const hiddenByViewer = new Map(); // viewerId -> Set<hiderId>
-    for (const uid of onlineUserIds()) {
+    for (const uid of ids) {
+        if (modes.get(uid) === "contacts") {
+            for (const viewerId of ids) {
+                if (uid === viewerId) continue;
+                let allowed = true;
+                try {
+                    allowed = await canSeeOnline(uid, viewerId);
+                } catch {
+                    allowed = false;
+                }
+                if (allowed) continue;
+                if (!hiddenByViewer.has(viewerId)) hiddenByViewer.set(viewerId, new Set());
+                hiddenByViewer.get(viewerId).add(uid);
+            }
+        }
         let hidden;
         try {
             hidden = await presenceHiddenFor(uid);
@@ -341,9 +381,9 @@ io.on("connection", async (socket) => {
     // dropped anything a client emitted immediately on connect — which is
     // exactly what the app does with markAsRead when it opens a chat.
     User.findById(userId)
-        .select("onlinePrivacy typingPrivacy")
+        .select("onlinePrivacy onlineVisibility typingPrivacy")
         .then((user) => {
-            if (user && user.onlinePrivacy === false) {
+            if (user && (user.onlineVisibility === "nobody" || (user.onlineVisibility === undefined && user.onlinePrivacy === false))) {
                 privateUsersSet.add(userId.toString());
             } else {
                 privateUsersSet.delete(userId.toString());
@@ -404,18 +444,24 @@ io.on("connection", async (socket) => {
             }
         }
 
-        // Per-contact read receipt hiding: if the sender has hidden read
-        // receipts from this receiver, suppress the blue tick event.
+        // Global + per-contact read receipt hiding: suppress the blue tick
+        // event when the message sender has disabled receipts entirely or
+        // specifically for this receiver.
         if (senderId) {
             try {
-                const senderDoc = await User.findById(senderId).select("readReceiptsHidden").lean();
+                const senderDoc = await User.findById(senderId)
+                    .select("readReceiptsEnabled readReceiptsHidden")
+                    .lean();
+                if (senderDoc?.readReceiptsEnabled === false) return;
                 const hiddenMap = senderDoc?.readReceiptsHidden;
                 const isHidden = hiddenMap instanceof Map
                     ? hiddenMap.get(String(receiverId))
                     : hiddenMap?.[String(receiverId)];
                 if (isHidden) return; // sender doesn't want to see blue ticks
-            } catch {
-                // If the lookup fails, fall through and send the receipt.
+            } catch (err) {
+                // Privacy setting lookup failed — fail closed, never leak a read.
+                console.error("Error checking read receipt privacy:", err.message);
+                return;
             }
         }
 
@@ -517,6 +563,28 @@ io.on("connection", async (socket) => {
         io.to(receiverSocketId).emit("iceCandidate", { candidate });
     });
 
+    socket.on("callModeChanged", async ({ mode, to }) => {
+        if (!["audio", "video"].includes(mode) || !to) return;
+        const receiverSocketId = getReceiverSocketId(to);
+        if (!receiverSocketId) return;
+        if (await isBlockedBetween(userId, to)) return;
+        io.to(receiverSocketId).emit("callModeChanged", { mode, from: userId });
+    });
+
+    socket.on("renegotiateOffer", async ({ signal, to }) => {
+        const receiverSocketId = getReceiverSocketId(to);
+        if (!receiverSocketId || !signal) return;
+        if (await isBlockedBetween(userId, to)) return;
+        io.to(receiverSocketId).emit("renegotiateOffer", { signal, from: userId });
+    });
+
+    socket.on("renegotiateAnswer", async ({ signal, to }) => {
+        const receiverSocketId = getReceiverSocketId(to);
+        if (!receiverSocketId || !signal) return;
+        if (await isBlockedBetween(userId, to)) return;
+        io.to(receiverSocketId).emit("renegotiateAnswer", { signal, from: userId });
+    });
+
     // ── Group Socket Events ──────────────────────────────────────────────────
     socket.on("joinGroupRoom", (groupId) => {
         if (groupId) {
@@ -530,6 +598,25 @@ io.on("connection", async (socket) => {
             socket.leave(`group_${groupId}`);
             console.log(`[Group Socket] User ${userId} left group_${groupId}`);
         }
+    });
+
+    socket.on("joinThread", async ({ rootId } = {}) => {
+        const id = typeof rootId === "string" ? rootId : rootId?._id || rootId?.toString?.();
+        if (!id) return;
+        try {
+            const root = await Message.findById(id).select("groupId");
+            if (!root?.groupId) return;
+            const group = await Group.findById(root.groupId).select("members.user");
+            if (!group?.members?.some((m) => m.user?.toString() === userId.toString())) return;
+            socket.join(roomForThread(String(id)));
+        } catch (err) {
+            console.error("Error joining thread room:", err.message);
+        }
+    });
+
+    socket.on("leaveThread", ({ rootId } = {}) => {
+        const id = typeof rootId === "string" ? rootId : rootId?._id || rootId?.toString?.();
+        if (id) socket.leave(roomForThread(id));
     });
 
     socket.on("groupTyping", ({ groupId, isTyping }) => {

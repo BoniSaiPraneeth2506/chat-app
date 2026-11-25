@@ -107,6 +107,24 @@ const useAuthStore=create((set,get)=>({
     socket:null,
     sessions:[],
     isLoadingSessions:false,
+    setAuthUser:(user)=>{
+        set({authUser:user});
+        persistAuthSnapshot(user);
+    },
+    renameSession:async(sessionId,label)=>{
+        try{
+            const res=await axiosInstance.put(`/auth/sessions/${sessionId}/label`,{label});
+            const currentSessions=Array.isArray(get().sessions)&&get().sessions.length?get().sessions:(get().authUser?.sessions||[]);
+            const updatedSessions=currentSessions.map((s)=>s.sid===sessionId?{...s,label}:s);
+            get().setAuthUser({...res.data,sessions:Array.isArray(res.data?.sessions)?res.data.sessions:updatedSessions});
+            set({sessions:Array.isArray(res.data?.sessions)?res.data.sessions:updatedSessions});
+            toast.success("Device renamed");
+            return res.data;
+        }catch(err){
+            toast.error(err.response?.data?.message || "Failed to rename device");
+            throw err;
+        }
+    },
     // Clears the client once this device's session is revoked elsewhere.
     // Idempotent, and stays client-side so the login page is not reloaded.
     handleSessionRevoked:()=>{

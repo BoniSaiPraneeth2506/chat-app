@@ -71,6 +71,8 @@ import useAuthStore from './store/useAuthStore'
 import { useChatStore } from './store/useChatStore'
 import { setScreenSecure } from './lib/secureScreen'
 import { setBadgeCount, clearBadge } from './lib/badge'
+import { getAccountsWithUnread, setAccountUnread } from './lib/accounts'
+import { parseShareTarget } from './lib/shareTarget'
 import { Loader, X, MessageSquare, Phone, Info, Users, Video } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import { useThemeStore } from './store/useThemeStore'
@@ -247,6 +249,10 @@ const App = () => {
     checkAuth();
   }, [])
 
+  useEffect(() => {
+    parseShareTarget();
+  }, [])
+
   const navigate = useNavigate();
   const location = useLocation();
   const locationRef = React.useRef(location);
@@ -319,6 +325,13 @@ const App = () => {
       };
     }
   }, [authUserId, socket, subscribeToMessages, unsubscribeFromMessages, subscribeToLiveLocation]);
+
+  useEffect(() => {
+    if (!socket) return;
+    const onNewDeviceLogin = () => toast("New device signed in to your account.");
+    socket.on("newDeviceLogin", onNewDeviceLogin);
+    return () => socket.off("newDeviceLogin", onNewDeviceLogin);
+  }, [socket]);
 
   // ── Push notifications (Android / FCM) ─────────────────────────────────────
   // All notification taps funnel to the centralized navigation module
@@ -478,6 +491,14 @@ const App = () => {
     }
     setBadgeCount(totalUnread);
   }, [totalUnread, authUser]);
+
+  const directUnread = totalUnread;
+  const accountUnreadIds = new Set(getAccountsWithUnread().map((entry) => entry._id));
+
+  useEffect(() => {
+    if (!authUser?._id) return;
+    setAccountUnread(authUser._id, directUnread);
+  }, [authUser?._id, directUnread]);
 
   // Coming back out of a locked chat returns to the locked list, not the normal
   // home. Watching the selection go empty catches every route out of the chat —
@@ -795,8 +816,13 @@ const App = () => {
                     className="object-cover rounded-full size-11 flex-shrink-0"
                   />
                   <span className="flex-1 min-w-0">
-                    <span className="block text-[15px] font-medium text-base-content truncate">
-                      {acc.fullName}
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <span className="block text-[15px] font-medium text-base-content truncate">
+                        {acc.fullName}
+                      </span>
+                      {accountUnreadIds.has(acc._id) && (
+                        <span className="size-1.5 rounded-full bg-primary flex-shrink-0" />
+                      )}
                     </span>
                     <span className="block text-xs text-base-content/45 truncate">{acc.email}</span>
                   </span>

@@ -355,13 +355,13 @@
 // };
 
 // export default Sidebar;
-import { useEffect, useLayoutEffect, useState, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
 import { useChatStore } from "../store/useChatStore";
 import useAuthStore from "../store/useAuthStore";
 import { useGroupStore } from "../store/useGroupStore";
 import SidebarSkeleton from "./skeletons/SidebarSkeleton";
-import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus, Lock,
-MessageSquare, RefreshCw, Phone, Megaphone, MessageSquareText, Image, Video, FileText, Link2, Mic } from "lucide-react";
+import { X, Search, Pin, Star, Archive, Bookmark, Users, Plus, Lock, Folder,
+MessageSquare, RefreshCw, Phone, Megaphone, MessageSquareText, Image, Video, FileText, Link2, Mic, Sparkles } from "lucide-react";
 import { useNicknames, displayNameOf } from "../lib/contacts";
 import { formatMessageTime } from "../lib/utils";
 import toast from "react-hot-toast";
@@ -372,6 +372,8 @@ import LockPasswordPrompt from "./LockPasswordPrompt";
 import UpdatesTab from "./UpdatesTab";
 import CallsTab from "./CallsTab";
 import ChannelsTab from "./ChannelsTab";
+import FolderManagerModal from "./FolderManagerModal";
+
 import { useChannelStore } from "../store/useChannelStore";
 import { useUpdatesStore } from "../store/useUpdatesStore";
 import { isBiometryAvailable, verifyBiometry, hasStoredLockSecret, readLockSecret } from "../lib/biometrics";
@@ -502,6 +504,8 @@ const SideBar = () => {
   const [menuPos, setMenuPos] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterMode, setFilterMode] = useState("all");
+  const [activeFolderId, setActiveFolderId] = useState("all");
+  const [isFolderManagerOpen, setIsFolderManagerOpen] = useState(false);
   // Global search tabs. "chats" keeps the classic name filter; every other
   // value searches message content of that kind across DMs and groups.
   const [searchType, setSearchType] = useState("chats");
@@ -754,16 +758,46 @@ const SideBar = () => {
     }
   };
 
+  const folders = useMemo(
+    () => (Array.isArray(authUser?.folders) ? authUser.folders : []),
+    [authUser?.folders]
+  );
+  const filterRowRef = useRef(null);
+  const prevFolderCountRef = useRef(folders.length);
+  const selectedFolder = activeFolderId === "all"
+    ? null
+    : folders.find((folder) => String(folder.id) === String(activeFolderId)) || null;
+  const folderUserIds = new Set((selectedFolder?.users || []).map((id) => String(id)));
+  const folderGroupIds = new Set((selectedFolder?.groups || []).map((id) => String(id)));
+
+  useEffect(() => {
+    if (activeFolderId !== "all" && !folders.some((folder) => String(folder.id) === String(activeFolderId))) {
+      setActiveFolderId("all");
+    }
+  }, [activeFolderId, folders]);
+
+  useEffect(() => {
+    if (folders.length > prevFolderCountRef.current && filterRowRef.current) {
+      const row = filterRowRef.current;
+      requestAnimationFrame(() => row.scrollTo({ left: row.scrollWidth, behavior: "smooth" }));
+    }
+    prevFolderCountRef.current = folders.length;
+  }, [folders.length]);
+
+
+
   // Chats (DMs + groups) with something unread, for the Unread filter capsule.
   const unreadChatCount =
     Object.values(unreadCounts || {}).filter((n) => Number(n) > 0).length +
     Object.values(unreadGroupCounts || {}).filter((n) => Number(n) > 0).length;
 
+  const inFolderView = filterMode === "folders" && !!selectedFolder;
+  const showFolderList = filterMode === "folders" && !selectedFolder;
+
   const filteredUsers = Array.isArray(users)
     ? users.filter((user) => {
         if (!user || !user.fullName) return false;
 
-        // Archive check
         const isArchived = Array.isArray(archivedUsers) && archivedUsers.includes(user._id);
         if (showArchivedOnly) {
           if (!isArchived) return false;
@@ -771,19 +805,17 @@ const SideBar = () => {
           if (isArchived) return false;
         }
 
+        if (inFolderView && !folderUserIds.has(String(user._id))) return false;
+        if (showFolderList) return false;
+
         const isOnline = user._id && Array.isArray(onlineUsers) ? onlineUsers.includes(user._id) : false;
-        const matchesSearch = user.fullName
-          .toLowerCase()
-          .includes(searchTerm.toLowerCase());
+        const matchesSearch = user.fullName.toLowerCase().includes(searchTerm.toLowerCase());
         if (!matchesSearch) return false;
 
-        // Filters
         if (filterMode === "unread") {
-          const hasUnread = unreadCounts[user._id] > 0;
-          if (!hasUnread) return false;
+          if (!(unreadCounts[user._id] > 0)) return false;
         } else if (filterMode === "favorites") {
-          const isFav = Array.isArray(favoriteUsers) && favoriteUsers.includes(user._id);
-          if (!isFav) return false;
+          if (!(Array.isArray(favoriteUsers) && favoriteUsers.includes(user._id))) return false;
         } else if (filterMode === "online") {
           if (!isOnline) return false;
         }
@@ -807,13 +839,16 @@ const SideBar = () => {
   // both kinds identically: pinned first, then most recent activity. Before this
   // a pinned group was impossible and an archived one still showed.
   const groupItems =
-    filterMode === "groups" || filterMode === "all" || filterMode === "favorites"
+    filterMode === "groups" || filterMode === "all" || filterMode === "favorites" || filterMode === "folders"
       ? groups
           .filter((g) => {
             if (!g.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
 
             const isArchived = archivedGroupIds.includes(g._id);
             if (showArchivedOnly ? !isArchived : isArchived) return false;
+
+            if (inFolderView && !folderGroupIds.has(String(g._id))) return false;
+            if (showFolderList) return false;
 
             if (filterMode === "favorites") return favoriteGroupIds.includes(g._id);
             if (filterMode === "unread") return (unreadGroupCounts[g._id] || 0) > 0;
@@ -839,7 +874,26 @@ const SideBar = () => {
           pinned: pinnedUserIds.includes(u._id),
         }));
 
-  const conversations = [...dmItems, ...groupItems].sort((a, b) => {
+  const folderItems =
+    !showArchivedOnly && !searchTerm && searchType === "chats" && !inFolderView && !showFolderList && filterMode === "all"
+      ? folders.map((folder) => {
+          const createdAt = folder.createdAt ? new Date(folder.createdAt).getTime() || 0 : 0;
+          const activityAt = Math.max(
+            0,
+            ...(folder.users || []).map((id) => timeOf(latestMessages[String(id)])),
+            ...(folder.groups || []).map((id) => timeOf(latestGroupMessages[String(id)]))
+          );
+          return {
+            type: "folder",
+            key: `f:${folder.id || folder.name}`,
+            folder,
+            at: Math.max(createdAt, activityAt),
+            pinned: false,
+          };
+        })
+      : [];
+
+  const conversations = [...dmItems, ...groupItems, ...folderItems].sort((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
     return b.at - a.at;
   });
@@ -963,6 +1017,38 @@ const SideBar = () => {
           );
         })}
       </div>
+    );
+  };
+
+  const renderFolderRow = (folder) => {
+    const chatCount = (folder.users?.length || 0) + (folder.groups?.length || 0);
+    return (
+      <button
+        key={folder.id || folder.name}
+        type="button"
+        onClick={() => {
+          haptic("tap");
+          setActiveFolderId(String(folder.id));
+          setFilterMode("folders");
+          setShowArchivedOnly(false);
+        }}
+        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-base-200/50 transition-colors select-none border-b border-base-200/20 last:border-0 text-left"
+      >
+        <div className="relative flex-shrink-0">
+          <div className="size-12 rounded-2xl bg-primary/10 border border-primary/15 grid place-items-center text-primary">
+            <Folder size={21} strokeWidth={1.8} />
+          </div>
+        </div>
+        <div className="min-w-0 flex-1 text-left">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-semibold text-base-content truncate">{folder.name}</span>
+            <span className="text-[11px] text-base-content/45 flex-shrink-0">Folder</span>
+          </div>
+          <div className="text-sm text-base-content/60 truncate">
+            {chatCount} {chatCount === 1 ? "chat" : "chats"}
+          </div>
+        </div>
+      </button>
     );
   };
 
@@ -1227,7 +1313,7 @@ const SideBar = () => {
     const messageTime = new Date(msg.createdAt).getTime();
 
     if (messageTime <= lastReadTime) {
-      return <DoubleCheck className="w-[15px] h-[13px] text-blue-500 flex-shrink-0" />;
+      return <DoubleCheck className={`w-[15px] h-[13px] ${authUser?.readReceiptsEnabled !== false ? "text-blue-500" : "text-zinc-400"} flex-shrink-0`} />;
     }
 
     // If recipient is online
@@ -1322,18 +1408,20 @@ const SideBar = () => {
         </div>
 
         {/* Filter Capsules */}
-        <div className="flex items-center gap-2 mt-3.5 overflow-x-auto no-scrollbar pb-0.5">
+        <div ref={filterRowRef} className="flex items-center gap-2 mt-3.5 overflow-x-auto no-scrollbar pb-0.5">
           {[
             { id: "all", label: "All" },
             { id: "groups", label: "Groups" },
             { id: "unread", label: "Unread" },
             { id: "favorites", label: "Favorites" },
-            { id: "online", label: "Online" }
+            { id: "online", label: "Online" },
+            { id: "folders", label: "Folders" }
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => {
                 setFilterMode(tab.id);
+                if (tab.id !== "folders") setActiveFolderId("all");
                 setShowArchivedOnly(false);
                 if (searchType !== "chats") setSearchType("chats");
               }}
@@ -1351,7 +1439,9 @@ const SideBar = () => {
                   {unreadChatCount > 0 && (
                     <span
                       className={`grid place-items-center min-w-4 h-4 px-1 rounded-full text-[9px] font-bold tabular-nums ${
-                        filterMode === "unread" ? "bg-primary-content/20 text-primary-content" : "bg-primary text-primary-content"
+                        filterMode === "unread" && activeFolderId === "all"
+                          ? "bg-primary-content/20 text-primary-content"
+                          : "bg-primary text-primary-content"
                       }`}
                     >
                       {unreadChatCount > 99 ? "99+" : unreadChatCount}
@@ -1363,6 +1453,17 @@ const SideBar = () => {
               )}
             </button>
           ))}
+
+
+          <button
+            onClick={() => setIsFolderManagerOpen(true)}
+            className="px-3 py-1.5 text-xs font-medium rounded-full border border-dashed border-primary/30 text-primary/80 hover:text-primary hover:bg-primary/5 transition-all flex-shrink-0 select-none flex items-center gap-1"
+            title="Manage folders"
+            aria-label="Manage folders"
+          >
+            <Plus size={14} />
+            Manage
+          </button>
         </div>
 
         {/* Global search type tabs — visible whenever the magnifier is used or
@@ -1429,8 +1530,77 @@ const SideBar = () => {
       <div className="flex-1 overflow-y-auto">
         {searchType !== "chats" ? (
           renderGlobalResults()
+        ) : showFolderList ? (
+          <div className="py-1">
+            <div className="px-4 py-3 flex items-center justify-between">
+              <span className="font-semibold text-xs text-base-content">Chat folders</span>
+              <button
+                type="button"
+                onClick={() => setIsFolderManagerOpen(true)}
+                className="text-[11px] text-primary font-medium hover:underline"
+              >
+                Manage
+              </button>
+            </div>
+            {folders.length === 0 ? (
+              <div className="px-4 py-10 text-center">
+                <p className="text-sm font-medium text-base-content/80">No folders yet</p>
+                <p className="text-xs t-dim mt-1">Create a folder to organize chats.</p>
+                <button
+                  type="button"
+                  onClick={() => setIsFolderManagerOpen(true)}
+                  className="mt-3 px-4 py-2 rounded-full bg-primary text-primary-content text-xs font-semibold"
+                >
+                  Create folder
+                </button>
+              </div>
+            ) : (
+              folders.map((folder) => {
+                const chatCount = (folder.users?.length || 0) + (folder.groups?.length || 0);
+                return (
+                  <button
+                    key={folder.id || folder.name}
+                    type="button"
+                    onClick={() => {
+                      setActiveFolderId(String(folder.id));
+                      setFilterMode("folders");
+                      setShowArchivedOnly(false);
+                    }}
+                    className="w-full px-4 py-3 flex items-center gap-3 hover:bg-base-200/50 transition-colors text-left"
+                  >
+                    <div className="size-10 rounded-xl bg-primary/10 text-primary grid place-items-center flex-shrink-0">
+                      <Folder size={18} strokeWidth={1.8} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-base-content truncate">{folder.name}</p>
+                      <p className="text-[11px] t-dim">{chatCount} {chatCount === 1 ? "chat" : "chats"}</p>
+                    </div>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="size-4 text-base-content/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                );
+              })
+            )}
+          </div>
         ) : (
           <>
+
+            {inFolderView && selectedFolder && (
+              <div className="w-full px-4 py-3 flex items-center gap-3 bg-base-200 select-none">
+                <button
+                  onClick={() => { setFilterMode("all"); setActiveFolderId("all"); }}
+                  className="p-1 hover:bg-base-300 rounded-full transition-colors"
+                  aria-label="Back to chats"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="size-4 text-base-content" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                  </svg>
+                </button>
+                <span className="size-6 rounded-lg bg-primary/10 text-primary grid place-items-center flex-shrink-0"><Folder size={14} strokeWidth={1.8} /></span>
+                <span className="font-semibold text-xs text-base-content truncate">{selectedFolder.name}</span>
+              </div>
+            )}
 
             {/* Archived Chats Header/Toggle row */}
             {showArchivedOnly ? (
@@ -1463,7 +1633,7 @@ const SideBar = () => {
             )}
 
             {/* Personal Notes (Self-Chat) */}
-            {!showArchivedOnly && (!searchTerm || "personal notes drafts you".includes(searchTerm.toLowerCase())) && (
+            {!showArchivedOnly && !inFolderView && !showFolderList && (!searchTerm || "personal notes drafts you".includes(searchTerm.toLowerCase())) && (
               <button
                 onClick={() => setSelectedUser(authUser)}
                 className={`w-full py-3.5 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors group select-none
@@ -1492,7 +1662,11 @@ const SideBar = () => {
 
             {/* DMs and groups in one list, newest activity first */}
             {conversations.map((c) =>
-              c.type === "group" ? renderGroupRow(c.group) : renderUserRow(c.user)
+              c.type === "folder"
+                ? renderFolderRow(c.folder)
+                : c.type === "group"
+                  ? renderGroupRow(c.group)
+                  : renderUserRow(c.user)
             )}
 
             {conversations.length === 0 && (
@@ -1684,6 +1858,14 @@ const SideBar = () => {
             </button>
           </div>
         </>
+      )}
+
+      {isFolderManagerOpen && (
+        <FolderManagerModal
+          users={users || []}
+          groups={groups || []}
+          onClose={() => setIsFolderManagerOpen(false)}
+        />
       )}
     </aside>
   );

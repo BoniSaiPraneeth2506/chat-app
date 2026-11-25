@@ -46,10 +46,71 @@ export const useGroupStore = create((set, get) => ({
   isGroupMessagesLoading: false,
   latestGroupMessages: {},
   unreadGroupCounts: {},
+  selectedGroupUnreadOnOpen: 0,
+  selectedGroupUnreadSince: null,
   // Groups where an unread message @-mentions you — surfaced ahead of a
   // plain unread count, since being named is a stronger signal.
   mentionedGroups: {},
   groupTypingUsers: {},
+  threadRootId: null,
+  threadReplies: {},
+  threadLoading: false,
+
+  setThreadRoot: (threadRootId) => set({ threadRootId }),
+  loadThreadMessages: async (groupId, rootId) => {
+    if (!groupId || !rootId) return;
+    set({ threadLoading: true });
+    try {
+      const res = await axiosInstance.get(`/groups/${groupId}/threads/${rootId}/messages`);
+      const messages = Array.isArray(res.data) ? res.data : Array.isArray(res.data?.messages) ? res.data.messages : [];
+      set((state) => ({
+        threadReplies: { ...state.threadReplies, [rootId]: messages },
+      }));
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Could not load thread");
+    } finally {
+      set({ threadLoading: false });
+    }
+  },
+  sendThreadReply: async (groupId, rootId, text) => {
+    if (!groupId || !rootId || !text?.trim()) return false;
+    try {
+      const res = await axiosInstance.post(`/groups/${groupId}/threads/${rootId}/replies`, { text: text.trim() });
+      const reply = res.data;
+      set((state) => {
+        const current = state.threadReplies[rootId] || [];
+        const next = current.some((m) => String(m._id) === String(reply._id)) ? current : [...current, reply];
+        return {
+          threadReplies: { ...state.threadReplies, [rootId]: next },
+          groupMessages: state.groupMessages.map((m) =>
+            String(m._id) === String(rootId) ? { ...m, threadReplyCount: (Number(m.threadReplyCount) || 0) + 1 } : m
+          ),
+        };
+      });
+      return true;
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Could not send thread reply");
+      return false;
+    }
+  },
+  addThreadReply: ({ threadRootId, groupMessage, replyCount } = {}) => {
+    if (!threadRootId || !groupMessage) return;
+    set((state) => {
+      const current = state.threadReplies[threadRootId] || [];
+      const exists = current.some((m) => String(m._id) === String(groupMessage._id));
+      const next = exists
+        ? current.map((m) => (String(m._id) === String(groupMessage._id) ? { ...m, ...groupMessage } : m))
+        : [...current, groupMessage];
+      return {
+        threadReplies: { ...state.threadReplies, [threadRootId]: next },
+        groupMessages: state.groupMessages.map((m) =>
+          String(m._id) === String(threadRootId)
+            ? { ...m, threadReplyCount: typeof replyCount === "number" ? replyCount : (Number(m.threadReplyCount) || 0) + 1 }
+            : m
+        ),
+      };
+    });
+  },
 
   // The group whose sidebar avatar was tapped — mirrors profilePreviewUser for
   // one-to-one chats, so an avatar means "show me this" in both lists rather than
@@ -254,21 +315,25 @@ export const useGroupStore = create((set, get) => ({
     if (group) {
       useChatStore.getState().setSelectedUser(null);
     }
-    set({ selectedGroup: group, groupMessages: [] });
+    const selectedGroupUnreadOnOpen = group ? Number(get().unreadGroupCounts?.[group._id] || 0) : 0;
+    const lr = useAuthStore.getState().authUser?.lastReadAt;
+    const rawLr = group ? (lr?.[group._id] ?? lr?.get?.(group._id)) : null;
+    const selectedGroupUnreadSince = rawLr ? new Date(rawLr).toISOString() : selectedGroupUnreadOnOpen > 0 ? new Date(0).toISOString() : null;
+    set({ selectedGroup: group, groupMessages: [], selectedGroupUnreadOnOpen, selectedGroupUnreadSince });
 
     // Persist the read mark for this group. Group reads were not recorded
     // anywhere before, which is what "seen by" needs to report against.
     if (group) {
       const socket = useAuthStore.getState().socket;
       socket?.emit("markGroupAsRead", { groupId: group._id });
-    }
-
-    if (group) {
       set((state) => {
         const mentionedGroups = { ...state.mentionedGroups };
         delete mentionedGroups[group._id];
         return {
-          unreadGroupCounts: { ...state.unreadGroupCounts, [group._id]: 0 },
+          unreadGroupCounts: {
+            ...state.unreadGroupCounts,
+            [group._id]: 0,
+          },
           mentionedGroups,
         };
       });
@@ -627,6 +692,7 @@ export const useGroupStore = create((set, get) => ({
     if (!socket) return;
 
     socket.off("newGroupMessage");
+    socket.off("newThreadReply");
     socket.off("groupPollUpdated");
     socket.off("groupMessageDeleted");
     socket.off("groupMessageEdited");
@@ -701,6 +767,22 @@ export const useGroupStore = create((set, get) => ({
           mentionedGroups: mentionsMe
             ? { ...state.mentionedGroups, [message.groupId]: true }
             : state.mentionedGroups,
+        }));
+      }
+    });
+
+    socket.on("newThreadReply", (payload) => {
+      const { threadRootId, groupMessage, replyCount } = payload || {};
+      if (!threadRootId || !groupMessage) return;
+      if (get().threadRootId === threadRootId) {
+        get().addThreadReply(payload);
+      } else {
+        set((state) => ({
+          groupMessages: state.groupMessages.map((m) =>
+            String(m._id) === String(threadRootId)
+              ? { ...m, threadReplyCount: typeof replyCount === "number" ? replyCount : (Number(m.threadReplyCount) || 0) + 1 }
+              : m
+          ),
         }));
       }
     });
@@ -898,6 +980,7 @@ export const useGroupStore = create((set, get) => ({
     const socket = useAuthStore.getState().socket;
     if (socket) {
       socket.off("newGroupMessage");
+      socket.off("newThreadReply");
       socket.off("groupPollUpdated");
       socket.off("groupMessageDeleted");
       socket.off("groupMessageEdited");

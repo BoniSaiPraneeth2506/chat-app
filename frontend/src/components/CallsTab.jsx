@@ -6,6 +6,7 @@ import {
   PhoneIncoming,
   PhoneOutgoing,
   PhoneMissed,
+  PhoneCall,
   Video,
   SlidersHorizontal,
   Check,
@@ -23,11 +24,11 @@ const CALL_FILTERS = [
 const matchesFilter = (call, filter) => {
   switch (filter) {
     case "missed":
-      return call.callStatus === "missed";
+      return call.callStatus === "missed" || call.callStatus === "declined";
     case "outgoing":
-      return call.isOutgoing === true;
+      return call.callStatus === "outgoing";
     case "incoming":
-      return call.isOutgoing === false;
+      return call.callStatus === "incoming";
     case "video":
       return call.callType === "video";
     case "all":
@@ -39,20 +40,28 @@ const matchesFilter = (call, filter) => {
 const CallIcon = ({ call }) => {
   const isVideo = call.callType === "video";
 
-  if (call.callStatus === "missed") {
+  if (call.callStatus === "missed" || call.callStatus === "declined") {
     return <PhoneMissed size={16} className="text-red-500" />;
   }
-  if (isVideo) {
-    return call.isOutgoing ? (
+  if (call.callStatus === "outgoing" || (call.isOutgoing && call.callStatus === "completed")) {
+    return isVideo ? (
       <Video size={16} className="text-green-500" />
     ) : (
-      <Video size={16} className="text-primary" />
+      <PhoneOutgoing size={16} className="text-green-500" />
     );
   }
-  if (call.isOutgoing) {
-    return <PhoneOutgoing size={16} className="text-green-500" />;
+  if (call.callStatus === "incoming") {
+    return isVideo ? (
+      <Video size={16} className="text-primary" />
+    ) : (
+      <PhoneIncoming size={16} className="text-primary" />
+    );
   }
-  return <PhoneIncoming size={16} className="text-primary" />;
+  return call.isOutgoing ? (
+    <PhoneOutgoing size={16} className="text-green-500" />
+  ) : (
+    <PhoneIncoming size={16} className="text-primary" />
+  );
 };
 
 const CallsTab = () => {
@@ -85,17 +94,22 @@ const CallsTab = () => {
     if (!Number.isFinite(sec) || sec <= 0) return "";
     const m = Math.floor(sec / 60);
     const s = Math.floor(sec % 60);
-    return `${m}:${s < 10 ? "0" : ""}${s} min`;
+    return `${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
   const callLabel = (call) => {
-    if (call.callStatus === "missed") {
-      return call.isOutgoing ? "Missed call" : "Missed call";
+    switch (call.callStatus) {
+      case "missed":
+        return "Missed call";
+      case "declined":
+        return "Declined call";
+      case "outgoing":
+        return "Outgoing call";
+      case "incoming":
+        return "Incoming call";
+      default:
+        return call.isOutgoing ? "Outgoing call" : "Incoming call";
     }
-    if (call.callType === "video") {
-      return call.isOutgoing ? "Outgoing video call" : "Incoming video call";
-    }
-    return call.isOutgoing ? "Outgoing voice call" : "Incoming voice call";
   };
 
   const timeLabel = (dateStr) => {
@@ -113,6 +127,16 @@ const CallsTab = () => {
     if (diffDays === 1) return "Yesterday";
     if (diffDays < 7) return d.toLocaleDateString([], { weekday: "short" });
     return d.toLocaleDateString([], { day: "numeric", month: "short" });
+  };
+
+  const callBack = (event, call) => {
+    event.stopPropagation();
+    const id = call.user?.idValue || call.user?._id;
+    const users = useChatStore.getState().users;
+    const target = users?.find((u) => String(u._id) === String(id)) || call.user;
+    if (!target) return;
+    haptic("tap");
+    useChatStore.getState().callUser(target, call.callType === "video" ? "video" : "audio");
   };
 
   const openCallTarget = (call) => {
@@ -202,10 +226,15 @@ const CallsTab = () => {
       ) : (
         <div className="pb-4">
           {filteredCalls.map((call) => (
-            <button
+            <div
               key={call._id}
+              role="button"
+              tabIndex={0}
               onClick={() => openCallTarget(call)}
-              className="w-full py-3 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors text-left"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") openCallTarget(call);
+              }}
+              className="w-full py-3 px-4 flex items-center gap-3 hover:bg-base-200/60 transition-colors text-left cursor-pointer"
             >
               <div className="relative flex-shrink-0">
                 <img
@@ -215,32 +244,55 @@ const CallsTab = () => {
                 />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
                   <span className="font-medium text-base-content truncate">
                     {call.user?.name || "Unknown"}
                   </span>
-                  <span className="text-xs t-dim flex-shrink-0 ml-2">
-                    {timeLabel(call.createdAt)}
-                  </span>
+                  {call.callDuration > 0 && (
+                    <span className="shrink-0 text-[11px] tabular-nums text-base-content/50">
+                      {fmtDuration(call.callDuration)}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <CallIcon call={call} />
                   <span
-                    className={`text-sm truncate ${
-                      call.callStatus === "missed"
+                    className={`min-w-0 flex-1 text-sm truncate ${
+                      call.callStatus === "missed" || call.callStatus === "declined"
                         ? "text-red-500"
                         : "text-base-content/60"
                     }`}
                   >
                     {callLabel(call)}
                     {call.callType === "video" ? " · video" : " · voice"}
-                    {call.callStatus === "completed" && call.callDuration > 0
-                      ? ` · ${fmtDuration(call.callDuration)}`
-                      : ""}
                   </span>
                 </div>
               </div>
-            </button>
+              <div className="w-14 -mr-1.5 md:-mr-3 shrink-0 self-end flex flex-col items-center gap-0.5">
+                {!call.isGroup && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    title="Call back"
+                    aria-label="Call back"
+                    onClick={(e) => callBack(e, call)}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === "Enter" || e.key === " ") callBack(e, call);
+                    }}
+                    className="p-2 rounded-full text-primary hover:bg-primary/10 transition-colors flex-shrink-0"
+                  >
+                    <PhoneCall size={16} />
+                  </span>
+                )}
+                <span
+                  className="max-w-full text-[10px] leading-none t-dim truncate"
+                  title={new Date(call.createdAt).toLocaleString()}
+                >
+                  {timeLabel(call.createdAt)}
+                </span>
+              </div>
+            </div>
           ))}
         </div>
       )}

@@ -249,7 +249,9 @@ const ChatHeader = ({ overlayRef }) => {
   );
   const autoTranslateOn = autoTranslatePref.on;
   const autoTranslateLang = autoTranslatePref.lang;
-  const showLastSeen = selectedUser?.onlinePrivacy !== false;
+  const showLastSeen = selectedUser?.onlinePrivacy !== false && Boolean(selectedUser?.lastSeen);
+  const activeDisappearingTimer =
+    authUser?.disappearingTimers?.[selectedUser?._id] || authUser?.messageTimer || "off";
   const isTyping = typingUsers?.[selectedUser?._id];
 
   // Serves both DMs and groups. Group messages arrive with senderId populated
@@ -681,8 +683,8 @@ const ChatHeader = ({ overlayRef }) => {
                 <div className="min-w-0 text-left select-none">
                   <h3 className="font-medium group-hover:text-primary transition-colors flex items-center gap-1.5 min-w-0">
                     <span className="truncate">{contactName}</span>
-                    {authUser?.disappearingTimers?.[selectedUser?._id] && authUser?.disappearingTimers?.[selectedUser?._id] !== "off" && (
-                      <Clock className="size-3 text-zinc-400" title={`Disappearing messages: ${authUser.disappearingTimers[selectedUser._id]}`} />
+                    {activeDisappearingTimer !== "off" && (
+                      <Clock className="size-3 text-zinc-400" title={`Disappearing messages: ${activeDisappearingTimer}`} />
                     )}
                   </h3>
                   {isTyping ? (
@@ -700,12 +702,19 @@ const ChatHeader = ({ overlayRef }) => {
                       )}
                     </div>
                   ) : (
-                    <p className="flex items-center gap-1 text-sm truncate">
-                      {isOnline && (
-                        <span className="size-[8px] rounded-full mt-[2.3px] bg-green-500"></span>
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-1 text-sm truncate">
+                        {isOnline && (
+                          <span className="size-[8px] rounded-full mt-[2.3px] bg-green-500"></span>
+                        )}
+                        {isOnline ? "Online" : showLastSeen ? formatLastSeen(selectedUser?.lastSeen) : "Offline"}
+                      </p>
+                      {activeDisappearingTimer !== "off" && (
+                        <p className="text-[10px] text-zinc-400 truncate">
+                          Disappearing messages: {activeDisappearingTimer}
+                        </p>
                       )}
-                      {isOnline ? "Online" : showLastSeen ? formatLastSeen(selectedUser?.lastSeen || selectedUser?.updatedAt || selectedUser?.createdAt) : "Offline"}
-                    </p>
+                    </div>
                   )}
                 </div>
               </div>

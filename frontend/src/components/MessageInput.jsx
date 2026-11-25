@@ -94,6 +94,14 @@ const MessageInput = () => {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const timerIntervalRef = useRef(null);
+  const [isRecordingVideoNote, setIsRecordingVideoNote] = useState(false);
+  const [videoNoteTime, setVideoNoteTime] = useState(0);
+  const videoNoteRecorderRef = useRef(null);
+  const videoNoteStreamRef = useRef(null);
+  const videoNoteChunksRef = useRef([]);
+  const videoNoteTimerRef = useRef(null);
+  const videoNoteTimeRef = useRef(0);
+  const videoNoteShouldSendRef = useRef(false);
   // HD default used when a photo is picked straight (no edits); the pencil edit
   // screen lets it be switched to Standard per photo before sending.
   const [hdQuality] = useState(
@@ -134,7 +142,9 @@ const MessageInput = () => {
     sendAttachmentMessage,
     selectedUser,
     drafts,
-    setDraft
+    setDraft,
+    composerPrefill,
+    consumeComposerPrefill
   } = useChatStore();
 
   const {
@@ -208,6 +218,8 @@ const MessageInput = () => {
     return () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      if (videoNoteTimerRef.current) clearInterval(videoNoteTimerRef.current);
+      videoNoteStreamRef.current?.getTracks?.().forEach((track) => track.stop());
       if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -225,6 +237,13 @@ const MessageInput = () => {
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_HEIGHT)}px`;
   }, [text]);
+
+  useEffect(() => {
+    if (!composerPrefill?.text) return;
+    setText((current) => (current.trim() ? `${current.replace(/\s+$/, "")} ${composerPrefill.text}` : composerPrefill.text));
+    consumeComposerPrefill();
+    requestAnimationFrame(() => focusWithKeyboard(inputRef.current));
+  }, [composerPrefill?.nonce, composerPrefill?.text, consumeComposerPrefill]);
 
   const handleKeyDown = (e) => {
     // A textarea does not submit on Enter the way an input in a form does, so
@@ -486,7 +505,7 @@ const MessageInput = () => {
       return;
     }
     if (id === "video") videoInputRef.current?.click();
-    if (id === "video_note") videoNoteInputRef.current?.click();
+    if (id === "video_note") startVideoNoteRecording();
     if (id === "document") docInputRef.current?.click();
   };
 
@@ -864,6 +883,90 @@ const MessageInput = () => {
   // Uneven on purpose: a constant pulse reads as an alert, a ragged wave reads
   // as the voice being heard. The animation adds the motion on top.
   const BAR_HEIGHTS = [42, 78, 55, 92, 38, 66, 82, 48, 96, 46, 70, 34, 86, 58, 74, 40, 100, 62, 44, 78, 50, 88, 60, 36, 72];
+
+  const MAX_VIDEO_NOTE_SECONDS = 60;
+
+  const stopVideoNoteRecording = (shouldSend = true) => {
+    if (videoNoteTimerRef.current) {
+      clearInterval(videoNoteTimerRef.current);
+      videoNoteTimerRef.current = null;
+    }
+    videoNoteShouldSendRef.current = shouldSend;
+    const recorder = videoNoteRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+    } else {
+      videoNoteStreamRef.current?.getTracks?.().forEach((track) => track.stop());
+      videoNoteStreamRef.current = null;
+      setIsRecordingVideoNote(false);
+    }
+  };
+
+  const startVideoNoteRecording = async () => {
+    if (isRecordingVideoNote) return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      videoNoteInputRef.current?.click();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: true,
+      });
+      const mime = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"].find(
+        (value) => typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported(value)
+      ) || "";
+      const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      videoNoteStreamRef.current = stream;
+      videoNoteRecorderRef.current = recorder;
+      videoNoteChunksRef.current = [];
+      videoNoteTimeRef.current = 0;
+      videoNoteShouldSendRef.current = true;
+      setVideoNoteTime(0);
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) videoNoteChunksRef.current.push(event.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        videoNoteStreamRef.current = null;
+        videoNoteRecorderRef.current = null;
+        if (videoNoteTimerRef.current) clearInterval(videoNoteTimerRef.current);
+        videoNoteTimerRef.current = null;
+        setIsRecordingVideoNote(false);
+
+        const shouldSend = videoNoteShouldSendRef.current;
+        videoNoteShouldSendRef.current = false;
+        const chunks = videoNoteChunksRef.current;
+        videoNoteChunksRef.current = [];
+        if (!shouldSend || chunks.length === 0) return;
+
+        const blob = new Blob(chunks, { type: mime || "video/webm" });
+        const file = new File([blob], `video-note-${Date.now()}.webm`, { type: blob.type || "video/webm" });
+        try {
+          await sendAttachmentMessage(file, "", {
+            isVideoNote: true,
+            duration: Math.max(1, videoNoteTimeRef.current),
+          });
+        } catch (error) {
+          toast.error(error.response?.data?.message || "Could not send video note");
+        }
+      };
+
+      recorder.start();
+      setIsRecordingVideoNote(true);
+      videoNoteTimerRef.current = setInterval(() => {
+        videoNoteTimeRef.current += 1;
+        setVideoNoteTime(videoNoteTimeRef.current);
+        if (videoNoteTimeRef.current >= MAX_VIDEO_NOTE_SECONDS) stopVideoNoteRecording(true);
+      }, 1000);
+    } catch (err) {
+      toast.error(err?.name === "NotAllowedError" ? "Camera access was blocked" : "Could not record a video note");
+      videoNoteStreamRef.current?.getTracks?.().forEach((track) => track.stop());
+      videoNoteStreamRef.current = null;
+      setIsRecordingVideoNote(false);
+    }
+  };
 
   // ── Voice dictation (long-press the mic) ──────────────────────────────────
   //
@@ -1441,7 +1544,25 @@ const MessageInput = () => {
 
         <form onSubmit={handleSendMessage} className="flex items-end gap-3">
         <div className="flex-1 min-w-0 flex items-end gap-3 bg-base-100 rounded-3xl px-4 py-1.5 min-h-[42px] border field-hair shadow-sm">
-          {isRecording ? (
+          {isRecordingVideoNote ? (
+            <div className="flex items-center justify-between w-full px-2 py-1">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="rec-dot" aria-hidden="true" />
+                <span className="text-xs font-semibold text-red-500 tabular-nums shrink-0">
+                  {formatTimer(videoNoteTime)} / {formatTimer(MAX_VIDEO_NOTE_SECONDS)}
+                </span>
+                <span className="text-[11px] t-dim truncate">Recording video note</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => stopVideoNoteRecording(false)}
+                className="text-red-500 hover:text-red-600 transition-colors p-1 hover:bg-base-200 rounded-full"
+                title="Discard video note"
+              >
+                <Trash2 size={16} />
+              </button>
+            </div>
+          ) : isRecording ? (
             <div className="flex items-center justify-between w-full px-2 py-1">
               <div className="flex items-center gap-2.5 min-w-0">
                 {/* Pulsing red dot */}
@@ -1676,7 +1797,16 @@ const MessageInput = () => {
           )}
         </div>
 
-        {isDictating ? (
+        {isRecordingVideoNote ? (
+          <button
+            type="button"
+            onClick={() => stopVideoNoteRecording(true)}
+            className="w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-md flex-shrink-0 bg-primary text-primary-content hover:scale-105 active:scale-95"
+            title="Stop & Send Video Note"
+          >
+            <Send size={16} className="ml-0.5" />
+          </button>
+        ) : isDictating ? (
           <button
             type="button"
             onClick={() => stopDictation()}

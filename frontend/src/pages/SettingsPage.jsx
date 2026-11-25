@@ -239,7 +239,7 @@ const SettingsPage = () => {
           <SettRow
             icon={Timer}
             title="Disappearing Messages"
-            subtitle="Default timer for new chats"
+            subtitle={`Default for new chats: ${({ off: "Off", "1h": "1 hour", "24h": "24 hours", "7d": "7 days", "30d": "30 days" })[authUser?.messageTimer || "off"]}`}
             onClick={() => navigate('/settings/disappearing-messages')}
           />
           <SettRow
